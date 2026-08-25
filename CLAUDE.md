@@ -192,5 +192,6 @@ tabs Dashboard / Matches / Applications (draft review + sent history) / Profile.
       human-confirmed screenshot before submit), skills-first CV presentation toggle
       (de-emphasize chronology; presentation not fabrication — for the 55+ market)
 - [ ] Placeholder-clean `talenthive/backend/.env.example` if TalentHiv ever goes public
-- [x] Git: repo initialized 2026-08-25; verified no secrets/DB/CVs/talenthive in trackable
-      files. REMAINS: first commit + private GitHub remote + push.
+- [x] Git: initialized + pushed 2026-08-25 (commit c768aa4, main → private repo
+      github.com/AgenticTony/JobFinderOS). Pre-push audit: zero secrets staged;
+      backend/.env, talenthive/, *.db, uploads/, node_modules excluded.
