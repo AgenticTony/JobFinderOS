@@ -24,6 +24,9 @@ interface Props {
 export default function MatchCard({ match, onDecision, onPrepare, prepared }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // Rolling 24h "new" — decays per-card instead of everything going stale at
+  // midnight; recomputed on every data refresh.
+  const isNew = Date.now() - new Date(match.created_at).getTime() < 24 * 60 * 60 * 1000;
 
   const handleDecision = async (decision: 'approved' | 'rejected') => {
     setBusy(decision);
@@ -81,15 +84,19 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
               .join(' · ')}
             {match.job?.source === 'adzuna' && <AdzunaAttribution />}
           </p>
-          {match.job?.salary && (
-            <p className="num mt-1 text-xs text-low">
-              <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5">{match.job.salary}</span>
-              <span className="ml-2">matched {timeAgo(match.created_at)}</span>
-            </p>
-          )}
-          {!match.job?.salary && (
-            <p className="mt-1 text-xs text-low">matched {timeAgo(match.created_at)}</p>
-          )}
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-low">
+            {match.job?.salary && (
+              <span className="num rounded border border-line bg-surface-2 px-1.5 py-0.5">
+                {match.job.salary}
+              </span>
+            )}
+            {isNew && (
+              <span className="rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal">
+                new
+              </span>
+            )}
+            <span>matched {timeAgo(match.created_at)}</span>
+          </p>
         </div>
         <ScoreRing score={match.score} />
         <ChevronDown
