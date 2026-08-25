@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # Set GLM_THINKING=enabled for deeper (much slower) reasoning.
     GLM_API_KEY: str = ""
     GLM_BASE_URL: str = "https://api.z.ai/api/coding/paas/v4"
-    GLM_MODEL: str = "glm-4.6"
+    GLM_MODEL: str = "glm-5.1"
     GLM_THINKING: str = "disabled"  # disabled | enabled
 
     # Email applications (Resend — same provider TalentHive used)

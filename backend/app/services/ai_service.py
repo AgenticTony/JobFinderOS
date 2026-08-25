@@ -232,7 +232,7 @@ Respond with ONLY valid JSON (no markdown):
 Prepare my tailored application package.
 """
 
-        raw = self._complete(system_prompt, user_message)
+        raw = self._complete(system_prompt, user_message, temperature=0.0)  # scoring: deterministic
         parsed = self._parse_json(raw)
 
         return {
@@ -378,6 +378,19 @@ STEP 3 — TIER (assign based on score)
 - stretch: 30-49 — notable gaps but plausible; a learning move or growth bet.
 - poor_match: 0-29 — fails core requirements. Do not apply.
 
+CALIBRATION ANCHORS — score against these reference cases:
+- ~90: hits essentially every listed requirement with named CV evidence, right
+  location, right language, right seniority. Nothing material is missing.
+- ~75: strong on the core stack (most requirements evidenced), but ONE real
+  gap — a missing certification, less seniority than asked, or adjacent-not-
+  exact domain experience.
+- ~55: transferable core (can plausibly do the job) but multiple clear gaps —
+  some required tools unproven, or a significant seniority/domain jump.
+- ~35: the direction is plausible but the job's core requirement rests mainly
+  on experience the CV does not show. A growth bet at best.
+- ~15: core requirements are absent; only generic soft skills overlap.
+Score relative to these anchors. Reserve 80+ for the ~90 anchor's level.
+
 STRICT RULE: The tier MUST match the score. No exceptions.
 
 ═══════════════════════════════════════
@@ -433,7 +446,7 @@ Respond with ONLY valid JSON (no markdown):
     # Shared plumbing (TalentHive patterns)
     # ------------------------------------------------------------------
 
-    def _complete(self, system_prompt: str, user_message: str) -> str:
+    def _complete(self, system_prompt: str, user_message: str, temperature: float = 0.3) -> str:
         """Run a chat completion and return raw content text."""
         response = self.client.chat.completions.create(
             model=self.model,
@@ -441,7 +454,7 @@ Respond with ONLY valid JSON (no markdown):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            temperature=0.3,  # low temperature for consistent evaluations
+            temperature=temperature,  # scoring calls pass 0.0 — identical inputs must give identical scores
             max_tokens=self.max_tokens,
             extra_body={"thinking": {"type": self.thinking}},
         )
