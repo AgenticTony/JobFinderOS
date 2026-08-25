@@ -81,6 +81,23 @@ CORS lockdown; Composio MailSender (send from user's Gmail); Stripe
 data export, retention; review Z.ai as CV-data processor), landing + pricing
 page, Sentry + scheduler dead-man alert, beta cohort.
 
+## Competitive landscape (researched Aug 2026)
+
+Market: AIApply ~$24-29/mo + application credits ($639/78d real user bill;
+non-refundable, BBB complaints unanswered); JobRight $39.99/mo (opaque,
+countdown checkout); Sonara $23.95/4wk (reportedly dead ~2024); LoopCV
+free tier + EUR9.99-29; Simplify free extension + $39.99/mo. All US/
+English-centric, scrape-based, black-box auto-apply. Top Reddit complaints:
+credits/hidden costs, irrelevant targeting, unreliable bots, applications
+look alike, no proof of outcomes. Our flat-price + gates + human-approval +
+paper-trail design answers every one. Their remaining edge: ATS portal
+autofill (LinkedIn Easy Apply) — the parked Playwright-driver item.
+
+**Launch weapon (from this research): outcome tracking.** Add replied/
+interview/offer markers on Sent applications -> publish real response-rate
+stats, the one proof point no competitor has. Small build, Phase 2.
+Also: explicit refund-friendly policy page (attacks the #1 complaint).
+
 ## Known gaps today
 
 - Composio unconnected (needs platform key); email applies via Resend/browser
