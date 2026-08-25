@@ -108,6 +108,23 @@ interview/offer markers on Sent applications -> publish real response-rate
 stats, the one proof point no competitor has. Small build, Phase 2.
 Also: explicit refund-friendly policy page (attacks the #1 complaint).
 
+## US expansion (researched Aug 2026) — official-APIs-only, like SE/UK
+
+Why competitors scrape: the big US boards (LinkedIn, Indeed, Glassdoor,
+ZipRecruiter, Dice) have NO public APIs — coverage-first forces the
+expensive stack. Our US pack instead:
+- Tier 1 (keys in hand or free): Adzuna US + Careerjet US (existing keys),
+  The Muse (free public API, no key), USAJOBS (free key, best-documented
+  job API; all federal jobs), existing remote feeds
+- Tier 2 (the gem): ATS-direct — Greenhouse/Lever/Ashby PUBLIC official
+  JSON endpoints (boards-api.greenhouse.io/v1/boards/{company}/jobs etc.)
+  with a curated top-N company-slug list (see jobber OSS). Direct-from-
+  employer postings, fresher than aggregators, zero scraping.
+- Not in pack (scraping-only boards): LinkedIn, Indeed, Glassdoor, Zip,
+  Dice — stated tradeoff, part of the positioning.
+- ATS-direct jobs apply via portal URLs → natural fit for the browser-apply
+  path and the future ATS autofill tier.
+
 ## Known gaps today
 
 - Composio unconnected (needs platform key); email applies via Resend/browser
