@@ -70,7 +70,7 @@ export default function Home() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [drafts, setDrafts] = useState<ApplicationDraft[]>([]);
   const [applications, setApplications] = useState<(Application & { job?: { title: string; company: string | null } })[]>([]);
-  const [matchesFilter, setMatchesFilter] = useState<'pending' | 'all' | 'approved'>('pending');
+  const [matchesFilter, setMatchesFilter] = useState<'pending' | 'approved'>('pending');
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [matchPolling, setMatchPolling] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<PipelineRunResponse | null>(null);
@@ -199,11 +199,9 @@ export default function Home() {
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
-  const filteredMatches = matches.filter((m) => {
-    if (matchesFilter === 'pending') return !m.decision;
-    if (matchesFilter === 'approved') return m.decision === 'approved';
-    return true;
-  });
+  const filteredMatches = matches.filter((m) =>
+    matchesFilter === 'approved' ? m.decision === 'approved' : !m.decision
+  );
 
   const stats = pipeStatus?.stats ?? status?.stats;
   const openDrafts = drafts.filter((d) => d.status !== 'submitted').length;
@@ -328,7 +326,6 @@ export default function Home() {
                         [
                           ['pending', 'Awaiting my decision'],
                           ['approved', 'Approved'],
-                          ['all', 'All'],
                         ] as const
                       ).map(([id, label]) => (
                         <button
