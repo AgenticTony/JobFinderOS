@@ -5,7 +5,7 @@
 // Shell: left sidebar (nav + live hunt status) on md+, compact top bar on mobile.
 // Landing view is the Dashboard: Hunt Pulse funnel + next decisions + status rail.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -100,13 +100,26 @@ export default function Home() {
     refresh();
   }, [refresh]);
 
-  // Keep the countdown and source health fresh without hammering the API
+  // Keep the countdown and source health fresh without hammering the API.
+  // When the stats signature changes (a scheduled hunt ran in the background),
+  // pull the full lists too — otherwise the cards go stale while the counts
+  // update, which reads as "new jobs but nothing new".
+  const lastStatsSig = useRef<string | null>(null);
   useEffect(() => {
     const id = setInterval(() => {
-      getPipelineStatus().then(setPipeStatus).catch(() => {});
+      getPipelineStatus()
+        .then((st) => {
+          setPipeStatus(st);
+          const sig = JSON.stringify(st.stats);
+          if (lastStatsSig.current !== null && sig !== lastStatsSig.current) {
+            refresh();
+          }
+          lastStatsSig.current = sig;
+        })
+        .catch(() => {});
     }, 60_000);
     return () => clearInterval(id);
-  }, []);
+  }, [refresh]);
 
   // While background matching runs, poll status + stream fresh matches in
   useEffect(() => {
