@@ -75,28 +75,27 @@ const FlowDivider = memo(function FlowDivider() {
 function HuntPulseBase({
   stats,
   openDrafts,
-  newSinceLastRun,
   matchingRunning,
   onOpenMatches,
   onOpenApplications,
 }: {
   stats: Stats | undefined;
   openDrafts: number;
-  newSinceLastRun?: number;
   matchingRunning: boolean;
   onOpenMatches: () => void;
   onOpenApplications: () => void;
 }) {
   const pending = stats?.matches_pending_decision ?? 0;
+  const last24 = stats?.jobs_last_24h ?? 0;
   const stages: Stage[] = [
     {
       id: 'hunted',
       label: 'Hunted',
-      hint: newSinceLastRun ? `+${newSinceLastRun} in the last hunt` : 'jobs found so far',
+      hint: last24 ? `+${last24} in the last 24h` : 'jobs found so far',
       count: stats?.jobs_total ?? 0,
       icon: Radar,
       attention: false,
-      delta: newSinceLastRun,
+      delta: last24,
     },
     {
       id: 'matched',

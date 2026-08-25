@@ -421,77 +421,104 @@ function DashboardView({
   onPrepare: (jobId: number) => Promise<void>;
   preparedJobIds: Set<number>;
 }) {
-  const decisions = [...pendingMatches].sort((a, b) => b.score - a.score).slice(0, 5);
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  // Fresh arrivals first, then the rest of the decision queue (deduped)
+  const newMatches = [...pendingMatches]
+    .filter((m) => Date.now() - new Date(m.created_at).getTime() < DAY_MS)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+  const newIds = new Set(newMatches.map((m) => m.id));
+  const decisions = [...pendingMatches]
+    .filter((m) => !newIds.has(m.id))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
   const matchFailed = pipelineResult?.match?.status === 'failed';
-  // Group rows into whole hunts: a run's sources finish seconds apart, separate
-  // hunts are hours apart. Rows within 10 minutes of the newest row = last hunt.
-  const runs = pipeStatus?.recent_runs ?? [];
-  const latestAt = runs[0] ? new Date(runs[0].started_at).getTime() : 0;
-  const lastHunt = latestAt
-    ? runs.filter((r) => latestAt - new Date(r.started_at).getTime() < 10 * 60 * 1000)
-    : [];
-  const newSinceLastRun = lastHunt.reduce((sum, r) => sum + r.jobs_new, 0);
 
   return (
     <section className="space-y-6">
       <HuntPulse
         stats={stats}
         openDrafts={openDrafts}
-        newSinceLastRun={newSinceLastRun}
         matchingRunning={matchPolling}
         onOpenMatches={onOpenMatches}
         onOpenApplications={onOpenApplications}
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
-        {/* Next decisions — the main column */}
-        <div>
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="font-semibold tracking-tight text-hi">
-              Next decisions
-              {decisions.length > 0 && (
-                <span className="num ml-2 text-sm font-normal text-low">{decisions.length}</span>
-              )}
-            </h2>
-            {pendingMatches.length > 0 && (
-              <button
-                onClick={onOpenMatches}
-                className="text-sm text-signal transition-colors hover:text-signal/80"
-              >
-                View all matches →
-              </button>
-            )}
-          </div>
-          {decisions.length > 0 ? (
-            <div className="space-y-3">
-              {decisions.map((m) => (
-                <MatchCard
-                  key={m.id}
-                  match={m}
-                  onDecision={onDecision}
-                  onPrepare={onPrepare}
-                  prepared={preparedJobIds.has(m.job_id)}
-                />
-              ))}
+        {/* Main column — fresh arrivals, then the decision queue */}
+        <div className="space-y-8">
+          {newMatches.length > 0 && (
+            <div>
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 className="font-semibold tracking-tight text-hi">
+                  New in the last 24h
+                  <span className="num ml-2 text-sm font-normal text-low">{newMatches.length}</span>
+                </h2>
+              </div>
+              <div className="space-y-3">
+                {newMatches.map((m) => (
+                  <MatchCard
+                    key={m.id}
+                    match={m}
+                    onDecision={onDecision}
+                    onPrepare={onPrepare}
+                    prepared={preparedJobIds.has(m.job_id)}
+                  />
+                ))}
+              </div>
             </div>
-          ) : (
-            <Empty
-              icon={<Radar className="h-8 w-8" />}
-              title={
-                pipelineBusy
-                  ? 'Scraping job sites…'
-                  : matchPolling
-                    ? 'AI is ranking jobs for you…'
-                    : 'Nothing waiting on you'
-              }
-              body={
-                pipelineBusy
-                  ? 'Fetching new postings from all sources.'
-                  : matchPolling
-                    ? 'Each job takes ~20-60s to score — matches appear live below as they finish.'
-                    : 'When the next hunt finds matches worth your attention, they land here for a yes or no.'
-              }
-            />
+          )}
+
+          {(decisions.length > 0 || newMatches.length === 0) && (
+            <div>
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 className="font-semibold tracking-tight text-hi">
+                  Next decisions
+                  {decisions.length > 0 && (
+                    <span className="num ml-2 text-sm font-normal text-low">{decisions.length}</span>
+                  )}
+                </h2>
+                {pendingMatches.length > 0 && (
+                  <button
+                    onClick={onOpenMatches}
+                    className="text-sm text-signal transition-colors hover:text-signal/80"
+                  >
+                    View all matches →
+                  </button>
+                )}
+              </div>
+              {decisions.length > 0 ? (
+                <div className="space-y-3">
+                  {decisions.map((m) => (
+                    <MatchCard
+                      key={m.id}
+                      match={m}
+                      onDecision={onDecision}
+                      onPrepare={onPrepare}
+                      prepared={preparedJobIds.has(m.job_id)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <Empty
+                  icon={<Radar className="h-8 w-8" />}
+                  title={
+                    pipelineBusy
+                      ? 'Scraping job sites…'
+                      : matchPolling
+                        ? 'AI is ranking jobs for you…'
+                        : 'Nothing else waiting'
+                  }
+                  body={
+                    pipelineBusy
+                      ? 'Fetching new postings from all sources.'
+                      : matchPolling
+                        ? 'Each job takes ~20-60s to score — matches appear live below as they finish.'
+                        : 'New arrivals appear above; anything still awaiting your decision stays here.'
+                  }
+                />
+              )}
+            </div>
           )}
         </div>
 
@@ -542,39 +569,6 @@ function DashboardView({
               </p>
             )}
           </div>
-
-          {/* Source health — the complete last hunt, every source */}
-          {lastHunt.length > 0 && (
-            <div className="rounded-xl border border-line bg-surface/80 p-4">
-              <p className="mb-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-low">
-                Last hunt · sources
-              </p>
-              <div className="space-y-1.5">
-                {lastHunt.map((r, i) => (
-                  <div key={`${r.source}-${i}`} className="flex items-center justify-between gap-3 text-xs">
-                    <span className="truncate text-mid">{r.source}</span>
-                    <span
-                      className={cn(
-                        'num shrink-0',
-                        r.status === 'completed'
-                          ? 'text-ok'
-                          : r.status === 'skipped'
-                            ? 'text-low'
-                            : 'text-bad'
-                      )}
-                      title={r.error ?? undefined}
-                    >
-                      {r.status === 'completed'
-                        ? `${r.jobs_found}↑ ${r.jobs_new}+`
-                        : r.status === 'skipped'
-                          ? 'skipped'
-                          : 'failed'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Manual trigger for wide screens without sidebar visibility? No —
               sidebar always has it; keep a quiet text link for convenience. */}

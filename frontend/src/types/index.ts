@@ -127,6 +127,7 @@ export interface QuerySuggestions {
 
 export interface Stats {
   jobs_total: number;
+  jobs_last_24h: number;
   jobs_new: number;
   jobs_matched: number;
   jobs_approved: number;

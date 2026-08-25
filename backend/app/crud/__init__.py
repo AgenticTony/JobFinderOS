@@ -1,5 +1,6 @@
 """CRUD query helpers for JobFinderOS."""
 
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from sqlalchemy import func, or_
@@ -137,9 +138,13 @@ def get_stats(db: Session) -> dict:
             query = query.filter(getattr(model, col) == val)
         return query.count()
 
+    day_ago = datetime.utcnow() - timedelta(hours=24)
     matches = db.query(MatchResult).all()
     return {
         "jobs_total": count(JobPosting),
+        # Measured from the jobs table (not run reports) so it can never
+        # exceed jobs_total, even after country switches or cleanups.
+        "jobs_last_24h": db.query(JobPosting).filter(JobPosting.scraped_at >= day_ago).count(),
         "jobs_new": count(JobPosting, status="new"),
         "jobs_matched": count(JobPosting, status="matched"),
         "jobs_approved": count(JobPosting, status="approved"),
