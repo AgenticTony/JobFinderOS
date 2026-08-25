@@ -6,9 +6,10 @@
 // Landing view is the Dashboard: Hunt Pulse funnel + next decisions + status rail.
 
 import { useCallback, useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
+  ChevronDown,
   Copy,
   Cpu,
   Download,
@@ -642,6 +643,10 @@ function ApplicationsView({
   onPrepare: (jobId: number) => Promise<void>;
 }) {
   const openDrafts = drafts.filter((d) => d.status !== 'submitted');
+  // Accordion: one draft open at a time; a single draft opens by itself
+  const [openId, setOpenId] = useState<number | null>(() =>
+    openDrafts.length === 1 ? openDrafts[0].id : null
+  );
 
   return (
     <div className="space-y-10">
@@ -649,7 +654,7 @@ function ApplicationsView({
       <section>
         <ViewHeader
           title="Review before sending"
-          sub="AI tailored your CV and cover letter to each approved job. Read, edit if you want, then send. Nothing goes out without you."
+          sub="AI tailored your CV and cover letter to each approved job. Open one to read and edit it, then send. Nothing goes out without you."
         />
         {openDrafts.length === 0 ? (
           <Empty
@@ -660,7 +665,13 @@ function ApplicationsView({
         ) : (
           <div className="space-y-3">
             {openDrafts.map((d) => (
-              <DraftCard key={d.id} draft={d} onChanged={onChanged} />
+              <DraftCard
+                key={d.id}
+                draft={d}
+                expanded={openId === d.id}
+                onToggle={() => setOpenId(openId === d.id ? null : d.id)}
+                onChanged={onChanged}
+              />
             ))}
           </div>
         )}
@@ -735,9 +746,13 @@ function ApplicationsView({
 // A single draft: read/edit cover letter + tailored CV, then submit
 function DraftCard({
   draft,
+  expanded,
+  onToggle,
   onChanged,
 }: {
   draft: ApplicationDraft;
+  expanded: boolean;
+  onToggle: () => void;
   onChanged: () => Promise<void>;
 }) {
   const [coverLetter, setCoverLetter] = useState(draft.cover_letter ?? '');
@@ -798,13 +813,18 @@ function DraftCard({
   };
 
   return (
-    <div className="rounded-xl border border-line bg-surface/80 p-4">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
+      {/* Header — click to open the review workspace */}
+      <div className="flex cursor-pointer items-center gap-3 p-4" onClick={onToggle}>
         <h3 className="min-w-0 flex-1 truncate font-semibold text-hi">
           {job?.title ?? `Job #${draft.job_id}`}
           <span className="ml-2 text-sm font-normal text-low">{job?.company}</span>
         </h3>
+        {dirty && (
+          <span className="rounded-full bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal">
+            unsaved
+          </span>
+        )}
         {draft.status === 'drafting' && (
           <span className="inline-flex items-center rounded-full bg-surface-2 px-2.5 py-1 text-xs text-mid">
             <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> tailoring…
@@ -818,32 +838,52 @@ function DraftCard({
         {draft.status === 'failed' && (
           <span className="rounded-full bg-bad/15 px-2.5 py-1 text-xs text-bad">failed</span>
         )}
+        <ChevronDown
+          className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
+        />
       </div>
 
-      {draft.status === 'failed' && draft.error && (
-        <p className="mt-2 text-sm text-bad">{draft.error}</p>
-      )}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden border-t border-line"
+          >
+            <div className="space-y-4 p-4">
+              {draft.status === 'drafting' && (
+                <p className="flex items-center gap-2 text-sm text-mid" role="status">
+                  <Loader2 className="h-4 w-4 animate-spin text-signal" />
+                  AI is tailoring your CV and cover letter — this box fills in by itself, usually
+                  within a minute.
+                </p>
+              )}
 
-      {/* What the AI changed */}
-      {draft.changes_summary.length > 0 && (
-        <div className="mt-3 rounded-lg border border-line bg-ink/60 p-3">
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-            What the AI changed for this application
-          </p>
-          <ul className="space-y-1">
-            {draft.changes_summary.map((c, i) => (
-              <li key={i} className="text-sm text-mid">
-                • {c}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+              {draft.status === 'failed' && draft.error && (
+                <p className="text-sm text-bad">{draft.error}</p>
+              )}
 
-      {draft.status === 'ready' && (
-        <>
+              {/* What the AI changed */}
+              {draft.status === 'ready' && draft.changes_summary.length > 0 && (
+                <div className="rounded-lg border border-line bg-ink/60 p-3">
+                  <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
+                    What the AI changed for this application
+                  </p>
+                  <ul className="space-y-1">
+                    {draft.changes_summary.map((c, i) => (
+                      <li key={i} className="text-sm text-mid">
+                        • {c}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {draft.status === 'ready' && (
+                <>
           {/* Cover letter editor */}
-          <div className="mt-4">
+          <div>
             <div className="mb-1.5 flex items-center justify-between">
               <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
                 Cover letter (sent to the employer)
@@ -875,7 +915,7 @@ function DraftCard({
           </div>
 
           {/* Tailored CV editor */}
-          <div className="mt-4">
+          <div>
             <div className="mb-1.5 flex items-center justify-between">
               <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
                 Your CV, tailored for this job
@@ -899,13 +939,13 @@ function DraftCard({
           </div>
 
           {submitError && (
-            <p className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
+            <p className="rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
               {submitError}
             </p>
           )}
 
           {/* Actions */}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={save}
               disabled={!dirty || busy !== null}
@@ -937,8 +977,12 @@ function DraftCard({
               {busy === 'submit-browser' ? 'Opening…' : 'Approve & apply in browser'}
             </button>
           </div>
-        </>
-      )}
+                </>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
