@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.db
+*.sqlite3
+
+# CV uploads (personal data — never commit)
+backend/uploads/
+
+# Environment — real secrets live ONLY in backend/.env (never committed)
+.env
+.env.local
+.env*.local
+# .env.example files are safe templates (placeholders only) and ARE committed
+
+# TalentHive reference clone — local-only (own git history; contains its own
+# env files with real keys; docs/TALENTHIVE_INDEX.md is our tracked reference)
+talenthive/
+
+# Node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

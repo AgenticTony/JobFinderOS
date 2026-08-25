@@ -1,0 +1,222 @@
+"""
+Pipeline service — orchestrates the full JobFinderOS loop:
+
+    scrape sources -> per-user location filter -> AI match vs profile -> recommend
+
+This is the job-seeker inversion of TalentHive's demo screening orchestration.
+When the user has completed onboarding, their country picks the source pack,
+their CV-derived queries drive the targeted boards, and their region/city
+filters what gets stored at all.
+"""
+
+import logging
+from datetime import datetime
+from typing import Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.database import SessionLocal
+from app.models import JobPosting, MatchResult, Profile, ScrapeRun
+from app.schemas.common import dump_json_list, parse_json_list
+from app.services.scrapers import SCRAPER_REGISTRY, NormalizedJob
+from app.services import matcher_service, source_packs
+
+logger = logging.getLogger(__name__)
+
+
+def build_scrape_context(db: Session) -> Optional[Dict]:
+    """Per-user scrape settings from the active profile's onboarding."""
+    profile = (
+        db.query(Profile).filter(Profile.is_active == 1, Profile.country.isnot(None)).first()
+    )
+    if not profile:
+        return None
+    return {
+        "country": (profile.country or "").upper(),
+        "region": profile.region,
+        "municipality": profile.municipality,
+        "remote_only": bool(profile.remote_only),
+        "queries": parse_json_list(profile.search_queries),
+    }
+
+
+def passes_location_filter(job: NormalizedJob, ctx: Dict) -> bool:
+    """
+    Universal location gate — applied to every source identically.
+
+    - Remote jobs always pass
+    - Jobs with no location text always pass (let AI matching judge them)
+    - Otherwise the job's location must mention the user's municipality or region
+    - remote_only users additionally drop non-remote jobs
+    """
+    if ctx.get("remote_only") and not job.remote:
+        return False
+    if job.remote or not job.location:
+        return True
+
+    terms = [t.lower() for t in (ctx.get("municipality"), ctx.get("region")) if t]
+    if not terms:
+        return True
+    location = job.location.lower()
+    return any(term in location for term in terms)
+
+
+def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> ScrapeRun:
+    """Run one scraper, upsert new jobs, record a ScrapeRun audit row."""
+    run = ScrapeRun(source=source_name, status="running")
+    db.add(run)
+    db.commit()
+
+    scraper_cls = SCRAPER_REGISTRY.get(source_name)
+    if scraper_cls is None:
+        run.status = "failed"
+        run.error = f"Unknown source: {source_name}"
+        run.finished_at = datetime.utcnow()
+        db.commit()
+        return run
+
+    if not scraper_cls.is_configured(ctx):
+        run.status = "skipped"
+        run.error = f"{source_name} not configured (see backend/.env.example)"
+        run.finished_at = datetime.utcnow()
+        db.commit()
+        return run
+
+    try:
+        jobs: List[NormalizedJob] = scraper_cls().fetch(ctx)
+        run.jobs_found = len(jobs)
+
+        # Universal location gate — out-of-area jobs are never stored,
+        # so they never consume matching budget
+        if ctx:
+            before = len(jobs)
+            jobs = [nj for nj in jobs if passes_location_filter(nj, ctx)]
+            if before != len(jobs):
+                logger.info("[%s] location filter: %d -> %d jobs", source_name, before, len(jobs))
+
+        new_count = 0
+        for nj in jobs:
+            if _job_exists(db, nj):
+                continue
+            posting = JobPosting(
+                source=nj.source,
+                source_id=nj.source_id,
+                title=nj.title[:500],
+                company=nj.company,
+                location=nj.location,
+                remote=1 if nj.remote else 0,
+                url=nj.url[:1000],
+                description=nj.description,
+                employment_type=nj.employment_type,
+                salary=nj.salary,
+                tags=dump_json_list(nj.tags),
+                category=nj.category,
+                application_email=nj.application_email,
+                application_url=nj.application_url,
+                published_at=nj.published_at,
+            )
+            db.add(posting)
+            db.flush()  # make the row visible so same-run duplicates are caught
+            new_count += 1
+
+        db.commit()
+        run.jobs_new = new_count
+        run.status = "completed"
+        logger.info("[%s] %d found, %d new", source_name, len(jobs), new_count)
+    except Exception as e:
+        db.rollback()
+        run.status = "failed"
+        run.error = str(e)[:2000]
+        logger.error("[%s] scrape failed: %s", source_name, e)
+    finally:
+        run.finished_at = datetime.utcnow()
+        db.commit()
+
+    return run
+
+
+def _job_exists(db: Session, nj: NormalizedJob) -> bool:
+    """Dedupe by (source, source_id) then by URL."""
+    if nj.source_id:
+        exists = (
+            db.query(JobPosting.id)
+            .filter(JobPosting.source == nj.source, JobPosting.source_id == nj.source_id)
+            .first()
+        )
+        if exists:
+            return True
+    if nj.url:
+        exists = db.query(JobPosting.id).filter(JobPosting.url == nj.url[:1000]).first()
+        if exists:
+            return True
+    return False
+# NOTE: autoflush is off, so same-run adds are invisible to these queries.
+# We flush each posting immediately to make same-run dedup work.
+
+
+def run_pipeline(
+    sources: Optional[List[str]] = None,
+    match: bool = True,
+    max_matches: Optional[int] = None,
+) -> Dict:
+    """
+    Run the full pipeline (used by the API and the scheduler).
+
+    Returns a summary dict (also logged by the scheduler).
+    """
+    db = SessionLocal()
+    try:
+        ctx = build_scrape_context(db)
+        # Per-user pack when onboarded; explicit request or global allow-list otherwise
+        if sources:
+            requested = sources
+        elif ctx:
+            requested = [s for s in source_packs.pack_for_country(ctx["country"]) if s in SCRAPER_REGISTRY]
+        else:
+            requested = settings.get_scrape_sources()
+        scrape_summaries = []
+        for source in requested:
+            run = scrape_source(db, source, ctx)
+            scrape_summaries.append(
+                {
+                    "source": run.source,
+                    "status": run.status,
+                    "jobs_found": run.jobs_found,
+                    "jobs_new": run.jobs_new,
+                    "error": run.error,
+                }
+            )
+
+        match_summary = None
+        if match:
+            try:
+                match_summary = matcher_service.run_matching(
+                    db, limit=max_matches, max_seconds=settings.MATCH_TIME_BUDGET_SECONDS
+                )
+            except Exception as e:  # noqa: BLE001 — report in summary, never 500 the endpoint
+                db.rollback()
+                match_summary = {
+                    "status": "failed",
+                    "jobs_considered": 0,
+                    "matches_created": 0,
+                    "error": f"{type(e).__name__}: {e}",
+                }
+
+        # Top recommendations of this run for immediate display
+        top_matches = (
+            db.query(MatchResult)
+            .join(JobPosting, MatchResult.job_id == JobPosting.id)
+            .filter(MatchResult.decision.is_(None), JobPosting.status == "matched")
+            .order_by(MatchResult.score.desc())
+            .limit(10)
+            .all()
+        )
+
+        return {
+            "scrape": scrape_summaries,
+            "match": match_summary,
+            "top_matches": [m.id for m in top_matches],
+        }
+    finally:
+        db.close()

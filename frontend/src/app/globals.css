@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0f;
+  --foreground: #ededf2;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #ffffff;
+    --foreground: #17171f;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Subtle grid backdrop for the OS feel */
+.os-backdrop {
+  background-image:
+    radial-gradient(circle at 25% 15%, rgba(56, 130, 246, 0.08), transparent 45%),
+    radial-gradient(circle at 80% 80%, rgba(16, 185, 129, 0.06), transparent 40%);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 140, 0.35);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
