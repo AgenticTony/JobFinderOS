@@ -9,8 +9,8 @@
 import { memo } from 'react';
 import { Crosshair, FileText, Radar, Scale, Send } from 'lucide-react';
 import type { Stats } from '@/types';
-import { cn } from '@/lib/utils';
-import { LiveDot } from './NextHunt';
+import { cn, timeAgo } from '@/lib/utils';
+import { LiveDot, useCountdown } from './NextHunt';
 
 interface Stage {
   id: string;
@@ -64,6 +64,59 @@ function PulseStage({
   );
 }
 
+// Header-right schedule block: last hunt + live countdown (replaces the
+// old Automatic hunts card)
+function PulseSchedule({
+  nextRunAt,
+  schedulerEnabled,
+  intervalMinutes,
+  lastHuntAt,
+}: {
+  nextRunAt: string | null;
+  schedulerEnabled: boolean;
+  intervalMinutes: number;
+  lastHuntAt: string | null;
+}) {
+  const countdown = useCountdown(schedulerEnabled ? nextRunAt : null);
+  const at = nextRunAt ? new Date(nextRunAt) : null;
+  const overdue =
+    lastHuntAt !== null &&
+    Date.now() - new Date(lastHuntAt).getTime() > intervalMinutes * 60_000 * 1.5;
+
+  if (!schedulerEnabled) {
+    return <p className="text-xs text-low">Automatic hunts off</p>;
+  }
+
+  return (
+    <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+      {lastHuntAt && (
+        <span className="text-low">
+          Last hunt {timeAgo(lastHuntAt)}
+          {overdue && (
+            <span className="ml-1.5 rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal">
+              overdue
+            </span>
+          )}
+        </span>
+      )}
+      <span className="flex items-center gap-2 text-mid">
+        <LiveDot />
+        <span>
+          next hunt in{' '}
+          <span className="num text-hi" aria-hidden>
+            {countdown ?? `every ${intervalMinutes}m`}
+          </span>
+          <span className="sr-only">
+            {at
+              ? `next automatic hunt at ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+              : `hunts every ${intervalMinutes} minutes`}
+          </span>
+        </span>
+      </span>
+    </p>
+  );
+}
+
 const FlowDivider = memo(function FlowDivider() {
   return (
     <div className="relative hidden h-px w-4 shrink-0 self-center bg-line sm:block" aria-hidden>
@@ -76,6 +129,10 @@ function HuntPulseBase({
   stats,
   openDrafts,
   matchingRunning,
+  nextRunAt,
+  schedulerEnabled,
+  intervalMinutes,
+  lastHuntAt,
   onOpenMatches,
   onOpenReview,
   onOpenSent,
@@ -83,6 +140,10 @@ function HuntPulseBase({
   stats: Stats | undefined;
   openDrafts: number;
   matchingRunning: boolean;
+  nextRunAt: string | null;
+  schedulerEnabled: boolean;
+  intervalMinutes: number;
+  lastHuntAt: string | null;
   onOpenMatches: () => void;
   onOpenReview: () => void;
   onOpenSent: () => void;
@@ -138,21 +199,29 @@ function HuntPulseBase({
       aria-label="Hunt pulse — your pipeline at a glance"
       className="rounded-xl border border-line bg-surface/80"
     >
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-line px-4 py-2.5 sm:px-5">
-        <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-mid">Hunt pulse</p>
-        {matchingRunning ? (
-          <p className="flex items-center gap-2 text-xs text-signal">
-            <LiveDot /> AI is ranking jobs for you — new matches stream in live
-          </p>
-        ) : (
-          <p className="text-xs text-mid">
-            {pending > 0
-              ? `${pending} ${pending === 1 ? 'match needs' : 'matches need'} your decision`
-              : openDrafts > 0
-                ? `${openDrafts} ${openDrafts === 1 ? 'draft is' : 'drafts are'} ready to review`
-                : 'All quiet — the next automatic hunt is on its way'}
-          </p>
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-line px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-hi">Hunt pulse</h2>
+          {matchingRunning ? (
+            <p className="flex items-center gap-2 text-xs text-signal">
+              <LiveDot /> AI is ranking jobs for you — new matches stream in live
+            </p>
+          ) : (
+            <p className="text-xs text-mid">
+              {pending > 0
+                ? `${pending} ${pending === 1 ? 'match needs' : 'matches need'} your decision`
+                : openDrafts > 0
+                  ? `${openDrafts} ${openDrafts === 1 ? 'draft is' : 'drafts are'} ready to review`
+                  : 'All quiet — the next automatic hunt is on its way'}
+            </p>
+          )}
+        </div>
+        <PulseSchedule
+          nextRunAt={nextRunAt}
+          schedulerEnabled={schedulerEnabled}
+          intervalMinutes={intervalMinutes}
+          lastHuntAt={lastHuntAt}
+        />
       </div>
       <div className="flex flex-wrap items-stretch py-1">
         {stages.map((stage, i) => (

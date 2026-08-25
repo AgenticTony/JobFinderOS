@@ -29,7 +29,6 @@ import MatchCard from '@/components/MatchCard';
 import OnboardingWizard from '@/components/OnboardingWizard';
 import Sidebar, { NAV, type View } from '@/components/Sidebar';
 import HuntPulse from '@/components/HuntPulse';
-import NextHunt from '@/components/NextHunt';
 import {
   decideMatch,
   draftCoverLetterPdfUrl,
@@ -321,7 +320,6 @@ export default function Home() {
                     onOpenMatches={() => setView('matches')}
                     onOpenReview={() => setView('apps-review')}
                     onOpenSent={() => setView('apps-sent')}
-                    onHunt={handleRunPipeline}
                     pendingMatches={matches.filter((m) => !m.decision)}
                     finishApplying={finishApplying}
                     onDecision={handleDecision}
@@ -393,7 +391,6 @@ function DashboardView({
   onOpenMatches,
   onOpenReview,
   onOpenSent,
-  onHunt,
   pendingMatches,
   finishApplying,
   onDecision,
@@ -410,7 +407,6 @@ function DashboardView({
   onOpenMatches: () => void;
   onOpenReview: () => void;
   onOpenSent: () => void;
-  onHunt: () => void;
   pendingMatches: Match[];
   finishApplying: Match[];
   onDecision: (matchId: number, decision: 'approved' | 'rejected') => Promise<void>;
@@ -432,9 +428,10 @@ function DashboardView({
   // Last hunt = newest scrape-run row; "overdue" when it's been more than
   // ~1.5x the interval (backend asleep or dead — the user should notice)
   const lastHuntAt = pipeStatus?.recent_runs?.[0]?.started_at ?? null;
-  const intervalMs = (pipeStatus?.scrape_interval_minutes ?? 180) * 60_000;
-  const lastHuntStale =
-    lastHuntAt !== null && Date.now() - new Date(lastHuntAt).getTime() > intervalMs * 1.5;
+  const hasRailWarnings =
+    Boolean(profileStatus && (!profileStatus.has_profile || !profileStatus.ai_enabled)) ||
+    matchFailed ||
+    matchPolling;
 
   return (
     <section className="space-y-6">
@@ -442,12 +439,16 @@ function DashboardView({
         stats={stats}
         openDrafts={openDrafts}
         matchingRunning={matchPolling}
+        nextRunAt={pipeStatus?.next_run_at ?? null}
+        schedulerEnabled={pipeStatus?.scheduler_enabled ?? false}
+        intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
+        lastHuntAt={lastHuntAt}
         onOpenMatches={onOpenMatches}
         onOpenReview={onOpenReview}
         onOpenSent={onOpenSent}
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className={cn('grid gap-6', hasRailWarnings && 'xl:grid-cols-[minmax(0,1fr)_300px]')}>
         {/* Main column — finish what you started, fresh arrivals, then the queue */}
         <div className="space-y-8">
           {finishApplying.length > 0 && (
@@ -549,74 +550,37 @@ function DashboardView({
           )}
         </div>
 
-        {/* Status rail */}
-        <aside className="space-y-4">
-          {/* Blockers first */}
-          {profileStatus && !profileStatus.has_profile && (
-            <Warning>
-              No CV on file — upload your CV in <b>Profile</b> to enable AI matching.
-            </Warning>
-          )}
-          {profileStatus && !profileStatus.ai_enabled && (
-            <Warning>
-              <Cpu className="mr-1.5 inline h-4 w-4" />
-              GLM_API_KEY not set on the backend — set it in <code>backend/.env</code> to enable AI
-              matching.
-            </Warning>
-          )}
-          {matchFailed && pipelineResult?.match?.error && (
-            <Warning>Last hunt failed: {pipelineResult.match.error}</Warning>
-          )}
-          {/* Email-apply config is deliberately NOT banner-warned: the platform's
-              email path is Composio connected-email (see CLAUDE.md decided
-              architecture), and the draft card already shows a precise error at
-              submit time if Resend keys are missing. Warn at the action, not
-              permanently. */}
-
-          {/* The schedule */}
-          <div className="rounded-xl border border-line bg-surface/80 p-4">
-            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-mid">
-              Automatic hunts
-            </p>
-            <div className="mt-2">
-              <NextHunt
-                nextRunAt={pipeStatus?.next_run_at ?? null}
-                schedulerEnabled={pipeStatus?.scheduler_enabled ?? false}
-                intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
-              />
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-mid">
-              {pipeStatus?.scheduler_enabled
-                ? `The console hunts by itself every ${Math.round((pipeStatus?.scrape_interval_minutes ?? 180) / 60)}h — new jobs are scraped, deduplicated, and scored while you're away.`
-                : 'Automatic hunts are off. Start one yourself whenever you like.'}
-            </p>
-            {lastHuntAt && (
-              <p className="mt-1.5 text-xs text-low">
-                Last hunt {timeAgo(lastHuntAt)}
-                {lastHuntStale && (
-                  <span className="ml-1.5 rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal">
-                    overdue
-                  </span>
-                )}
-              </p>
+        {/* Status rail — only when there's something to say; the schedule
+            lives in the Hunt Pulse header now */}
+        {hasRailWarnings && (
+          <aside className="space-y-4">
+            {profileStatus && !profileStatus.has_profile && (
+              <Warning>
+                No CV on file — upload your CV in <b>Profile</b> to enable AI matching.
+              </Warning>
             )}
+            {profileStatus && !profileStatus.ai_enabled && (
+              <Warning>
+                <Cpu className="mr-1.5 inline h-4 w-4" />
+                GLM_API_KEY not set on the backend — set it in <code>backend/.env</code> to enable AI
+                matching.
+              </Warning>
+            )}
+            {matchFailed && pipelineResult?.match?.error && (
+              <Warning>Last hunt failed: {pipelineResult.match.error}</Warning>
+            )}
+            {/* Email-apply config is deliberately NOT banner-warned: the platform's
+                email path is Composio connected-email (see CLAUDE.md decided
+                architecture), and the draft card already shows a precise error at
+                submit time if Resend keys are missing. Warn at the action, not
+                permanently. */}
             {matchPolling && (
-              <p className="mt-2 text-xs text-signal" role="status">
+              <p className="text-xs text-signal" role="status">
                 Matching now — results stream into “Next decisions”…
               </p>
             )}
-          </div>
-
-          {/* Manual trigger for wide screens without sidebar visibility? No —
-              sidebar always has it; keep a quiet text link for convenience. */}
-          <button
-            onClick={onHunt}
-            disabled={pipelineBusy || matchPolling}
-            className="text-xs text-mid transition-colors hover:text-signal disabled:opacity-50"
-          >
-            Can&apos;t wait? Hunt now →
-          </button>
-        </aside>
+          </aside>
+        )}
       </div>
     </section>
   );
