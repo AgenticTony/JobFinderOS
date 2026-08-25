@@ -40,7 +40,7 @@ function PulseStage({
         onClick && 'cursor-pointer hover:bg-surface-2'
       )}
     >
-      <span className="flex items-center gap-2 self-center text-low sm:self-start">
+      <span className="flex items-center gap-2 self-center text-mid sm:self-start">
         <stage.icon className="h-3.5 w-3.5" aria-hidden />
         <span className="text-[10px] font-medium uppercase tracking-[0.14em]">{stage.label}</span>
         {live && <span className="num text-[10px] text-signal">live</span>}
@@ -59,7 +59,7 @@ function PulseStage({
           <span className="num rounded bg-ok/10 px-1 py-0.5 text-[11px] text-ok">+{stage.delta}</span>
         ) : null}
       </span>
-      <span className="hidden truncate text-[11px] text-low sm:block">{stage.hint}</span>
+      <span className="hidden truncate text-[11px] text-mid sm:block">{stage.hint}</span>
     </Tag>
   );
 }
