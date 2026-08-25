@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ChevronDown, ExternalLink, FileText, Sparkles, X } from 'lucide-react';
+import { Briefcase, Check, ChevronDown, ExternalLink, FileText, Sparkles, X } from 'lucide-react';
 import type { Match } from '@/types';
 import ScoreRing from './ScoreRing';
 import TierBadge from './TierBadge';
@@ -45,9 +45,14 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
 
   return (
     <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
-      {/* Header row */}
-      <div className="flex cursor-pointer items-center gap-4 p-4" onClick={() => setExpanded(!expanded)}>
-        <ScoreRing score={match.score} />
+      {/* Header row — job-board convention: company tile left, score right */}
+      <div className="flex cursor-pointer items-center gap-3.5 p-4" onClick={() => setExpanded(!expanded)}>
+        <span
+          className="num flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-2 text-sm font-semibold text-mid"
+          aria-hidden
+        >
+          {match.job?.company?.trim()?.[0]?.toUpperCase() ?? <Briefcase className="h-4 w-4" />}
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate font-semibold text-hi">{match.job?.title ?? 'Unknown job'}</h3>
@@ -76,7 +81,17 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
               .join(' · ')}
             {match.job?.source === 'adzuna' && <AdzunaAttribution />}
           </p>
+          {match.job?.salary && (
+            <p className="num mt-1 text-xs text-low">
+              <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5">{match.job.salary}</span>
+              <span className="ml-2">matched {timeAgo(match.created_at)}</span>
+            </p>
+          )}
+          {!match.job?.salary && (
+            <p className="mt-1 text-xs text-low">matched {timeAgo(match.created_at)}</p>
+          )}
         </div>
+        <ScoreRing score={match.score} />
         <ChevronDown
           className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
         />
@@ -144,10 +159,6 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
                     <ExternalLink className="h-4 w-4" /> View posting
                   </a>
                 )}
-
-                <span className="num ml-auto text-xs text-low">
-                  matched {timeAgo(match.created_at)}
-                </span>
               </div>
             </div>
           </motion.div>

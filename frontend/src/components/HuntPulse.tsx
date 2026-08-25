@@ -19,6 +19,7 @@ interface Stage {
   count: number;
   icon: typeof Radar;
   attention: boolean; // needs the user's decision → breathes amber
+  delta?: number; // "+N" fresh-count chip (last hunt)
 }
 
 function PulseStage({
@@ -54,6 +55,9 @@ function PulseStage({
         >
           {stage.count}
         </span>
+        {stage.delta ? (
+          <span className="num rounded bg-ok/10 px-1 py-0.5 text-[11px] text-ok">+{stage.delta}</span>
+        ) : null}
       </span>
       <span className="hidden truncate text-[11px] text-low sm:block">{stage.hint}</span>
     </Tag>
@@ -71,12 +75,14 @@ const FlowDivider = memo(function FlowDivider() {
 function HuntPulseBase({
   stats,
   openDrafts,
+  newSinceLastRun,
   matchingRunning,
   onOpenMatches,
   onOpenApplications,
 }: {
   stats: Stats | undefined;
   openDrafts: number;
+  newSinceLastRun?: number;
   matchingRunning: boolean;
   onOpenMatches: () => void;
   onOpenApplications: () => void;
@@ -86,10 +92,11 @@ function HuntPulseBase({
     {
       id: 'hunted',
       label: 'Hunted',
-      hint: 'jobs found so far',
+      hint: newSinceLastRun ? `+${newSinceLastRun} in the last hunt` : 'jobs found so far',
       count: stats?.jobs_total ?? 0,
       icon: Radar,
       attention: false,
+      delta: newSinceLastRun,
     },
     {
       id: 'matched',

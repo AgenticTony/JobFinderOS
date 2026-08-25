@@ -424,12 +424,22 @@ function DashboardView({
   const decisions = [...pendingMatches].sort((a, b) => b.score - a.score).slice(0, 5);
   const matchFailed = pipelineResult?.match?.status === 'failed';
   const lastRuns = (pipeStatus?.recent_runs ?? []).slice(0, 6);
+  // New jobs from the most recent hunt (rows sharing the newest started_at)
+  const allRuns = pipeStatus?.recent_runs ?? [];
+  const latestAt = allRuns.reduce<string | null>(
+    (max, r) => (!max || r.started_at > max ? r.started_at : max),
+    null
+  );
+  const newSinceLastRun = latestAt
+    ? allRuns.filter((r) => r.started_at === latestAt).reduce((sum, r) => sum + r.jobs_new, 0)
+    : 0;
 
   return (
     <section className="space-y-6">
       <HuntPulse
         stats={stats}
         openDrafts={openDrafts}
+        newSinceLastRun={newSinceLastRun}
         matchingRunning={matchPolling}
         onOpenMatches={onOpenMatches}
         onOpenApplications={onOpenApplications}
