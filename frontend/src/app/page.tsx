@@ -583,7 +583,7 @@ function DashboardView({
 
           {/* The schedule */}
           <div className="rounded-xl border border-line bg-surface/80 p-4">
-            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-low">
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-mid">
               Automatic hunts
             </p>
             <div className="mt-2">
@@ -593,7 +593,7 @@ function DashboardView({
                 intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
               />
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-low">
+            <p className="mt-2 text-xs leading-relaxed text-mid">
               {pipeStatus?.scheduler_enabled
                 ? `The console hunts by itself every ${Math.round((pipeStatus?.scrape_interval_minutes ?? 180) / 60)}h — new jobs are scraped, deduplicated, and scored while you're away.`
                 : 'Automatic hunts are off. Start one yourself whenever you like.'}
@@ -610,7 +610,7 @@ function DashboardView({
           <button
             onClick={onHunt}
             disabled={pipelineBusy || matchPolling}
-            className="text-xs text-low transition-colors hover:text-signal disabled:opacity-50"
+            className="text-xs text-mid transition-colors hover:text-signal disabled:opacity-50"
           >
             Can&apos;t wait? Hunt now →
           </button>

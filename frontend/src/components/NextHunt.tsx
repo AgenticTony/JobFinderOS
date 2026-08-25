@@ -89,7 +89,7 @@ export default function NextHunt({
             : `hunts every ${intervalMinutes} minutes`}
         </span>
       </span>
-      <span className="hidden text-low lg:inline">to next hunt</span>
+      <span className="hidden text-mid lg:inline">to next hunt</span>
     </p>
   );
 }

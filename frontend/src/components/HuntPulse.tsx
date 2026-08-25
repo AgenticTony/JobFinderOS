@@ -137,13 +137,13 @@ function HuntPulseBase({
       className="rounded-xl border border-line bg-surface/80"
     >
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-line px-4 py-2.5 sm:px-5">
-        <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-low">Hunt pulse</p>
+        <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-mid">Hunt pulse</p>
         {matchingRunning ? (
           <p className="flex items-center gap-2 text-xs text-signal">
             <LiveDot /> AI is ranking jobs for you — new matches stream in live
           </p>
         ) : (
-          <p className="text-xs text-low">
+          <p className="text-xs text-mid">
             {pending > 0
               ? `${pending} ${pending === 1 ? 'match needs' : 'matches need'} your decision`
               : openDrafts > 0

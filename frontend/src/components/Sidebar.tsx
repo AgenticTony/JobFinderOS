@@ -101,7 +101,7 @@ export default function Sidebar({
       <div className="mt-auto space-y-3">
         {/* Live hunt status */}
         <div className="rounded-lg border border-line bg-ink/60 px-3 py-2.5">
-          <p className="hidden text-[10px] font-medium uppercase tracking-widest text-low lg:block">
+          <p className="hidden text-[10px] font-medium uppercase tracking-widest text-mid lg:block">
             Hunt cycle
           </p>
           <NextHunt
