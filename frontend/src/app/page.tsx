@@ -322,6 +322,7 @@ export default function Home() {
                     approved={view === 'matches-approved'}
                     matches={matches}
                     preparedJobIds={preparedJobIds}
+                    appliedJobIds={appliedJobIds}
                     onDecision={handleDecision}
                     onPrepare={handlePrepare}
                     onSwitch={(v) => setView(v)}
@@ -619,6 +620,7 @@ function MatchesView({
   approved,
   matches,
   preparedJobIds,
+  appliedJobIds,
   onDecision,
   onPrepare,
   onSwitch,
@@ -626,18 +628,23 @@ function MatchesView({
   approved: boolean;
   matches: Match[];
   preparedJobIds: Set<number>;
+  appliedJobIds: Set<number>;
   onDecision: (matchId: number, decision: 'approved' | 'rejected') => Promise<void>;
   onPrepare: (jobId: number) => Promise<void>;
   onSwitch: (v: View) => void;
 }) {
-  const list = matches.filter((m) => (approved ? m.decision === 'approved' : !m.decision));
+  // Approved page = in flight: approved and not yet sent. Once sent, the
+  // job's record lives in Applications → Sent — it leaves Matches for good.
+  const list = matches.filter((m) =>
+    approved ? m.decision === 'approved' && !appliedJobIds.has(m.job_id) : !m.decision
+  );
 
   return (
     <section>
       {approved ? (
         <ViewHeader
           title="Approved"
-          sub="The jobs you sent forward — prepare or review their applications."
+          sub="Approved and in flight — jobs stay here until they're sent, then move to Applications → Sent."
         />
       ) : (
         <ViewHeader
@@ -655,10 +662,10 @@ function MatchesView({
       {list.length === 0 ? (
         <Empty
           icon={<Inbox className="h-8 w-8" />}
-          title={approved ? 'Nothing approved yet' : 'No matches waiting'}
+          title={approved ? 'Nothing in flight' : 'No matches waiting'}
           body={
             approved
-              ? 'Approve a match and it moves here, ready for its tailored application.'
+              ? 'Approve a match and it appears here until its application is sent.'
               : 'Hunt now to scrape job sites and match them against your CV.'
           }
         />
@@ -670,6 +677,7 @@ function MatchesView({
               match={m}
               onDecision={onDecision}
               onPrepare={onPrepare}
+              onReview={() => onSwitch('apps-review')}
               prepared={preparedJobIds.has(m.job_id)}
             />
           ))}
