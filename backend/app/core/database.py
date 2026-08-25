@@ -73,6 +73,7 @@ def init_db():
         ("profiles", "search_queries", "TEXT"),
         ("profiles", "languages", "TEXT"),
         ("profiles", "include_remote", "INTEGER DEFAULT 0"),
+        ("job_postings", "dedupe_key", "VARCHAR(16)"),
         ("applications", "draft_id", "INTEGER"),
     ]
     try:
@@ -86,3 +87,40 @@ def init_db():
                     pass  # Column already exists
     except Exception as e:
         logger.warning("Migration check: %s", e)
+
+    # Backfill dedupe keys for pre-existing rows, and dismiss older copies
+    # of cross-board duplicates that were never matched
+    from app.core.dedupe import dedupe_key_for
+
+    try:
+        from sqlalchemy import text as t
+
+        with engine.connect() as conn:
+            rows = conn.execute(t("SELECT id, title, company, location FROM job_postings")).fetchall()
+            seen: dict[str, int] = {}
+            dismiss: list[int] = []
+            for job_id, title, company, location in rows:
+                conn.execute(
+                    t("UPDATE job_postings SET dedupe_key = :k WHERE id = :i"),
+                    {"k": dedupe_key_for(title, company, location), "i": job_id},
+                )
+            # Re-read with statuses; keep the NEWEST copy of each key
+            rows = conn.execute(
+                t("SELECT id, dedupe_key, status, scraped_at FROM job_postings ORDER BY scraped_at DESC")
+            ).fetchall()
+            for job_id, key, status, _scraped in rows:
+                if status != "new" or not key:
+                    continue
+                if key in seen:
+                    dismiss.append(job_id)
+                else:
+                    seen[key] = job_id
+            for job_id in dismiss:
+                conn.execute(
+                    t("UPDATE job_postings SET status = 'dismissed' WHERE id = :i"), {"i": job_id}
+                )
+            conn.commit()
+            if dismiss:
+                logger.info("Dedupe backfill: dismissed %d older duplicate postings", len(dismiss))
+    except Exception as e:
+        logger.warning("Dedupe backfill skipped: %s", e)

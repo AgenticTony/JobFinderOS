@@ -204,8 +204,10 @@ RULES — READ BEFORE WRITING ANYTHING
 - changes_summary: 3-5 short bullets addressed to the job seeker in second
   person ("Moved your Azure experience to the top because this role...").
 - Write both documents in the language of the job posting (a German posting
-  gets German documents; English posting gets English). The changes_summary
-  always matches the CV's original language.
+  gets German documents; English posting gets English). If the posting mixes
+  languages or is ambiguous, use its dominant language; if still unclear,
+  use the first of my working languages listed in My Profile. The
+  changes_summary always matches the CV's original language.
 
 Output plain text with clear section headers (e.g. "PROFESSIONAL SUMMARY",
 "SKILLS", "EXPERIENCE") — no markdown asterisks or hashes.

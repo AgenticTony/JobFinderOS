@@ -37,6 +37,10 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
   // Rolling 24h "new" — decays per-card instead of everything going stale at
   // midnight; recomputed on every data refresh.
   const isNew = Date.now() - new Date(match.created_at).getTime() < 24 * 60 * 60 * 1000;
+  // Posting age (when the board publishes it) — old postings get a red hint
+  const postedMs = match.job?.published_at ? Date.now() - new Date(match.job.published_at).getTime() : null;
+  const postedAgeDays = postedMs !== null ? Math.floor(postedMs / 86_400_000) : null;
+  const postedStale = postedAgeDays !== null && postedAgeDays >= 21;
 
   const handleDecision = async (decision: 'approved' | 'rejected') => {
     setBusy(decision);
@@ -106,6 +110,11 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
               </span>
             )}
             <span>matched {timeAgo(match.created_at)}</span>
+            {postedAgeDays !== null && (
+              <span className={cn('num rounded px-1.5 py-0.5', postedStale ? 'bg-bad/10 text-bad' : '')}>
+                posted {postedAgeDays === 0 ? 'today' : `${postedAgeDays}d ago`}
+              </span>
+            )}
           </p>
         </div>
         <ScoreRing score={match.score} />

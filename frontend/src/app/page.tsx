@@ -429,6 +429,12 @@ function DashboardView({
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
   const matchFailed = pipelineResult?.match?.status === 'failed';
+  // Last hunt = newest scrape-run row; "overdue" when it's been more than
+  // ~1.5x the interval (backend asleep or dead — the user should notice)
+  const lastHuntAt = pipeStatus?.recent_runs?.[0]?.started_at ?? null;
+  const intervalMs = (pipeStatus?.scrape_interval_minutes ?? 180) * 60_000;
+  const lastHuntStale =
+    lastHuntAt !== null && Date.now() - new Date(lastHuntAt).getTime() > intervalMs * 1.5;
 
   return (
     <section className="space-y-6">
@@ -584,6 +590,16 @@ function DashboardView({
                 ? `The console hunts by itself every ${Math.round((pipeStatus?.scrape_interval_minutes ?? 180) / 60)}h — new jobs are scraped, deduplicated, and scored while you're away.`
                 : 'Automatic hunts are off. Start one yourself whenever you like.'}
             </p>
+            {lastHuntAt && (
+              <p className="mt-1.5 text-xs text-low">
+                Last hunt {timeAgo(lastHuntAt)}
+                {lastHuntStale && (
+                  <span className="ml-1.5 rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal">
+                    overdue
+                  </span>
+                )}
+              </p>
+            )}
             {matchPolling && (
               <p className="mt-2 text-xs text-signal" role="status">
                 Matching now — results stream into “Next decisions”…

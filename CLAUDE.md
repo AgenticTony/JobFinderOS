@@ -179,6 +179,33 @@ tabs Dashboard / Matches / Applications (draft review + sent history) / Profile.
   matches) for conversion; LTV ~£20–45 → organic acquisition channels only (AF-adjacent).
   Shared job data + per-query scrape caching keeps DB and free API tiers viable at scale.
 
+## Pipeline gates & hygiene (all enforced every run)
+
+Scrape-time gates (in order): location (area pass; remote/locationless only when
+include_remote) → language (non-spoken languages dropped; English always passes) →
+freshness (published_at older than MAX_POSTING_AGE_DAYS=30 dropped) → dedupe
+(same-board IDs/URLs, plus cross-board normalized title+company via
+jobs.dedupe_key — app/core/dedupe.py, backfilled at startup).
+
+Matcher gates: exclude keywords → language backlog gate → cross-board dupe guard
+(same dedupe_key already matched = dismissed) → AI score < MATCH_KEEP_MIN_SCORE=25
+= job dismissed, NO match row (never enters the queue).
+
+Sweeps (run_pipeline `_maintenance_sweeps`): stale unmatched postings >30d →
+dismissed; pending matches older than MATCH_STALE_DAYS=30 → auto-passed.
+
+Onboarding: country → region/city → languages (step 3) → remote switches
+("Include remote jobs" opt-in + "Remote jobs only") → job titles (strategy
+field/adjacent/widen). Profile.languages / include_remote drive the gates.
+
+Tailor language rule: documents in the posting's language; mixed → dominant;
+unclear → first profile working language.
+
+Ops: backend runs under launchd agent `com.jobfinderos.backend`
+(ops/com.jobfinderos.backend.plist in-repo; installed at
+~/Library/LaunchAgents) — RunAtLoad + KeepAlive, logs /tmp/jobfinderos-backend.log.
+Frontend is `npm run dev` on demand. Real fix later: deploy backend so hunts run 24/7.
+
 ## Open items / next steps
 
 - [ ] Purge old broad-scraped `new` jobs (~580) from pre-onboarding era

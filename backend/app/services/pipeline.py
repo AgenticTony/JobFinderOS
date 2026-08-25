@@ -10,13 +10,14 @@ filters what gets stored at all.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.dedupe import dedupe_key_for
 from app.models import JobPosting, MatchResult, Profile, ScrapeRun
 from app.schemas.common import dump_json_list, parse_json_list
 from app.services import matcher_service, source_packs
@@ -99,6 +100,18 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
             if before != len(jobs):
                 logger.info("[%s] location filter: %d -> %d jobs", source_name, before, len(jobs))
 
+            # Freshness gate — postings older than MAX_POSTING_AGE_DAYS
+            # are almost certainly closed; never store them
+            max_age = timedelta(days=settings.MAX_POSTING_AGE_DAYS)
+            fresh = len(jobs)
+            jobs = [
+                nj
+                for nj in jobs
+                if nj.published_at is None or nj.published_at >= datetime.utcnow() - max_age
+            ]
+            if fresh != len(jobs):
+                logger.info("[%s] freshness gate: %d -> %d jobs", source_name, fresh, len(jobs))
+
             # Language gate — postings in languages the user doesn't speak
             # are dropped before storing (English always passes)
             before = len(jobs)
@@ -119,6 +132,7 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
             posting = JobPosting(
                 source=nj.source,
                 source_id=nj.source_id,
+                dedupe_key=dedupe_key_for(nj.title, nj.company, nj.location),
                 title=nj.title[:500],
                 company=nj.company,
                 location=nj.location,
@@ -167,7 +181,10 @@ def _job_exists(db: Session, nj: NormalizedJob) -> bool:
         exists = db.query(JobPosting.id).filter(JobPosting.url == nj.url[:1000]).first()
         if exists:
             return True
-    return False
+    # Cross-board duplicate: same normalized title+company already stored
+    key = dedupe_key_for(nj.title, nj.company, nj.location)
+    exists = db.query(JobPosting.id).filter(JobPosting.dedupe_key == key).first()
+    return bool(exists)
 # NOTE: autoflush is off, so same-run adds are invisible to these queries.
 # We flush each posting immediately to make same-run dedup work.
 
@@ -211,6 +228,8 @@ def run_pipeline(
                 }
             )
 
+        _maintenance_sweeps(db)
+
         match_summary = None
         if match:
             try:
@@ -243,3 +262,37 @@ def run_pipeline(
         }
     finally:
         db.close()
+
+
+def _maintenance_sweeps(db: Session) -> None:
+    """Queue hygiene: expire stale unmatched postings and auto-pass stale
+    pending matches. Runs inside every pipeline run."""
+    now = datetime.utcnow()
+
+    stale_cutoff = now - timedelta(days=settings.MAX_POSTING_AGE_DAYS)
+    stale_new = (
+        db.query(JobPosting)
+        .filter(JobPosting.status == "new", JobPosting.published_at < stale_cutoff)
+        .all()
+    )
+    for job in stale_new:
+        job.status = "dismissed"
+    if stale_new:
+        logger.info("Sweep: dismissed %d stale unmatched postings", len(stale_new))
+
+    old_cutoff = now - timedelta(days=settings.MATCH_STALE_DAYS)
+    old_pending = (
+        db.query(MatchResult)
+        .filter(MatchResult.decision.is_(None))
+        .filter(MatchResult.created_at < old_cutoff)
+        .all()
+    )
+    for m in old_pending:
+        m.decision = "rejected"
+        m.decided_at = now
+        job = db.query(JobPosting).get(m.job_id)
+        if job and job.status == "matched":
+            job.status = "rejected"
+    if old_pending:
+        logger.info("Sweep: auto-passed %d pending matches older than %dd", len(old_pending), settings.MATCH_STALE_DAYS)
+    db.commit()

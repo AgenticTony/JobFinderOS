@@ -39,6 +39,9 @@ class Settings(BaseSettings):
 
     # Matching
     MAX_JOBS_PER_MATCH_RUN: int = 25  # glm-4.6 no-thinking: ~5-10s per job
+    MATCH_KEEP_MIN_SCORE: int = 25  # below this a match never enters the queue
+    MATCH_STALE_DAYS: int = 30  # pending matches older than this are auto-passed
+    MAX_POSTING_AGE_DAYS: int = 30  # postings older than this are never stored
     MATCH_TIME_BUDGET_SECONDS: int = 420  # hard stop; frontend pipeline timeout is 600s
 
     # Scraping

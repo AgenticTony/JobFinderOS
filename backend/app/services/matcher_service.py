@@ -96,6 +96,32 @@ def run_matching(
             j for j in unmatched if passes_language_filter(j.title, j.description, languages)
         ]
 
+    # Cross-board duplicate gate: if another posting with the same
+    # title+company key already has a match, dismiss this copy instead of
+    # paying for the same job twice
+    from app.core.dedupe import dedupe_key_for
+
+    matched_keys = {
+        row[0]
+        for row in db.query(JobPosting.dedupe_key)
+        .join(MatchResult, MatchResult.job_id == JobPosting.id)
+        .filter(JobPosting.dedupe_key.isnot(None))
+        .all()
+    }
+    deduped = []
+    for j in unmatched:
+        key = j.dedupe_key or dedupe_key_for(j.title, j.company, j.location)
+        if key in matched_keys:
+            j.status = "dismissed"
+            db.add(j)
+            deduped.append(j)
+        else:
+            matched_keys.add(key)  # also guards duplicates within this batch
+    if deduped:
+        db.commit()
+        logger.info("Dedupe gate: dismissed %d cross-board duplicates", len(deduped))
+    unmatched = [j for j in unmatched if j not in deduped]
+
     deadline = time.time() + max_seconds
     matches_created = 0
     try:
@@ -133,6 +159,13 @@ def run_matching(
                 continue  # leave as 'new' for the next run
 
             elapsed_ms = int((time.time() - started) * 1000)
+            if result["score"] < settings.MATCH_KEEP_MIN_SCORE:
+                # Too weak for the queue — count it as seen and move on;
+                # no MatchResult row, so it never clutters decisions
+                job.status = "dismissed"
+                db.add(job)
+                db.commit()
+                continue
             match = MatchResult(
                 job_id=job.id,
                 score=result["score"],

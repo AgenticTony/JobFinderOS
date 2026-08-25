@@ -29,6 +29,7 @@ class JobPosting(Base):
     company = Column(String(255), nullable=True)
     location = Column(String(255), nullable=True)
     remote = Column(Integer, default=0, nullable=False)  # 1/0
+    dedupe_key = Column(String(16), nullable=True, index=True)  # cross-board title+company key
     url = Column(String(1000), nullable=False)  # job posting URL
     description = Column(Text, nullable=True)  # Full job description text
     employment_type = Column(String(50), nullable=True)  # full-time, part-time, contract
