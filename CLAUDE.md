@@ -179,6 +179,18 @@ tabs Dashboard / Matches / Applications (draft review + sent history) / Profile.
   matches) for conversion; LTV ~£20–45 → organic acquisition channels only (AF-adjacent).
   Shared job data + per-query scrape caching keeps DB and free API tiers viable at scale.
 
+## Model bake-off (measured 2026-08-25, real CV + 3 jobs, thinking disabled)
+
+glm-4.6: 7-11s/call, 3 concurrent, ~29k calls/day capacity. Scores: 88/20/8.
+glm-5.1: ~6.2s/call, 10 concurrent, ~139k/day. Scores 72/22/8 — ordering preserved,
+systematically lower (thresholds are calibrated to 4.6; recalibrate before switching).
+glm-5.2: ~6s, 10 concurrent. 62/18/8 — lower still.
+glm-4-plus: 429 insufficient quota on current plan — unavailable.
+Decision: matcher stays 4.6 until ~3-5k users (embeddings-filtered load);
+upgrade path = batch-5-per-call -> glm-5.1 with threshold recalibration (A/B over
+~50 stored jobs with known decisions) -> Z.ai tier bump. 5.1 goes first to the
+interactive/tailoring lane when adopted.
+
 ## Pipeline gates & hygiene (all enforced every run)
 
 Scrape-time gates (in order): location (area pass; remote/locationless only when
