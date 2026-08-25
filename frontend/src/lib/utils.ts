@@ -7,17 +7,17 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const TIER_CONFIG: Record<Tier, { label: string; color: string; ring: string }> = {
-  excellent_match: { label: 'Excellent Match', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', ring: 'text-emerald-400' },
-  good_match: { label: 'Good Match', color: 'bg-sky-500/15 text-sky-400 border-sky-500/30', ring: 'text-sky-400' },
-  stretch: { label: 'Stretch', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30', ring: 'text-amber-400' },
-  poor_match: { label: 'Poor Match', color: 'bg-rose-500/15 text-rose-400 border-rose-500/30', ring: 'text-rose-400' },
+  excellent_match: { label: 'Excellent Match', color: 'bg-ok/15 text-ok border-ok/30', ring: 'text-ok' },
+  good_match: { label: 'Good Match', color: 'bg-info/15 text-info border-info/30', ring: 'text-info' },
+  stretch: { label: 'Stretch', color: 'bg-signal/15 text-signal border-signal/30', ring: 'text-signal' },
+  poor_match: { label: 'Poor Match', color: 'bg-bad/15 text-bad border-bad/30', ring: 'text-bad' },
 };
 
 export function scoreColor(score: number): string {
-  if (score >= 80) return 'text-emerald-400';
-  if (score >= 50) return 'text-sky-400';
-  if (score >= 30) return 'text-amber-400';
-  return 'text-rose-400';
+  if (score >= 80) return 'text-ok';
+  if (score >= 50) return 'text-info';
+  if (score >= 30) return 'text-signal';
+  return 'text-bad';
 }
 
 export function timeAgo(iso: string): string {

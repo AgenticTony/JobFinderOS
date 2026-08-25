@@ -1,14 +1,14 @@
 'use client';
 
-// JobFinderOS dashboard — the job hunter's operating system.
+// JobFinderOS — the hunting console.
 // Pipeline: scrape -> match vs CV -> approve -> tailor CV & cover letter -> review -> send.
+// Shell: left sidebar (nav + live hunt status) on md+, compact top bar on mobile.
+// Landing view is the Dashboard: Hunt Pulse funnel + next decisions + status rail.
 
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   AlertTriangle,
-  Briefcase,
-  ClipboardList,
   Copy,
   Cpu,
   Download,
@@ -22,12 +22,13 @@ import {
   Radar,
   Save,
   Send,
-  User,
 } from 'lucide-react';
 import CvUpload from '@/components/CvUpload';
 import MatchCard from '@/components/MatchCard';
 import OnboardingWizard from '@/components/OnboardingWizard';
-import StatCard from '@/components/StatCard';
+import Sidebar, { NAV, type View } from '@/components/Sidebar';
+import HuntPulse from '@/components/HuntPulse';
+import NextHunt, { LiveDot } from '@/components/NextHunt';
 import {
   decideMatch,
   draftCoverLetterPdfUrl,
@@ -54,16 +55,16 @@ import type {
   Match,
   OnboardingPayload,
   PipelineRunResponse,
+  PipelineStatusResponse,
   Profile,
   ProfileStatus,
 } from '@/types';
 import { cn, timeAgo } from '@/lib/utils';
 
-type Tab = 'dashboard' | 'matches' | 'applications' | 'profile';
-
 export default function Home() {
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [view, setView] = useState<View>('dashboard');
   const [status, setStatus] = useState<ProfileStatus | null>(null);
+  const [pipeStatus, setPipeStatus] = useState<PipelineStatusResponse | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [drafts, setDrafts] = useState<ApplicationDraft[]>([]);
@@ -76,9 +77,14 @@ export default function Home() {
   const [showWizard, setShowWizard] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [statusRes, profileRes] = await Promise.allSettled([getProfileStatus(), getProfile()]);
+    const [statusRes, profileRes, pipeRes] = await Promise.allSettled([
+      getProfileStatus(),
+      getProfile(),
+      getPipelineStatus(),
+    ]);
     if (statusRes.status === 'fulfilled') setStatus(statusRes.value);
     if (profileRes.status === 'fulfilled') setProfile(profileRes.value);
+    if (pipeRes.status === 'fulfilled') setPipeStatus(pipeRes.value);
     const [matchRes, draftRes, appsRes] = await Promise.all([
       getMatches({ limit: 200 }).catch(() => []),
       getDrafts().catch(() => []),
@@ -94,6 +100,14 @@ export default function Home() {
     refresh();
   }, [refresh]);
 
+  // Keep the countdown and source health fresh without hammering the API
+  useEffect(() => {
+    const id = setInterval(() => {
+      getPipelineStatus().then(setPipeStatus).catch(() => {});
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   // While background matching runs, poll status + stream fresh matches in
   useEffect(() => {
     if (!matchPolling) return;
@@ -103,6 +117,7 @@ export default function Home() {
           getPipelineStatus(),
           getMatches({ limit: 200 }),
         ]);
+        setPipeStatus(st);
         setStatus((prev) => (prev ? { ...prev, stats: st.stats } : prev));
         setMatches(ms);
         if (!st.matching_running) {
@@ -167,7 +182,7 @@ export default function Home() {
 
   const handlePrepare = async (jobId: number) => {
     await prepareDraft(jobId); // tailors CV + cover letter (~5-20s)
-    setTab('applications'); // take the user straight to the review stage
+    setView('applications'); // take the user straight to the review stage
     await refresh();
   };
 
@@ -181,179 +196,188 @@ export default function Home() {
     return true;
   });
 
-  const stats = status?.stats;
+  const stats = pipeStatus?.stats ?? status?.stats;
+  const openDrafts = drafts.filter((d) => d.status !== 'submitted').length;
+  const hunting = pipelineBusy || matchPolling;
+  const pendingCount = stats?.matches_pending_decision ?? 0;
+
+  const huntButton = (compact: boolean) => (
+    <button
+      onClick={handleRunPipeline}
+      disabled={hunting}
+      aria-busy={hunting}
+      title="Scrape all sources and rank new jobs against your CV"
+      className={cn(
+        'inline-flex items-center justify-center gap-2 rounded-lg bg-signal font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-60',
+        compact ? 'h-9 w-9 shrink-0' : 'w-full px-3 py-2.5 text-sm'
+      )}
+    >
+      {hunting ? (
+        <Loader2 className={cn('animate-spin', compact ? 'h-4 w-4' : 'h-4 w-4')} />
+      ) : (
+        <Play className={cn(compact ? 'h-4 w-4' : 'h-4 w-4')} aria-hidden />
+      )}
+      {!compact && (
+        <span className="hidden lg:inline">
+          {pipelineBusy ? 'Hunting…' : matchPolling ? 'Matching in background…' : 'Hunt now'}
+        </span>
+      )}
+      {compact && <span className="sr-only">Hunt now — run the pipeline</span>}
+    </button>
+  );
 
   return (
-    <div className="os-backdrop min-h-screen text-zinc-100">
-      <div className="mx-auto max-w-6xl px-4 pb-16 pt-8">
-        {/* Header */}
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-violet-600">
-              <Radar className="h-6 w-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight">JobFinderOS</h1>
-              <p className="text-xs text-zinc-500">
-                scrape → match → approve → tailor → review → send · powered by the TalentHive engine
-              </p>
-            </div>
+    <div className="console-backdrop min-h-dvh bg-ink text-hi">
+      {/* Mobile top bar (sidebar takes over from md) */}
+      <header className="sticky top-0 z-40 border-b border-line bg-ink/85 backdrop-blur md:hidden">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <Radar className="h-5 w-5 text-signal" aria-hidden />
+            <span className="font-semibold tracking-tight">JobFinderOS</span>
           </div>
-          <button
-            onClick={handleRunPipeline}
-            disabled={pipelineBusy || matchPolling}
-            className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-600/20 transition hover:bg-sky-500 disabled:opacity-60"
-          >
-            {pipelineBusy || matchPolling ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="h-4 w-4" />
-            )}
-            {pipelineBusy
-              ? 'Scraping job sites…'
-              : matchPolling
-                ? 'AI matching in background…'
-                : 'Run Pipeline'}
-          </button>
-        </header>
-
-        {/* Readiness warnings */}
-        {status && !loading && (
-          <div className="mb-6 space-y-2">
-            {!status.has_profile && (
-              <Warning>
-                No CV on file — upload your CV in the <b>Profile</b> tab to enable AI matching.
-              </Warning>
-            )}
-            {!status.ai_enabled && (
-              <Warning>
-                <Cpu className="mr-1.5 inline h-4 w-4" />
-                GLM_API_KEY not set on the backend — set it in <code>backend/.env</code> (your
-                TalentHive key works) to enable AI matching.
-              </Warning>
-            )}
-            {/* Email-apply config is deliberately NOT banner-warned: the platform's
-                email path is Composio connected-email (see CLAUDE.md decided
-                architecture), and the draft card already shows a precise error at
-                submit time if Resend keys are missing. Warn at the action, not
-                permanently. */}
-          </div>
-        )}
-
-        {/* Tabs */}
-        <nav className="mb-6 flex gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1">
-          {(
-            [
-              ['dashboard', 'Dashboard', <Briefcase key="i" className="h-4 w-4" />],
-              ['matches', 'Matches', <ClipboardList key="i" className="h-4 w-4" />],
-              ['applications', 'Applications', <Send key="i" className="h-4 w-4" />],
-              ['profile', 'Profile', <User key="i" className="h-4 w-4" />],
-            ] as [Tab, string, React.ReactNode][]
-          ).map(([id, label, icon]) => (
+          {huntButton(true)}
+        </div>
+        <nav className="flex border-t border-line" aria-label="Main">
+          {NAV.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id)}
+              onClick={() => setView(id)}
+              aria-current={view === id ? 'page' : undefined}
               className={cn(
-                'flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition',
-                tab === id ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium',
+                view === id ? 'text-signal' : 'text-low hover:text-mid'
               )}
             >
-              {icon}
+              {view === id && <span className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-signal" />}
+              <Icon className="h-[18px] w-[18px]" aria-hidden />
               {label}
-              {id === 'matches' && stats?.matches_pending_decision ? (
-                <span className="rounded-full bg-sky-500/20 px-1.5 text-xs text-sky-300">
-                  {stats.matches_pending_decision}
+              {id === 'matches' && pendingCount > 0 && (
+                <span className="num absolute right-3 top-1.5 rounded-full bg-signal/15 px-1.5 text-[10px] text-signal">
+                  {pendingCount}
                 </span>
-              ) : null}
+              )}
             </button>
           ))}
         </nav>
+      </header>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-24 text-zinc-500">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your OS…
-          </div>
-        ) : (
-          <motion.main key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-            {tab === 'dashboard' && (
-              <DashboardView
-                stats={stats}
-                pipelineResult={pipelineResult}
-                pipelineBusy={pipelineBusy}
-                matchPolling={matchPolling}
-                onOpenMatches={() => setTab('matches')}
-                topMatches={pipelineResult?.top_matches ?? []}
-                onDecision={handleDecision}
-                onPrepare={handlePrepare}
-                preparedJobIds={preparedJobIds}
-              />
-            )}
+      <div className="md:flex">
+        <Sidebar
+          view={view}
+          onNavigate={setView}
+          pendingCount={pendingCount}
+          nextRunAt={pipeStatus?.next_run_at ?? null}
+          schedulerEnabled={pipeStatus?.scheduler_enabled ?? false}
+          intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
+          profile={profile}
+          onEditSetup={() => (profile ? setShowWizard(true) : setView('profile'))}
+        >
+          {huntButton(false)}
+        </Sidebar>
 
-            {tab === 'matches' && (
-              <section>
-                <div className="mb-4 flex gap-2">
-                  {(
-                    [
-                      ['pending', 'Awaiting my decision'],
-                      ['approved', 'Approved'],
-                      ['all', 'All'],
-                    ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      onClick={() => setMatchesFilter(id)}
-                      className={cn(
-                        'rounded-lg px-3 py-1.5 text-sm transition',
-                        matchesFilter === id
-                          ? 'bg-white/10 text-zinc-100'
-                          : 'text-zinc-500 hover:text-zinc-300'
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {filteredMatches.length === 0 ? (
-                  <Empty
-                    icon={<Inbox className="h-8 w-8" />}
-                    title="No matches here yet"
-                    body="Run the pipeline to scrape job sites and match them against your CV."
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 md:py-8 lg:px-10">
+          <div className="mx-auto max-w-5xl">
+            {loading ? (
+              <div className="flex items-center justify-center py-24 text-low">
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Warming up the console…
+              </div>
+            ) : (
+              <motion.div
+                key={view}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+              >
+                {view === 'dashboard' && (
+                  <DashboardView
+                    stats={stats}
+                    pipeStatus={pipeStatus}
+                    pipelineResult={pipelineResult}
+                    pipelineBusy={pipelineBusy}
+                    matchPolling={matchPolling}
+                    profileStatus={status}
+                    openDrafts={openDrafts}
+                    onOpenMatches={() => setView('matches')}
+                    onOpenApplications={() => setView('applications')}
+                    onHunt={handleRunPipeline}
+                    pendingMatches={matches.filter((m) => !m.decision)}
+                    onDecision={handleDecision}
+                    onPrepare={handlePrepare}
+                    preparedJobIds={preparedJobIds}
                   />
-                ) : (
-                  <div className="space-y-3">
-                    {filteredMatches.map((m) => (
-                      <MatchCard
-                        key={m.id}
-                        match={m}
-                        onDecision={handleDecision}
-                        onPrepare={handlePrepare}
-                        prepared={preparedJobIds.has(m.job_id)}
-                      />
-                    ))}
-                  </div>
                 )}
-              </section>
-            )}
 
-            {tab === 'applications' && (
-              <ApplicationsView
-                drafts={drafts}
-                applications={applications}
-                onChanged={refresh}
-                onPrepare={handlePrepare}
-              />
-            )}
+                {view === 'matches' && (
+                  <section>
+                    <ViewHeader
+                      title="Matches"
+                      sub="Every job the AI has ranked against your CV. Approve the ones worth your time."
+                    />
+                    <div className="mb-5 inline-flex rounded-lg border border-line bg-ink p-1">
+                      {(
+                        [
+                          ['pending', 'Awaiting my decision'],
+                          ['approved', 'Approved'],
+                          ['all', 'All'],
+                        ] as const
+                      ).map(([id, label]) => (
+                        <button
+                          key={id}
+                          onClick={() => setMatchesFilter(id)}
+                          className={cn(
+                            'rounded-md px-3 py-1.5 text-sm transition-colors',
+                            matchesFilter === id
+                              ? 'bg-surface-2 text-hi'
+                              : 'text-low hover:text-mid'
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {filteredMatches.length === 0 ? (
+                      <Empty
+                        icon={<Inbox className="h-8 w-8" />}
+                        title="No matches here yet"
+                        body="Hunt now to scrape job sites and match them against your CV."
+                      />
+                    ) : (
+                      <div className="space-y-3">
+                        {filteredMatches.map((m) => (
+                          <MatchCard
+                            key={m.id}
+                            match={m}
+                            onDecision={handleDecision}
+                            onPrepare={handlePrepare}
+                            prepared={preparedJobIds.has(m.job_id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                )}
 
-            {tab === 'profile' && (
-              <ProfileView
-                profile={profile}
-                onUpload={handleUpload}
-                onSaved={refresh}
-                onEditSetup={() => setShowWizard(true)}
-              />
+                {view === 'applications' && (
+                  <ApplicationsView
+                    drafts={drafts}
+                    applications={applications}
+                    onChanged={refresh}
+                    onPrepare={handlePrepare}
+                  />
+                )}
+
+                {view === 'profile' && (
+                  <ProfileView
+                    profile={profile}
+                    onUpload={handleUpload}
+                    onSaved={refresh}
+                    onEditSetup={() => setShowWizard(true)}
+                  />
+                )}
+              </motion.div>
             )}
-          </motion.main>
-        )}
+          </div>
+        </main>
       </div>
 
       {/* Onboarding wizard — auto-shows until setup is done, re-openable anytime */}
@@ -364,7 +388,206 @@ export default function Home() {
   );
 }
 
+// ---------------- Dashboard ----------------
+
+function DashboardView({
+  stats,
+  pipeStatus,
+  pipelineResult,
+  pipelineBusy,
+  matchPolling,
+  profileStatus,
+  openDrafts,
+  onOpenMatches,
+  onOpenApplications,
+  onHunt,
+  pendingMatches,
+  onDecision,
+  onPrepare,
+  preparedJobIds,
+}: {
+  stats: ProfileStatus['stats'] | undefined;
+  pipeStatus: PipelineStatusResponse | null;
+  pipelineResult: PipelineRunResponse | null;
+  pipelineBusy: boolean;
+  matchPolling: boolean;
+  profileStatus: ProfileStatus | null;
+  openDrafts: number;
+  onOpenMatches: () => void;
+  onOpenApplications: () => void;
+  onHunt: () => void;
+  pendingMatches: Match[];
+  onDecision: (matchId: number, decision: 'approved' | 'rejected') => Promise<void>;
+  onPrepare: (jobId: number) => Promise<void>;
+  preparedJobIds: Set<number>;
+}) {
+  const decisions = [...pendingMatches].sort((a, b) => b.score - a.score).slice(0, 5);
+  const matchFailed = pipelineResult?.match?.status === 'failed';
+  const lastRuns = (pipeStatus?.recent_runs ?? []).slice(0, 6);
+
+  return (
+    <section className="space-y-6">
+      <HuntPulse
+        stats={stats}
+        openDrafts={openDrafts}
+        matchingRunning={matchPolling}
+        onOpenMatches={onOpenMatches}
+        onOpenApplications={onOpenApplications}
+      />
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+        {/* Next decisions — the main column */}
+        <div>
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="font-semibold tracking-tight text-hi">
+              Next decisions
+              {decisions.length > 0 && (
+                <span className="num ml-2 text-sm font-normal text-low">{decisions.length}</span>
+              )}
+            </h2>
+            {pendingMatches.length > 0 && (
+              <button
+                onClick={onOpenMatches}
+                className="text-sm text-signal transition-colors hover:text-signal/80"
+              >
+                View all matches →
+              </button>
+            )}
+          </div>
+          {decisions.length > 0 ? (
+            <div className="space-y-3">
+              {decisions.map((m) => (
+                <MatchCard
+                  key={m.id}
+                  match={m}
+                  onDecision={onDecision}
+                  onPrepare={onPrepare}
+                  prepared={preparedJobIds.has(m.job_id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <Empty
+              icon={<Radar className="h-8 w-8" />}
+              title={
+                pipelineBusy
+                  ? 'Scraping job sites…'
+                  : matchPolling
+                    ? 'AI is ranking jobs for you…'
+                    : 'Nothing waiting on you'
+              }
+              body={
+                pipelineBusy
+                  ? 'Fetching new postings from all sources.'
+                  : matchPolling
+                    ? 'Each job takes ~20-60s to score — matches appear live below as they finish.'
+                    : 'When the next hunt finds matches worth your attention, they land here for a yes or no.'
+              }
+            />
+          )}
+        </div>
+
+        {/* Status rail */}
+        <aside className="space-y-4">
+          {/* Blockers first */}
+          {profileStatus && !profileStatus.has_profile && (
+            <Warning>
+              No CV on file — upload your CV in <b>Profile</b> to enable AI matching.
+            </Warning>
+          )}
+          {profileStatus && !profileStatus.ai_enabled && (
+            <Warning>
+              <Cpu className="mr-1.5 inline h-4 w-4" />
+              GLM_API_KEY not set on the backend — set it in <code>backend/.env</code> to enable AI
+              matching.
+            </Warning>
+          )}
+          {matchFailed && pipelineResult?.match?.error && (
+            <Warning>Last hunt failed: {pipelineResult.match.error}</Warning>
+          )}
+          {/* Email-apply config is deliberately NOT banner-warned: the platform's
+              email path is Composio connected-email (see CLAUDE.md decided
+              architecture), and the draft card already shows a precise error at
+              submit time if Resend keys are missing. Warn at the action, not
+              permanently. */}
+
+          {/* The schedule */}
+          <div className="rounded-xl border border-line bg-surface/80 p-4">
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-low">
+              Automatic hunts
+            </p>
+            <div className="mt-2 flex items-center gap-2.5">
+              <LiveDot />
+              <NextHunt
+                nextRunAt={pipeStatus?.next_run_at ?? null}
+                schedulerEnabled={pipeStatus?.scheduler_enabled ?? false}
+                intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
+              />
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-low">
+              {pipeStatus?.scheduler_enabled
+                ? `The console hunts by itself every ${Math.round((pipeStatus?.scrape_interval_minutes ?? 180) / 60)}h — new jobs are scraped, deduplicated, and scored while you're away.`
+                : 'Automatic hunts are off. Start one yourself whenever you like.'}
+            </p>
+            {matchPolling && (
+              <p className="mt-2 text-xs text-signal" role="status">
+                Matching now — results stream into “Next decisions”…
+              </p>
+            )}
+          </div>
+
+          {/* Source health */}
+          {lastRuns.length > 0 && (
+            <div className="rounded-xl border border-line bg-surface/80 p-4">
+              <p className="mb-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-low">
+                Last hunt · sources
+              </p>
+              <div className="space-y-1.5">
+                {lastRuns.map((r, i) => (
+                  <div key={`${r.source}-${i}`} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate text-mid">{r.source}</span>
+                    <span
+                      className={cn(
+                        'num shrink-0',
+                        r.status === 'completed'
+                          ? 'text-ok'
+                          : 'text-bad'
+                      )}
+                      title={r.error ?? undefined}
+                    >
+                      {r.status === 'completed' ? `${r.jobs_found}↑ ${r.jobs_new}+` : 'failed'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Manual trigger for wide screens without sidebar visibility? No —
+              sidebar always has it; keep a quiet text link for convenience. */}
+          <button
+            onClick={onHunt}
+            disabled={pipelineBusy || matchPolling}
+            className="text-xs text-low transition-colors hover:text-signal disabled:opacity-50"
+          >
+            Can&apos;t wait? Hunt now →
+          </button>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
 // ---------------- Applications (draft review + sent history) ----------------
+
+function ViewHeader({ title, sub }: { title: string; sub: string }) {
+  return (
+    <div className="mb-5">
+      <h1 className="text-lg font-semibold tracking-tight text-hi">{title}</h1>
+      <p className="mt-0.5 text-sm text-mid">{sub}</p>
+    </div>
+  );
+}
 
 function ApplicationsView({
   drafts,
@@ -379,19 +602,18 @@ function ApplicationsView({
   const openDrafts = drafts.filter((d) => d.status !== 'submitted');
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       {/* Stage 1: drafted applications awaiting review */}
       <section>
-        <h2 className="mb-1 font-semibold text-zinc-200">Review before sending</h2>
-        <p className="mb-4 text-sm text-zinc-500">
-          AI tailored your CV and cover letter to each approved job. Read, edit if you want, then
-          send. Nothing goes out without you.
-        </p>
+        <ViewHeader
+          title="Review before sending"
+          sub="AI tailored your CV and cover letter to each approved job. Read, edit if you want, then send. Nothing goes out without you."
+        />
         {openDrafts.length === 0 ? (
           <Empty
             icon={<FileText className="h-8 w-8" />}
             title="No drafts waiting"
-            body="Approve a match in the Matches tab and press 'Prepare application' — the AI will tailor your CV and cover letter for that job."
+            body="Approve a match and press “Prepare application” — the AI will tailor your CV and cover letter for that job."
           />
         ) : (
           <div className="space-y-3">
@@ -404,7 +626,7 @@ function ApplicationsView({
 
       {/* Stage 2: sent history */}
       <section>
-        <h2 className="mb-4 font-semibold text-zinc-200">Sent applications</h2>
+        <ViewHeader title="Sent applications" sub="Everything you've released — by email or through a browser." />
         {applications.length === 0 ? (
           <Empty
             icon={<Send className="h-8 w-8" />}
@@ -416,24 +638,24 @@ function ApplicationsView({
             {applications.map((a) => (
               <div
                 key={a.id}
-                className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4"
+                className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface/80 p-4"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-zinc-100">
+                  <p className="truncate font-medium text-hi">
                     {a.job?.title ?? `Job #${a.job_id}`}
                   </p>
-                  <p className="text-sm text-zinc-500">
+                  <p className="text-sm text-low">
                     {a.job?.company} · {a.method} · {timeAgo(a.created_at)}
                   </p>
-                  {a.error && <p className="mt-1 text-sm text-rose-400">{a.error}</p>}
+                  {a.error && <p className="mt-1 text-sm text-bad">{a.error}</p>}
                 </div>
                 <span
                   className={cn(
                     'rounded-full px-2.5 py-1 text-xs font-medium',
-                    a.status === 'sent' && 'bg-emerald-500/15 text-emerald-400',
-                    a.status === 'manual_pending' && 'bg-amber-500/15 text-amber-400',
-                    a.status === 'failed' && 'bg-rose-500/15 text-rose-400',
-                    a.status === 'queued' && 'bg-zinc-500/15 text-zinc-400'
+                    a.status === 'sent' && 'bg-ok/15 text-ok',
+                    a.status === 'manual_pending' && 'bg-signal/15 text-signal',
+                    a.status === 'failed' && 'bg-bad/15 text-bad',
+                    a.status === 'queued' && 'bg-surface-2 text-mid'
                   )}
                 >
                   {a.status === 'sent' ? 'sent ✓' : a.status.replace('_', ' ')}
@@ -443,7 +665,7 @@ function ApplicationsView({
                     href={a.apply_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-sm text-zinc-300 hover:bg-white/5"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
                   >
                     <ExternalLink className="h-4 w-4" /> Open posting
                   </a>
@@ -454,7 +676,7 @@ function ApplicationsView({
                       await retryApplication(a.id);
                       onChanged();
                     }}
-                    className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+                    className="rounded-lg bg-signal px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-signal/90"
                   >
                     Retry
                   </button>
@@ -534,41 +756,41 @@ function DraftCard({
   };
 
   return (
-    <div className="rounded-xl border border-sky-500/20 bg-white/[0.03] p-4">
+    <div className="rounded-xl border border-line bg-surface/80 p-4">
       {/* Header */}
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="min-w-0 flex-1 truncate font-semibold text-zinc-100">
+        <h3 className="min-w-0 flex-1 truncate font-semibold text-hi">
           {job?.title ?? `Job #${draft.job_id}`}
-          <span className="ml-2 text-sm font-normal text-zinc-500">{job?.company}</span>
+          <span className="ml-2 text-sm font-normal text-low">{job?.company}</span>
         </h3>
         {draft.status === 'drafting' && (
-          <span className="rounded-full bg-zinc-500/15 px-2.5 py-1 text-xs text-zinc-400">
+          <span className="inline-flex items-center rounded-full bg-surface-2 px-2.5 py-1 text-xs text-mid">
             <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> tailoring…
           </span>
         )}
         {draft.status === 'ready' && (
-          <span className="rounded-full bg-sky-500/15 px-2.5 py-1 text-xs text-sky-400">
+          <span className="rounded-full bg-signal/15 px-2.5 py-1 text-xs text-signal">
             ready for your review
           </span>
         )}
         {draft.status === 'failed' && (
-          <span className="rounded-full bg-rose-500/15 px-2.5 py-1 text-xs text-rose-400">failed</span>
+          <span className="rounded-full bg-bad/15 px-2.5 py-1 text-xs text-bad">failed</span>
         )}
       </div>
 
       {draft.status === 'failed' && draft.error && (
-        <p className="mt-2 text-sm text-rose-400">{draft.error}</p>
+        <p className="mt-2 text-sm text-bad">{draft.error}</p>
       )}
 
       {/* What the AI changed */}
       {draft.changes_summary.length > 0 && (
-        <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
-          <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <div className="mt-3 rounded-lg border border-line bg-ink/60 p-3">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
             What the AI changed for this application
           </p>
           <ul className="space-y-1">
             {draft.changes_summary.map((c, i) => (
-              <li key={i} className="text-sm text-zinc-400">
+              <li key={i} className="text-sm text-mid">
                 • {c}
               </li>
             ))}
@@ -581,19 +803,19 @@ function DraftCard({
           {/* Cover letter editor */}
           <div className="mt-4">
             <div className="mb-1.5 flex items-center justify-between">
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
                 Cover letter (sent to the employer)
               </p>
               <div className="flex items-center gap-3">
                 <button
                   onClick={copyCoverLetter}
-                  className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300"
+                  className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                 >
                   <Copy className="h-3.5 w-3.5" /> Copy
                 </button>
                 <button
                   onClick={() => download('cover-letter')}
-                  className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300"
+                  className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                 >
                   <Download className="h-3.5 w-3.5" /> PDF
                 </button>
@@ -606,19 +828,19 @@ function DraftCard({
                 setDirty(true);
               }}
               rows={10}
-              className="w-full rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-sm leading-relaxed outline-none focus:border-sky-500"
+              className="w-full rounded-lg border border-line bg-ink p-3 font-mono text-sm leading-relaxed text-hi outline-none transition-colors focus:border-signal"
             />
           </div>
 
           {/* Tailored CV editor */}
           <div className="mt-4">
             <div className="mb-1.5 flex items-center justify-between">
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
                 Your CV, tailored for this job
               </p>
               <button
                 onClick={() => download('cv')}
-                className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300"
+                className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
               >
                 <Download className="h-3.5 w-3.5" /> PDF
               </button>
@@ -630,12 +852,14 @@ function DraftCard({
                 setDirty(true);
               }}
               rows={16}
-              className="w-full rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-sm leading-relaxed outline-none focus:border-sky-500"
+              className="w-full rounded-lg border border-line bg-ink p-3 font-mono text-sm leading-relaxed text-hi outline-none transition-colors focus:border-signal"
             />
           </div>
 
           {submitError && (
-            <p className="mt-3 rounded-lg bg-rose-500/10 p-3 text-sm text-rose-300">{submitError}</p>
+            <p className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
+              {submitError}
+            </p>
           )}
 
           {/* Actions */}
@@ -643,29 +867,29 @@ function DraftCard({
             <button
               onClick={save}
               disabled={!dirty || busy !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-3.5 py-2 text-sm text-zinc-300 transition hover:bg-white/5 disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-40"
             >
               <Save className="h-4 w-4" /> {busy === 'save' ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
             </button>
 
-            <span className="mx-1 h-6 w-px bg-white/10" />
+            <span className="mx-1 h-6 w-px bg-line" />
 
             {canEmail ? (
               <button
                 onClick={() => submit('email')}
                 disabled={busy !== null}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-ok px-4 py-2 text-sm font-medium text-ink transition hover:bg-ok/90 active:scale-[0.98] disabled:opacity-50"
               >
                 <Mail className="h-4 w-4" />
                 {busy === 'submit-email' ? 'Sending…' : 'Approve & send by email'}
               </button>
             ) : (
-              <span className="text-xs text-zinc-600">no application email published</span>
+              <span className="text-xs text-low">no application email published</span>
             )}
             <button
               onClick={() => submit('browser')}
               disabled={busy !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
             >
               <MousePointerClick className="h-4 w-4" />
               {busy === 'submit-browser' ? 'Opening…' : 'Approve & apply in browser'}
@@ -674,126 +898,6 @@ function DraftCard({
         </>
       )}
     </div>
-  );
-}
-
-// ---------------- Dashboard ----------------
-
-function DashboardView({
-  stats,
-  pipelineResult,
-  pipelineBusy,
-  matchPolling,
-  onOpenMatches,
-  topMatches,
-  onDecision,
-  onPrepare,
-  preparedJobIds,
-}: {
-  stats: ProfileStatus['stats'] | undefined;
-  pipelineResult: PipelineRunResponse | null;
-  pipelineBusy: boolean;
-  matchPolling: boolean;
-  onOpenMatches: () => void;
-  topMatches: Match[];
-  onDecision: (matchId: number, decision: 'approved' | 'rejected') => Promise<void>;
-  onPrepare: (jobId: number) => Promise<void>;
-  preparedJobIds: Set<number>;
-}) {
-  return (
-    <section className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Jobs scraped" value={stats?.jobs_total ?? 0} />
-        <StatCard
-          label="Awaiting decision"
-          value={stats?.matches_pending_decision ?? 0}
-          accent="text-sky-400"
-          hint="recommended, not yet approved"
-        />
-        <StatCard label="Approved" value={stats?.jobs_approved ?? 0} accent="text-emerald-400" />
-        <StatCard label="Applied" value={stats?.jobs_applied ?? 0} accent="text-violet-400" />
-      </div>
-
-      {pipelineResult && (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-          <p className="mb-3 text-sm font-semibold text-zinc-200">Last pipeline run</p>
-          <div className="space-y-1.5">
-            {pipelineResult.scrape.map((s) => (
-              <div key={s.source} className="flex items-center justify-between text-sm">
-                <span className="text-zinc-400">{s.source}</span>
-                <span className={s.status === 'completed' ? 'text-emerald-400' : 'text-rose-400'}>
-                  {s.status === 'completed'
-                    ? `${s.jobs_found} found · ${s.jobs_new} new`
-                    : s.error ?? 'failed'}
-                </span>
-              </div>
-            ))}
-            {pipelineResult.match && (
-              <div className="flex items-center justify-between border-t border-white/5 pt-2 text-sm">
-                <span className="text-zinc-400">AI matching</span>
-                <span
-                  className={
-                    pipelineResult.match.status === 'completed' ? 'text-emerald-400' : 'text-amber-400'
-                  }
-                >
-                  {pipelineResult.match.error ??
-                    `${pipelineResult.match.matches_created} matched of ${pipelineResult.match.jobs_considered}`}
-                </span>
-              </div>
-            )}
-            {matchPolling && (
-              <div className="flex items-center justify-between border-t border-white/5 pt-2 text-sm">
-                <span className="text-zinc-400">AI matching</span>
-                <span className="inline-flex items-center gap-1.5 text-sky-400">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  running in background — matches appear live
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-semibold text-zinc-200">Top recommendations</h2>
-          <button onClick={onOpenMatches} className="text-sm text-sky-400 hover:text-sky-300">
-            View all matches →
-          </button>
-        </div>
-        {topMatches.length > 0 ? (
-          <div className="space-y-3">
-            {topMatches.slice(0, 5).map((m) => (
-              <MatchCard
-                key={m.id}
-                match={m}
-                onDecision={onDecision}
-                onPrepare={onPrepare}
-                prepared={preparedJobIds.has(m.job_id)}
-              />
-            ))}
-          </div>
-        ) : (
-          <Empty
-            icon={<Radar className="h-8 w-8" />}
-            title={
-              pipelineBusy
-                ? 'Scraping job sites…'
-                : matchPolling
-                  ? 'AI is ranking jobs for you…'
-                  : 'No recommendations yet'
-            }
-            body={
-              pipelineBusy
-                ? 'Fetching new postings from all sources.'
-                : matchPolling
-                  ? 'Each job takes ~20-60s to score — matches stream live into the Matches tab.'
-                  : 'Press "Run Pipeline" to scrape job sites and let the AI rank them for you.'
-            }
-          />
-        )}
-      </div>
-    </section>
   );
 }
 
@@ -835,38 +939,42 @@ function ProfileView({
 
   return (
     <section className="space-y-6">
+      <ViewHeader
+        title="Profile"
+        sub="Your CV is the source of truth — the original file is never modified. Tailored copies live with each application."
+      />
       <CvUpload onUploaded={onUpload} hasExistingCv={!!profile?.cv_file_name} />
 
       {profile && (
         <>
           {/* Search setup — the onboarding result, always visible/editable */}
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
+          <div className="rounded-xl border border-line bg-surface/80 p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="font-semibold text-zinc-200">Your search setup</h3>
+              <h3 className="font-semibold text-hi">Your search setup</h3>
               <button
                 onClick={onEditSetup}
-                className="rounded-lg border border-white/15 px-3 py-1.5 text-sm text-zinc-300 hover:bg-white/5"
+                className="rounded-lg border border-line px-3 py-1.5 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
               >
                 Edit setup
               </button>
             </div>
             {profile.onboarded ? (
-              <div className="grid gap-2 text-sm sm:grid-cols-2">
+              <div className="grid gap-3 text-sm sm:grid-cols-2">
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-zinc-500">Where</p>
-                  <p className="text-zinc-200">
-                    {profile.country === 'SE' ? '🇸🇪 Sweden' : profile.country === 'GB' ? '🇬🇧 United Kingdom' : profile.country}
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-low">Where</p>
+                  <p className="mt-1 text-hi">
+                    {profile.country === 'SE' ? 'Sweden' : profile.country === 'GB' ? 'United Kingdom' : profile.country}
                     {profile.municipality ? ` · ${profile.municipality}` : profile.region ? ` · ${profile.region}` : ''}
                     {profile.remote_only ? ' · remote only' : ''}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-zinc-500">
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-low">
                     Hunting for ({profile.search_queries.length} titles)
                   </p>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {profile.search_queries.map((q) => (
-                      <span key={q} className="rounded-full bg-sky-500/10 px-2 py-0.5 text-xs text-sky-300">
+                      <span key={q} className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs text-mid">
                         {q}
                       </span>
                     ))}
@@ -874,31 +982,31 @@ function ProfileView({
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-low">
                 Not set up yet — the wizard sets your country, area, and job titles from your CV.
               </p>
             )}
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
+          <div className="rounded-xl border border-line bg-surface/80 p-5">
             <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-lg font-semibold">{profile.full_name ?? 'Your profile'}</h2>
+              <h2 className="text-lg font-semibold text-hi">{profile.full_name ?? 'Your profile'}</h2>
               {profile.professional_title && (
-                <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-sm text-zinc-400">
+                <span className="rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-sm text-mid">
                   {profile.professional_title}
                 </span>
               )}
               {profile.experience_years != null && (
-                <span className="text-sm text-zinc-500">{profile.experience_years} yrs exp</span>
+                <span className="num text-sm text-low">{profile.experience_years} yrs exp</span>
               )}
             </div>
-            {profile.ai_summary && <p className="mt-2 text-sm text-zinc-400">{profile.ai_summary}</p>}
+            {profile.ai_summary && <p className="mt-2 text-sm text-mid">{profile.ai_summary}</p>}
             {profile.skills.length > 0 && (
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {profile.skills.slice(0, 20).map((s, i) => (
                   <span
                     key={`${s.name}-${i}`}
-                    className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-zinc-300"
+                    className="rounded-md border border-line bg-surface-2 px-2 py-0.5 text-xs text-mid"
                   >
                     {s.name}
                     {s.level ? ` · ${s.level}` : ''}
@@ -908,36 +1016,36 @@ function ProfileView({
             )}
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
-            <h3 className="mb-3 font-semibold text-zinc-200">Job search preferences</h3>
+          <div className="rounded-xl border border-line bg-surface/80 p-5">
+            <h3 className="mb-3 font-semibold text-hi">Job search preferences</h3>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
-                <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
                   Preferred roles (comma separated)
                 </span>
                 <input
                   value={preferredRoles}
                   onChange={(e) => setPreferredRoles(e.target.value)}
                   placeholder="Backend Developer, Python Developer"
-                  className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-sky-500"
+                  className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
                   Exclude keywords (jobs skipped)
                 </span>
                 <input
                   value={excludeKeywords}
                   onChange={(e) => setExcludeKeywords(e.target.value)}
                   placeholder="senior, scala, on-site"
-                  className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-sky-500"
+                  className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                 />
               </label>
             </div>
             <button
               onClick={save}
               disabled={saving}
-              className="mt-4 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+              className="mt-4 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
             >
               {saving ? 'Saving…' : 'Save preferences'}
             </button>
@@ -952,8 +1060,8 @@ function ProfileView({
 
 function Warning({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+    <div className="flex items-start gap-2 rounded-lg border border-bad/30 bg-bad/10 p-3 text-sm text-hi" role="alert">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-bad" />
       <div>{children}</div>
     </div>
   );
@@ -969,10 +1077,10 @@ function Empty({
   body: string;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 py-16 text-center">
-      <div className="mb-3 text-zinc-600">{icon}</div>
-      <p className="font-medium text-zinc-300">{title}</p>
-      <p className="mt-1 max-w-sm text-sm text-zinc-500">{body}</p>
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-line-2 py-16 text-center">
+      <div className="mb-3 text-low">{icon}</div>
+      <p className="font-medium text-mid">{title}</p>
+      <p className="mt-1 max-w-sm text-sm text-low">{body}</p>
     </div>
   );
 }

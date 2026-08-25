@@ -71,25 +71,25 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
         className={cn(
           'flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors',
           dragging
-            ? 'border-sky-500 bg-sky-500/5'
-            : 'border-white/15 hover:border-white/30 hover:bg-white/[0.02]'
+            ? 'border-signal bg-signal/5'
+            : 'border-line-2 hover:border-signal/50 hover:bg-surface/40'
         )}
       >
         {uploading ? (
-          <Loader2 className="h-8 w-8 animate-spin text-sky-400" />
+          <Loader2 className="h-8 w-8 animate-spin text-signal" />
         ) : hasExistingCv ? (
-          <RefreshCw className="h-8 w-8 text-zinc-400" />
+          <RefreshCw className="h-8 w-8 text-mid" />
         ) : (
-          <FileUp className="h-8 w-8 text-zinc-400" />
+          <FileUp className="h-8 w-8 text-mid" />
         )}
         <div>
-          <p className="text-sm font-medium text-zinc-200">
+          <p className="text-sm font-medium text-hi">
             {uploading
               ? statusLine
               : label ?? (hasExistingCv ? 'Replace your CV' : 'Drop your CV (PDF) here')}
           </p>
           {!uploading && (
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-low">
               PDF up to 5MB — text is extracted and profiled by AI
             </p>
           )}
@@ -102,7 +102,7 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
           onChange={(e) => handleFiles(e.target.files)}
         />
       </div>
-      {error && <p className="mt-2 text-sm text-rose-400">{error}</p>}
+      {error && <p className="mt-2 text-sm text-bad">{error}</p>}
     </div>
   );
 }

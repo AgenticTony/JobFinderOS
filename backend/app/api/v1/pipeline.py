@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.crud import get_stats, list_scrape_runs
-from app.schemas.pipeline import PipelineRunRequest, PipelineRunResponse, ScrapeSummary
-from app.schemas.match import MatchWithJobResponse
 from app.models import MatchResult
+from app.schemas.match import MatchWithJobResponse
+from app.schemas.pipeline import PipelineRunRequest, PipelineRunResponse, ScrapeSummary
 from app.services.pipeline import run_pipeline
 from app.services.scrapers import SCRAPER_REGISTRY
 
@@ -61,13 +61,16 @@ async def run(payload: PipelineRunRequest, db: Session = Depends(get_db)):
 async def status(db: Session = Depends(get_db)):
     """Dashboard readiness: source list, stats, recent scrape runs, live match flag."""
     from app.services.matcher_service import is_matching_running
+    from app.services.scheduler import get_next_run_time
 
+    next_run = get_next_run_time()
     runs = list_scrape_runs(db, limit=10)
     return {
         "sources_available": sorted(SCRAPER_REGISTRY.keys()),
         "sources_enabled": settings.get_scrape_sources(),
         "scheduler_enabled": settings.ENABLE_SCHEDULER,
         "scrape_interval_minutes": settings.SCRAPE_INTERVAL_MINUTES,
+        "next_run_at": next_run.isoformat() if next_run else None,
         "matching_running": is_matching_running(),
         "stats": get_stats(db),
         "recent_runs": [

@@ -3,7 +3,7 @@
 // Match card — expandable recommendation with the approval workflow.
 // After approval, the user prepares a tailored application (draft stage);
 // cover notes are no longer shown here — they're generated per-application
-// in the Applications tab instead.
+// in the Applications view instead.
 
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -44,33 +44,33 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
   };
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] transition-colors hover:border-white/20">
+    <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
       {/* Header row */}
       <div className="flex cursor-pointer items-center gap-4 p-4" onClick={() => setExpanded(!expanded)}>
         <ScoreRing score={match.score} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate font-semibold text-zinc-100">{match.job?.title ?? 'Unknown job'}</h3>
+            <h3 className="truncate font-semibold text-hi">{match.job?.title ?? 'Unknown job'}</h3>
             <TierBadge tier={match.tier} />
             {match.recommendation === 'apply' && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-300">
+              <span className="inline-flex items-center gap-1 rounded-full bg-signal/15 px-2 py-0.5 text-xs font-medium text-signal">
                 <Sparkles className="h-3 w-3" /> AI says: apply
               </span>
             )}
             {match.decision === 'approved' && (
-              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-400">approved</span>
+              <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs text-ok">approved</span>
             )}
             {match.decision === 'rejected' && (
-              <span className="rounded-full bg-zinc-500/15 px-2 py-0.5 text-xs text-zinc-400">rejected</span>
+              <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-mid">rejected</span>
             )}
             {prepared && (
-              <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs text-sky-400">
+              <span className="rounded-full bg-info/15 px-2 py-0.5 text-xs text-info">
                 <FileText className="mr-1 inline h-3 w-3" />
                 application drafted
               </span>
             )}
           </div>
-          <p className="mt-0.5 truncate text-sm text-zinc-400">
+          <p className="mt-0.5 truncate text-sm text-mid">
             {[match.job?.company, match.job?.location, match.job?.remote ? 'Remote' : null, match.job?.source]
               .filter(Boolean)
               .join(' · ')}
@@ -78,7 +78,7 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
           </p>
         </div>
         <ChevronDown
-          className={cn('h-5 w-5 shrink-0 text-zinc-500 transition-transform', expanded && 'rotate-180')}
+          className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
         />
       </div>
 
@@ -89,17 +89,17 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-t border-white/10"
+            className="overflow-hidden border-t border-line"
           >
             <div className="space-y-4 p-4">
               {match.reasoning && (
-                <p className="text-sm leading-relaxed text-zinc-300">{match.reasoning}</p>
+                <p className="text-sm leading-relaxed text-mid">{match.reasoning}</p>
               )}
 
               <div className="grid gap-3 sm:grid-cols-3">
-                <SkillChips label="You have" skills={match.matched_skills} tone="emerald" />
-                <SkillChips label="They want (gaps)" skills={match.missing_skills} tone="rose" />
-                <SkillChips label="Transferable" skills={match.transferable_skills} tone="violet" />
+                <SkillChips label="You have" skills={match.matched_skills} tone="ok" />
+                <SkillChips label="They want (gaps)" skills={match.missing_skills} tone="bad" />
+                <SkillChips label="Transferable" skills={match.transferable_skills} tone="info" />
               </div>
 
               {/* Actions */}
@@ -109,16 +109,16 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
                     <button
                       onClick={() => handleDecision('approved')}
                       disabled={busy !== null}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
                     >
                       <Check className="h-4 w-4" /> Approve
                     </button>
                     <button
                       onClick={() => handleDecision('rejected')}
                       disabled={busy !== null}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-3.5 py-2 text-sm text-zinc-300 transition hover:bg-white/5 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-50"
                     >
-                      <X className="h-4 w-4" /> Reject
+                      <X className="h-4 w-4" /> Pass
                     </button>
                   </>
                 )}
@@ -127,7 +127,7 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
                   <button
                     onClick={handlePrepare}
                     disabled={busy !== null}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
                   >
                     <FileText className="h-4 w-4" />
                     {busy === 'prepare' ? 'Tailoring your CV & cover letter…' : 'Prepare application'}
@@ -139,13 +139,13 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
                     href={match.job.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-zinc-400 transition hover:text-zinc-200"
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-low transition-colors hover:text-mid"
                   >
                     <ExternalLink className="h-4 w-4" /> View posting
                   </a>
                 )}
 
-                <span className="ml-auto text-xs text-zinc-600">
+                <span className="num ml-auto text-xs text-low">
                   matched {timeAgo(match.created_at)}
                 </span>
               </div>
@@ -157,15 +157,15 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
   );
 }
 
-function SkillChips({ label, skills, tone }: { label: string; skills: string[]; tone: 'emerald' | 'rose' | 'violet' }) {
+function SkillChips({ label, skills, tone }: { label: string; skills: string[]; tone: 'ok' | 'bad' | 'info' }) {
   const tones = {
-    emerald: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
-    rose: 'bg-rose-500/10 text-rose-300 border-rose-500/20',
-    violet: 'bg-violet-500/10 text-violet-300 border-violet-500/20',
+    ok: 'bg-ok/10 text-ok border-ok/20',
+    bad: 'bg-bad/10 text-bad border-bad/20',
+    info: 'bg-info/10 text-info border-info/20',
   };
   return (
     <div>
-      <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</p>
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-low">{label}</p>
       <div className="flex flex-wrap gap-1.5">
         {skills.length ? (
           skills.slice(0, 8).map((s) => (
@@ -174,7 +174,7 @@ function SkillChips({ label, skills, tone }: { label: string; skills: string[]; 
             </span>
           ))
         ) : (
-          <span className="text-xs text-zinc-600">—</span>
+          <span className="text-xs text-low">—</span>
         )}
       </div>
     </div>

@@ -1,8 +1,33 @@
 @import "tailwindcss";
 
+/*
+  JobFinderOS design tokens — "The Hunting Console"
+  Base: blue-tinted charcoal (never pure black). One brand accent: signal amber.
+  Semantic colors (emerald/rose/sky) carry meaning only, never decoration.
+*/
+@theme {
+  --color-ink: #0c0e12;        /* app background */
+  --color-surface: #12151c;    /* panels */
+  --color-surface-2: #171b24;  /* raised panels / hover */
+  --color-line: #1e2330;       /* borders */
+  --color-line-2: #2a3040;     /* borders on hover */
+  --color-hi: #e7eaf0;         /* primary text */
+  --color-mid: #9ba3b4;        /* secondary text */
+  --color-low: #5c6678;        /* tertiary text */
+  --color-signal: #f5a524;     /* THE accent — amber */
+  --color-signal-dim: #c07f14; /* accent, desaturated for borders */
+  --color-ok: #34d399;         /* emerald — sent/approved/success */
+  --color-warn: #f5a524;       /* amber doubles as attention */
+  --color-bad: #f87171;        /* rose — errors */
+  --color-info: #7db8f5;       /* muted sky — informational only */
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
 :root {
-  --background: #0a0a0f;
-  --foreground: #ededf2;
+  --background: var(--color-ink);
+  --foreground: var(--color-hi);
 }
 
 @media (prefers-color-scheme: light) {
@@ -15,24 +40,52 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Subtle grid backdrop for the OS feel */
-.os-backdrop {
-  background-image:
-    radial-gradient(circle at 25% 15%, rgba(56, 130, 246, 0.08), transparent 45%),
-    radial-gradient(circle at 80% 80%, rgba(16, 185, 129, 0.06), transparent 40%);
+/* Numbers everywhere: mono + tabular so digits never jitter */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Amber focus ring — visible, never on click, always on keyboard */
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--color-signal) 80%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The console backdrop: one faint radar bloom, fixed, pointer-transparent */
+.console-backdrop {
+  background-image: radial-gradient(
+    ellipse 60% 40% at 18% 0%,
+    color-mix(in oklab, var(--color-signal) 5%, transparent),
+    transparent 60%
+  );
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(120, 120, 140, 0.35);
-  border-radius: 4px;
+  background: var(--color-line-2);
+  border-radius: 5px;
+  border: 2px solid var(--color-ink);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

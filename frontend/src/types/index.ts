@@ -178,6 +178,7 @@ export interface PipelineStatusResponse {
   sources_enabled: string[];
   scheduler_enabled: boolean;
   scrape_interval_minutes: number;
+  next_run_at: string | null;
   matching_running: boolean;
   stats: Stats;
   recent_runs: {

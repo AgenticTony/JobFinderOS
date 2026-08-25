@@ -48,6 +48,14 @@ def start_scheduler() -> None:
     )
 
 
+def get_next_run_time():
+    """Next scheduled pipeline run (datetime) or None if scheduler is off."""
+    if _scheduler is None:
+        return None
+    job = _scheduler.get_job("jobfinder_pipeline")
+    return job.next_run_time if job else None
+
+
 def stop_scheduler() -> None:
     """Stop the scheduler on shutdown."""
     global _scheduler

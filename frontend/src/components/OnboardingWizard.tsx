@@ -6,7 +6,20 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Check, Globe2, Loader2, MapPin, Plus, Radar, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Compass,
+  Globe2,
+  Loader2,
+  MapPin,
+  Plus,
+  Radar,
+  Search,
+  Target,
+  X,
+} from 'lucide-react';
 import { getGeo, suggestQueries } from '@/lib/api';
 import type { GeoData, OnboardingPayload, SearchMode } from '@/types';
 import { cn } from '@/lib/utils';
@@ -18,10 +31,15 @@ interface Props {
 
 const STEPS = ['Country', 'Location', 'Job titles', 'Confirm'] as const;
 
-const MODES: { id: SearchMode; label: string; hint: string; icon: string }[] = [
-  { id: 'field', label: 'Stay in my field', hint: 'Job titles from my CV', icon: '🎯' },
-  { id: 'adjacent', label: 'Open to adjacent roles', hint: 'My field, plus near-neighbours', icon: '🔍' },
-  { id: 'widen', label: 'Widen my options', hint: 'My field is shrinking or I\u2019m changing direction — use my transferable skills', icon: '🧭' },
+const MODES: { id: SearchMode; label: string; hint: string; icon: typeof Target }[] = [
+  { id: 'field', label: 'Stay in my field', hint: 'Job titles from my CV', icon: Target },
+  { id: 'adjacent', label: 'Open to adjacent roles', hint: 'My field, plus near-neighbours', icon: Search },
+  {
+    id: 'widen',
+    label: 'Widen my options',
+    hint: 'My field is shrinking or I\u2019m changing direction — use my transferable skills',
+    icon: Compass,
+  },
 ];
 
 export default function OnboardingWizard({ onComplete, onClose }: Props) {
@@ -121,23 +139,26 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4 backdrop-blur-sm">
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-xl rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Set up your job hunt"
+        className="w-full max-w-xl rounded-2xl border border-line bg-surface shadow-2xl"
       >
         {/* Header */}
-        <div className="flex items-center gap-3 border-b border-white/10 p-5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-violet-600">
-            <Radar className="h-5 w-5 text-white" />
+        <div className="flex items-center gap-3 border-b border-line p-5">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-signal/30 bg-signal/10">
+            <Radar className="h-5 w-5 text-signal" aria-hidden />
           </div>
           <div className="flex-1">
-            <h2 className="font-semibold text-zinc-100">Set up your job hunt</h2>
-            <p className="text-xs text-zinc-500">Takes a minute — makes everything after it personal</p>
+            <h2 className="font-semibold text-hi">Set up your job hunt</h2>
+            <p className="text-xs text-low">Takes a minute — makes everything after it personal</p>
           </div>
           {onClose && (
-            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+            <button onClick={onClose} aria-label="Close" className="text-low transition-colors hover:text-mid">
               <X className="h-5 w-5" />
             </button>
           )}
@@ -150,10 +171,10 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
               <div
                 className={cn(
                   'h-1 rounded-full',
-                  i < step ? 'bg-emerald-500' : i === step ? 'bg-sky-500' : 'bg-white/10'
+                  i < step ? 'bg-ok' : i === step ? 'bg-signal' : 'bg-line-2'
                 )}
               />
-              <p className={cn('mt-1.5 text-[11px]', i === step ? 'text-zinc-300' : 'text-zinc-600')}>
+              <p className={cn('mt-1.5 text-[11px]', i === step ? 'text-mid' : 'text-low')}>
                 {label}
               </p>
             </div>
@@ -182,15 +203,15 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                           setMunicipality('');
                         }}
                         className={cn(
-                          'rounded-xl border p-5 text-left transition',
+                          'rounded-xl border p-5 text-left transition-colors',
                           country === c.code
-                            ? 'border-sky-500 bg-sky-500/10'
-                            : 'border-white/10 hover:border-white/25'
+                            ? 'border-signal bg-signal/10'
+                            : 'border-line hover:border-line-2'
                         )}
                       >
-                        <span className="text-3xl">{c.flag}</span>
-                        <p className="mt-2 font-medium text-zinc-100">{c.name}</p>
-                        <p className="text-xs text-zinc-500">
+                        <span className="text-3xl" aria-hidden>{c.flag}</span>
+                        <p className="mt-2 font-medium text-hi">{c.name}</p>
+                        <p className="text-xs text-low">
                           {c.code === 'SE' ? 'Platsbanken + remote boards' : 'Reed + Adzuna + remote boards'}
                         </p>
                       </button>
@@ -204,14 +225,14 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                   <StepTitle icon={<MapPin className="h-4 w-4" />} title="Which area should we search?" />
                   <div className="mt-5 space-y-4">
                     <label className="block">
-                      <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">Region</span>
+                      <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">Region</span>
                       <select
                         value={region}
                         onChange={(e) => {
                           setRegion(e.target.value);
                           setMunicipality('');
                         }}
-                        className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-sky-500"
+                        className="w-full rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-hi outline-none transition-colors focus:border-signal"
                       >
                         <option value="">Select a region…</option>
                         {Object.keys(geo?.geo[country] ?? {}).map((r) => (
@@ -220,14 +241,14 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                       </select>
                     </label>
                     <label className="block">
-                      <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
-                        City / municipality <span className="normal-case text-zinc-600">(optional — whole region is fine)</span>
+                      <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
+                        City / municipality <span className="normal-case">(optional — whole region is fine)</span>
                       </span>
                       <select
                         value={municipality}
                         onChange={(e) => setMunicipality(e.target.value)}
                         disabled={!region}
-                        className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-sky-500 disabled:opacity-40"
+                        className="w-full rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-hi outline-none transition-colors focus:border-signal disabled:opacity-40"
                       >
                         <option value="">All of {region || 'region'}…</option>
                         {municipalities.map((m) => (
@@ -237,21 +258,22 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                     </label>
                     <button
                       onClick={() => setRemoteOnly(!remoteOnly)}
-                      className="flex w-full items-center justify-between rounded-lg border border-white/10 p-3 text-left hover:border-white/25"
+                      aria-pressed={remoteOnly}
+                      className="flex w-full items-center justify-between rounded-lg border border-line p-3 text-left transition-colors hover:border-line-2"
                     >
                       <div>
-                        <p className="text-sm font-medium text-zinc-200">Remote jobs only</p>
-                        <p className="text-xs text-zinc-500">Skip anything that requires being on-site</p>
+                        <p className="text-sm font-medium text-hi">Remote jobs only</p>
+                        <p className="text-xs text-low">Skip anything that requires being on-site</p>
                       </div>
                       <span
                         className={cn(
-                          'h-6 w-11 rounded-full p-0.5 transition',
-                          remoteOnly ? 'bg-sky-500' : 'bg-white/15'
+                          'h-6 w-11 rounded-full p-0.5 transition-colors',
+                          remoteOnly ? 'bg-signal' : 'bg-line-2'
                         )}
                       >
                         <span
                           className={cn(
-                            'block h-5 w-5 rounded-full bg-white transition',
+                            'block h-5 w-5 rounded-full bg-hi transition-transform',
                             remoteOnly && 'translate-x-5'
                           )}
                         />
@@ -271,25 +293,25 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                         key={m.id}
                         onClick={() => changeMode(m.id)}
                         className={cn(
-                          'flex w-full items-center gap-3 rounded-lg border p-3 text-left transition',
+                          'flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors',
                           mode === m.id
-                            ? 'border-sky-500 bg-sky-500/10'
-                            : 'border-white/10 hover:border-white/25'
+                            ? 'border-signal bg-signal/10'
+                            : 'border-line hover:border-line-2'
                         )}
                       >
-                        <span className="text-xl">{m.icon}</span>
+                        <m.icon className="h-5 w-5 shrink-0 text-mid" aria-hidden />
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-zinc-200">{m.label}</p>
-                          <p className="text-xs text-zinc-500">{m.hint}</p>
+                          <p className="text-sm font-medium text-hi">{m.label}</p>
+                          <p className="text-xs text-low">{m.hint}</p>
                         </div>
-                        {mode === m.id && <Check className="h-4 w-4 text-sky-400" />}
+                        {mode === m.id && <Check className="h-4 w-4 text-signal" />}
                       </button>
                     ))}
                   </div>
 
                   {loadingQueries ? (
-                    <div className="flex flex-col items-center py-10 text-zinc-500">
-                      <Loader2 className="mb-3 h-6 w-6 animate-spin text-sky-400" />
+                    <div className="flex flex-col items-center py-10 text-low" role="status">
+                      <Loader2 className="mb-3 h-6 w-6 animate-spin text-signal" />
                       <p className="text-sm">
                         {mode === 'widen'
                           ? 'Reading your CV\u2019s transferable skills…'
@@ -301,7 +323,7 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                     <>
                       {directQueries.length > 0 && (
                         <div className="mt-5">
-                          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+                          <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
                             From your experience
                           </p>
                           <div className="flex flex-wrap gap-2">
@@ -314,7 +336,7 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
 
                       {pivotSuggestions.length > 0 && (
                         <div className="mt-5">
-                          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-violet-400/80">
+                          <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-info/90">
                             {mode === 'widen'
                               ? 'Jobs your skills open up'
                               : 'Worth a look — you might not have thought of these'}
@@ -325,26 +347,26 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                                 key={p.query}
                                 onClick={() => toggle(p.query)}
                                 className={cn(
-                                  'flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition',
+                                  'flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors',
                                   selected.has(p.query)
-                                    ? 'border-violet-500/50 bg-violet-500/10'
-                                    : 'border-white/10 hover:border-white/25'
+                                    ? 'border-info/50 bg-info/10'
+                                    : 'border-line hover:border-line-2'
                                 )}
                               >
                                 <span
                                   className={cn(
                                     'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border',
                                     selected.has(p.query)
-                                      ? 'border-violet-500 bg-violet-500/30 text-violet-300'
-                                      : 'border-white/20'
+                                      ? 'border-info bg-info/25 text-info'
+                                      : 'border-line-2'
                                   )}
                                 >
                                   {selected.has(p.query) && <Check className="h-3 w-3" />}
                                 </span>
                                 <span className="min-w-0 flex-1">
-                                  <span className="text-sm text-zinc-200">{p.query}</span>
+                                  <span className="text-sm text-hi">{p.query}</span>
                                   {p.why && (
-                                    <span className="block text-xs leading-snug text-zinc-500">{p.why}</span>
+                                    <span className="block text-xs leading-snug text-low">{p.why}</span>
                                   )}
                                 </span>
                               </button>
@@ -359,11 +381,12 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                           onChange={(e) => setCustomInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && addCustom()}
                           placeholder="Add your own search title…"
-                          className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-sky-500"
+                          className="flex-1 rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                         />
                         <button
                           onClick={addCustom}
-                          className="rounded-lg border border-white/15 px-3 py-2 text-sm text-zinc-300 hover:bg-white/5"
+                          aria-label="Add search title"
+                          className="rounded-lg border border-line px-3 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
                         >
                           <Plus className="h-4 w-4" />
                         </button>
@@ -376,7 +399,7 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
               {step === 3 && (
                 <div>
                   <StepTitle title="Ready — here's your setup" />
-                  <div className="mt-5 space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+                  <div className="mt-5 space-y-2.5 rounded-xl border border-line bg-ink/60 p-4 text-sm">
                     <SummaryRow label="Country" value={`${flagFor(country)} ${nameFor(geo, country)}`} />
                     <SummaryRow label="Area" value={[municipality, region].filter(Boolean).join(', ') || 'everywhere'} />
                     <SummaryRow label="Remote" value={remoteOnly ? 'remote jobs only' : 'on-site + remote'} />
@@ -385,13 +408,13 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                   </div>
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {[...selected].map((q) => (
-                      <span key={q} className="rounded-full bg-sky-500/10 px-2.5 py-1 text-xs text-sky-300">
+                      <span key={q} className="rounded-full border border-line bg-surface-2 px-2.5 py-1 text-xs text-mid">
                         {q}
                       </span>
                     ))}
                   </div>
-                  <p className="mt-5 text-sm text-zinc-500">
-                    Your first targeted pipeline run starts automatically — jobs will be scraped from
+                  <p className="mt-5 text-sm text-low">
+                    Your first targeted hunt starts automatically — jobs will be scraped from
                     your country&apos;s boards, filtered to your area, and ranked against your CV.
                   </p>
                 </div>
@@ -401,22 +424,22 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-white/10 p-4">
+        <div className="flex items-center justify-between border-t border-line p-4">
           <button
             onClick={() => setStep((s) => Math.max(0, s - 1))}
             disabled={step === 0}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-mid transition-colors hover:text-hi disabled:opacity-30"
           >
             <ArrowLeft className="h-4 w-4" /> Back
           </button>
-          <p className="text-xs text-zinc-600">
+          <p className="num text-xs text-low">
             Step {step + 1} of {STEPS.length}
           </p>
           {step < STEPS.length - 1 ? (
             <button
               onClick={() => canProceed && setStep((s) => s + 1)}
               disabled={!canProceed || (step === 2 && loadingQueries)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-40"
             >
               Continue <ArrowRight className="h-4 w-4" />
             </button>
@@ -424,7 +447,7 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
             <button
               onClick={finish}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Radar className="h-4 w-4" />}
               Start hunting
@@ -438,7 +461,7 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
 
 function StepTitle({ icon, title }: { icon?: React.ReactNode; title: string }) {
   return (
-    <h3 className="flex items-center gap-2 text-lg font-semibold text-zinc-100">
+    <h3 className="flex items-center gap-2 text-lg font-semibold text-hi">
       {icon}
       {title}
     </h3>
@@ -449,11 +472,12 @@ function QueryChip({ query, on, onToggle }: { query: string; on: boolean; onTogg
   return (
     <button
       onClick={onToggle}
+      aria-pressed={on}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition',
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
         on
-          ? 'border-sky-500/50 bg-sky-500/15 text-sky-200'
-          : 'border-white/10 text-zinc-500 hover:border-white/25'
+          ? 'border-signal/60 bg-signal/15 text-signal'
+          : 'border-line text-low hover:border-line-2 hover:text-mid'
       )}
     >
       {on && <Check className="h-3.5 w-3.5" />}
@@ -465,8 +489,8 @@ function QueryChip({ query, on, onToggle }: { query: string; on: boolean; onTogg
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
-      <span className="text-zinc-500">{label}</span>
-      <span className="text-zinc-200">{value}</span>
+      <span className="text-low">{label}</span>
+      <span className="text-hi">{value}</span>
     </div>
   );
 }

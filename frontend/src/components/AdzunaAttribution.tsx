@@ -7,7 +7,7 @@ export default function AdzunaAttribution() {
       href="https://www.adzuna.co.uk"
       target="_blank"
       rel="noopener noreferrer"
-      className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] text-zinc-600 hover:text-zinc-400"
+      className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] text-low hover:text-mid"
       title="Jobs by Adzuna"
     >
       Jobs by <span className="font-semibold">Adzuna</span>
