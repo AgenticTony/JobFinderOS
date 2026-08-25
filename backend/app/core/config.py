@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     MATCH_STALE_DAYS: int = 30  # pending matches older than this are auto-passed
     MAX_POSTING_AGE_DAYS: int = 30  # postings older than this are never stored
     MATCH_TIME_BUDGET_SECONDS: int = 420  # hard stop; frontend pipeline timeout is 600s
+    COMPOSIO_API_KEY: str = ""  # integrations layer (Settings page)
 
     # Scraping
     SCRAPE_SOURCES: str = "arbeitnow,remotive,jobicy,workingnomads,jobtech,teamtailor"

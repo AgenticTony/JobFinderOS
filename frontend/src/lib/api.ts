@@ -6,6 +6,7 @@ import type {
   Application,
   ApplicationDraft,
   GeoData,
+  IntegrationsStatus,
   Job,
   Match,
   OnboardingPayload,
@@ -180,6 +181,24 @@ export const draftCoverLetterPdfUrl = (draftId: number) =>
   `${API_BASE_URL}/api/v1/applications/draft/${draftId}/download/cover-letter`;
 export const draftCvPdfUrl = (draftId: number) =>
   `${API_BASE_URL}/api/v1/applications/draft/${draftId}/download/cv`;
+
+// ---------- Settings / integrations ----------
+
+export const getIntegrations = async (): Promise<IntegrationsStatus> => {
+  const response = await api.get<IntegrationsStatus>('/api/v1/settings/integrations');
+  return response.data;
+};
+
+export const connectComposio = async (
+  appName: string,
+  redirectUri = `${window.location.origin}/`
+): Promise<{ redirect_url: string }> => {
+  const response = await api.post<{ redirect_url: string }>(
+    '/api/v1/settings/integrations/composio/connect',
+    { app_name: appName, redirect_uri: redirectUri }
+  );
+  return response.data;
+};
 
 // ---------- Applications ----------
 

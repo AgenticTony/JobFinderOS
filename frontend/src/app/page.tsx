@@ -60,6 +60,8 @@ import type {
   ProfileStatus,
 } from '@/types';
 import { cn, timeAgo } from '@/lib/utils';
+import { connectComposio, getIntegrations } from '@/lib/api';
+import type { IntegrationsStatus } from '@/types';
 
 export default function Home() {
   const [view, setView] = useState<View>('dashboard');
@@ -367,6 +369,8 @@ export default function Home() {
                     subTabsAlways={railCollapsed}
                   />
                 )}
+
+                {view === 'settings' && <SettingsView />}
 
                 {view === 'profile' && (
                   <ProfileView
@@ -1349,6 +1353,100 @@ function ProfileView({
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+// ---------------- Settings ----------------
+
+function SettingsView() {
+  const [integrations, setIntegrations] = useState<IntegrationsStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      setIntegrations(await getIntegrations());
+    } catch {
+      setIntegrations({ composio: { configured: false, accounts: [] } });
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const connect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { redirect_url } = await connectComposio('gmail');
+      window.open(redirect_url, '_blank', 'noopener');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start the connection');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const composio = integrations?.composio;
+  const connected = composio?.accounts.filter((a) => a.status === 'ACTIVE') ?? [];
+
+  return (
+    <section className="space-y-6">
+      <ViewHeader
+        title="Settings"
+        sub="Account-level configuration. Integrations connect JobFinderOS to your world."
+      />
+
+      <div className="rounded-xl border border-line bg-surface/80 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="font-semibold text-hi">Composio</h3>
+            <p className="mt-1 max-w-md text-sm text-low">
+              The integrations layer — connect your Gmail once and JobFinderOS can send
+              applications from your own email (coming next), plus any other tool Composio
+              offers as the platform grows.
+            </p>
+          </div>
+          {composio?.configured ? (
+            <button
+              onClick={connect}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
+            >
+              {busy ? 'Opening…' : 'Connect Gmail'}
+            </button>
+          ) : (
+            <span className="rounded-full bg-surface-2 px-2.5 py-1 text-xs text-low">
+              not configured
+            </span>
+          )}
+        </div>
+
+        {composio && !composio.configured && (
+          <p className="mt-4 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
+            Add <code className="text-signal">COMPOSIO_API_KEY</code> to{' '}
+            <code className="text-signal">backend/.env</code> to enable — grab one from your
+            Composio dashboard (composio.dev), then restart the backend.
+          </p>
+        )}
+
+        {connected.length > 0 && (
+          <div className="mt-4 space-y-1.5">
+            {connected.map((a) => (
+              <div key={a.id} className="flex items-center justify-between gap-3 text-sm">
+                <span className="capitalize text-mid">{a.app_name}</span>
+                <span className="inline-flex items-center gap-1.5 text-ok">
+                  <span className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden /> connected
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && <p className="mt-3 text-sm text-bad">{error}</p>}
+      </div>
     </section>
   );
 }

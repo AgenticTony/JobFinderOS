@@ -178,6 +178,20 @@ export interface PipelineRunResponse {
   top_matches: Match[];
 }
 
+export interface ComposioAccount {
+  id: string;
+  app_name: string;
+  status: string;
+  created_at: string | null;
+}
+
+export interface IntegrationsStatus {
+  composio: {
+    configured: boolean;
+    accounts: ComposioAccount[];
+  };
+}
+
 export interface PipelineStatusResponse {
   sources_available: string[];
   sources_enabled: string[];

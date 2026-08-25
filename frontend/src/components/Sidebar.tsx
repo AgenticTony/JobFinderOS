@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Radar,
   Send,
+  Settings,
   User,
 } from 'lucide-react';
 import type { Profile } from '@/types';
@@ -29,7 +30,8 @@ export type View =
   | 'matches-approved'
   | 'apps-review'
   | 'apps-sent'
-  | 'profile';
+  | 'profile'
+  | 'settings';
 
 export const NAV: {
   id: View;
@@ -57,6 +59,7 @@ export const NAV: {
     ],
   },
   { id: 'profile', label: 'Profile', icon: User },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 export default function Sidebar({
