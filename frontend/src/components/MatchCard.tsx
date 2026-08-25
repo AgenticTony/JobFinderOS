@@ -7,7 +7,16 @@
 
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Briefcase, Check, ChevronDown, ExternalLink, FileText, Sparkles, X } from 'lucide-react';
+import {
+  ArrowRight,
+  Briefcase,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  FileText,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import type { Match } from '@/types';
 import ScoreRing from './ScoreRing';
 import TierBadge from './TierBadge';
@@ -18,10 +27,11 @@ interface Props {
   match: Match;
   onDecision: (matchId: number, decision: 'approved' | 'rejected') => Promise<void>;
   onPrepare: (jobId: number) => Promise<void>;
+  onReview?: () => void; // jump to the draft review (approved + already drafted)
   prepared?: boolean;
 }
 
-export default function MatchCard({ match, onDecision, onPrepare, prepared }: Props) {
+export default function MatchCard({ match, onDecision, onPrepare, onReview, prepared }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   // Rolling 24h "new" — decays per-card instead of everything going stale at
@@ -153,6 +163,15 @@ export default function MatchCard({ match, onDecision, onPrepare, prepared }: Pr
                   >
                     <FileText className="h-4 w-4" />
                     {busy === 'prepare' ? 'Tailoring your CV & cover letter…' : 'Prepare application'}
+                  </button>
+                )}
+
+                {match.decision === 'approved' && prepared && onReview && (
+                  <button
+                    onClick={onReview}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98]"
+                  >
+                    Review & send <ArrowRight className="h-4 w-4" />
                   </button>
                 )}
 

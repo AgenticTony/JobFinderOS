@@ -190,6 +190,14 @@ export default function Home() {
     drafts.filter((d) => d.status === 'ready' || d.status === 'submitted').map((d) => d.job_id)
   );
 
+  // Approved but not yet applied — the hunt isn't done until it's sent.
+  // These stay on the dashboard so a distracted "I'm sure I applied" never happens.
+  const appliedJobIds = new Set(applications.map((a) => a.job_id));
+  const finishApplying = matches
+    .filter((m) => m.decision === 'approved' && !appliedJobIds.has(m.job_id))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
   const filteredMatches = matches.filter((m) => {
     if (matchesFilter === 'pending') return !m.decision;
     if (matchesFilter === 'approved') return m.decision === 'approved';
@@ -301,6 +309,7 @@ export default function Home() {
                     onOpenApplications={() => setView('applications')}
                     onHunt={handleRunPipeline}
                     pendingMatches={matches.filter((m) => !m.decision)}
+                    finishApplying={finishApplying}
                     onDecision={handleDecision}
                     onPrepare={handlePrepare}
                     preparedJobIds={preparedJobIds}
@@ -402,6 +411,7 @@ function DashboardView({
   onOpenApplications,
   onHunt,
   pendingMatches,
+  finishApplying,
   onDecision,
   onPrepare,
   preparedJobIds,
@@ -417,6 +427,7 @@ function DashboardView({
   onOpenApplications: () => void;
   onHunt: () => void;
   pendingMatches: Match[];
+  finishApplying: Match[];
   onDecision: (matchId: number, decision: 'approved' | 'rejected') => Promise<void>;
   onPrepare: (jobId: number) => Promise<void>;
   preparedJobIds: Set<number>;
@@ -445,8 +456,32 @@ function DashboardView({
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
-        {/* Main column — fresh arrivals, then the decision queue */}
+        {/* Main column — finish what you started, fresh arrivals, then the queue */}
         <div className="space-y-8">
+          {finishApplying.length > 0 && (
+            <div>
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 className="font-semibold tracking-tight text-hi">
+                  Finish applying
+                  <span className="num ml-2 text-sm font-normal text-signal">{finishApplying.length}</span>
+                  <span className="ml-2 text-sm font-normal text-low">approved, not sent yet</span>
+                </h2>
+              </div>
+              <div className="space-y-3">
+                {finishApplying.map((m) => (
+                  <MatchCard
+                    key={m.id}
+                    match={m}
+                    onDecision={onDecision}
+                    onPrepare={onPrepare}
+                    onReview={onOpenApplications}
+                    prepared={preparedJobIds.has(m.job_id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {newMatches.length > 0 && (
             <div>
               <div className="mb-3 flex items-baseline justify-between">
