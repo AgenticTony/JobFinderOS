@@ -14,11 +14,11 @@ from app.schemas.profile import (
     ProfilePreferencesUpdate,
     ProfileResponse,
 )
+from app.services.ai_service import ai_service_available, get_ai_service
 from app.services.cv_service import (
     create_or_replace_profile_from_pdf,
     get_active_profile,
 )
-from app.services.ai_service import ai_service_available, get_ai_service
 from app.services.source_packs import available_countries
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,7 @@ async def save_onboarding(payload: OnboardingRequest, db: Session = Depends(get_
     profile.municipality = payload.municipality
     profile.remote_only = 1 if payload.remote_only else 0
     profile.search_queries = dump_json_list(payload.search_queries)
+    profile.languages = dump_json_list(payload.languages or ["English"])
     profile.onboarded = 1
     db.add(profile)
     db.commit()

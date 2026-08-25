@@ -62,6 +62,11 @@ def build_profile_context(profile: Profile) -> str:
     if profile.location:
         lines.append(f"Location: {profile.location}")
     lines.append(f"Open to remote: {'yes' if profile.remote_ok else 'no'}")
+    languages = parse_json_list(profile.languages)
+    if languages:
+        lines.append(
+            f"Working languages (jobs in other languages are a poor fit): {', '.join(languages)}"
+        )
     if preferred:
         lines.append(f"Preferred roles: {', '.join(preferred)}")
     if profile.preferred_locations:

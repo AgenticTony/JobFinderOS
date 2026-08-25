@@ -12,6 +12,7 @@ import {
   Check,
   Compass,
   Globe2,
+  Languages,
   Loader2,
   MapPin,
   Plus,
@@ -27,9 +28,22 @@ import { cn } from '@/lib/utils';
 interface Props {
   onComplete: (payload: OnboardingPayload) => Promise<void>;
   onClose?: () => void; // optional — wizard is modal but re-openable from Profile
+  initialLanguages?: string[]; // prefill when re-running setup
 }
 
-const STEPS = ['Country', 'Location', 'Job titles', 'Confirm'] as const;
+const STEPS = ['Country', 'Location', 'Languages', 'Job titles', 'Confirm'] as const;
+
+const LANGUAGE_OPTIONS = [
+  'English',
+  'Swedish',
+  'German',
+  'French',
+  'Spanish',
+  'Danish/Norwegian',
+  'Finnish',
+  'Italian',
+  'Dutch',
+];
 
 const MODES: { id: SearchMode; label: string; hint: string; icon: typeof Target }[] = [
   { id: 'field', label: 'Stay in my field', hint: 'Job titles from my CV', icon: Target },
@@ -42,13 +56,14 @@ const MODES: { id: SearchMode; label: string; hint: string; icon: typeof Target 
   },
 ];
 
-export default function OnboardingWizard({ onComplete, onClose }: Props) {
+export default function OnboardingWizard({ onComplete, onClose, initialLanguages }: Props) {
   const [step, setStep] = useState(0);
   const [geo, setGeo] = useState<GeoData | null>(null);
   const [country, setCountry] = useState('');
   const [region, setRegion] = useState('');
   const [municipality, setMunicipality] = useState('');
   const [remoteOnly, setRemoteOnly] = useState(false);
+  const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']);
   const [mode, setMode] = useState<SearchMode>('field');
   const [directQueries, setDirectQueries] = useState<string[]>([]);
   const [pivotSuggestions, setPivotSuggestions] = useState<{ query: string; why: string }[]>([]);
@@ -67,9 +82,9 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
     [geo, country, region]
   );
 
-  // Fetch AI suggestions when reaching step 3 (re-fetch when mode changes)
+  // Fetch AI suggestions when reaching the Job titles step (re-fetch when mode changes)
   useEffect(() => {
-    if (step !== 2 || !country || loadingQueries) return;
+    if (step !== 3 || !country || loadingQueries) return;
     if (directQueries.length > 0 || pivotSuggestions.length > 0) return; // already loaded for this mode
     setLoadingQueries(true);
     suggestQueries(country, mode)
@@ -116,9 +131,13 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
     setCustomInput('');
   };
 
+  const toggleLanguage = (lang: string) =>
+    setLanguages((prev) => (prev.includes(lang) ? prev.filter((l) => l !== lang) : [...prev, lang]));
+
   const canProceed = [
     Boolean(country),
     Boolean(region), // municipality optional (whole region is valid)
+    languages.length > 0,
     selected.size > 0,
     true,
   ][step];
@@ -132,6 +151,7 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
         municipality: municipality || null,
         remote_only: remoteOnly,
         search_queries: [...selected],
+        languages,
       });
     } finally {
       setSaving(false);
@@ -285,6 +305,37 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
 
               {step === 2 && (
                 <div>
+                  <StepTitle icon={<Languages className="h-4 w-4" />} title="Which languages do you work in?" />
+                  <p className="mt-2 text-sm text-low">
+                    Jobs posted in other languages are filtered out before matching — English
+                    always passes. You can change this anytime under Edit setup.
+                  </p>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {LANGUAGE_OPTIONS.map((lang) => {
+                      const on = languages.includes(lang);
+                      return (
+                        <button
+                          key={lang}
+                          onClick={() => toggleLanguage(lang)}
+                          aria-pressed={on}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm transition-colors',
+                            on
+                              ? 'border-signal bg-signal/15 text-signal'
+                              : 'border-line text-low hover:border-line-2 hover:text-mid'
+                          )}
+                        >
+                          {on && <Check className="h-3.5 w-3.5" />}
+                          {lang}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {step === 3 && (
+                <div>
                   <StepTitle title="What roles should we hunt for?" />
                   {/* Strategy — always the user's own choice, never inferred */}
                   <div className="mt-4 space-y-2">
@@ -396,13 +447,14 @@ export default function OnboardingWizard({ onComplete, onClose }: Props) {
                 </div>
               )}
 
-              {step === 3 && (
+              {step === 4 && (
                 <div>
                   <StepTitle title="Ready — here's your setup" />
                   <div className="mt-5 space-y-2.5 rounded-xl border border-line bg-ink/60 p-4 text-sm">
                     <SummaryRow label="Country" value={`${flagFor(country)} ${nameFor(geo, country)}`} />
                     <SummaryRow label="Area" value={[municipality, region].filter(Boolean).join(', ') || 'everywhere'} />
                     <SummaryRow label="Remote" value={remoteOnly ? 'remote jobs only' : 'on-site + remote'} />
+                    <SummaryRow label="Languages" value={languages.join(', ')} />
                     <SummaryRow label="Strategy" value={MODES.find((m) => m.id === mode)?.label ?? mode} />
                     <SummaryRow label="Job titles" value={`${selected.size} search queries`} />
                   </div>

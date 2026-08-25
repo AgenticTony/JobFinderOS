@@ -56,6 +56,7 @@ class Profile(Base):
     municipality = Column(String(255), nullable=True)  # e.g. "Malmö"
     remote_only = Column(Integer, default=0, nullable=False)  # 1 = drop on-site jobs
     search_queries = Column(Text, nullable=True)  # JSON array — AI-suggested, user-approved
+    languages = Column(Text, nullable=True)  # JSON array — languages the user works in
 
     is_active = Column(Integer, default=1, nullable=False)  # single active profile
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

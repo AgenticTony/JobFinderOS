@@ -16,6 +16,7 @@ from app.models import JobPosting, MatchResult, Profile
 from app.schemas.common import dump_json_list, parse_json_list
 from app.services.ai_service import ai_service_available, get_ai_service
 from app.services.cv_service import build_profile_context, get_active_profile
+from app.services.language_filter import passes_language_filter
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,14 @@ def run_matching(
     service = get_ai_service()
     profile_context = build_profile_context(profile)
     exclude_keywords = [k.lower() for k in parse_json_list(profile.exclude_keywords)]
+    languages = parse_json_list(profile.languages) or []
+
+    # Language gate on the backlog: previously-stored jobs written in a
+    # language the user doesn't speak never consume matching budget
+    if languages:
+        unmatched = [
+            j for j in unmatched if passes_language_filter(j.title, j.description, languages)
+        ]
 
     deadline = time.time() + max_seconds
     matches_created = 0

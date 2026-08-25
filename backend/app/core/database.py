@@ -49,7 +49,14 @@ def get_db():
 
 def init_db():
     """Create all tables on startup (TalentHive pattern) + light migrations."""
-    from app.models import profile, job, match, draft, application, scrape_run  # noqa: F401
+    from app.models import (  # noqa: F401
+        application,
+        draft,
+        job,
+        match,
+        profile,
+        scrape_run,
+    )
 
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables initialized")
@@ -64,6 +71,7 @@ def init_db():
         ("profiles", "municipality", "VARCHAR(255)"),
         ("profiles", "remote_only", "INTEGER DEFAULT 0"),
         ("profiles", "search_queries", "TEXT"),
+        ("profiles", "languages", "TEXT"),
         ("applications", "draft_id", "INTEGER"),
     ]
     try:

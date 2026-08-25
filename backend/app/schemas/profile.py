@@ -15,6 +15,7 @@ class OnboardingRequest(BaseModel):
     municipality: Optional[str] = None
     remote_only: bool = False
     search_queries: List[str] = []
+    languages: List[str] = []
 
 
 class ProfilePreferencesUpdate(BaseModel):
@@ -53,6 +54,7 @@ class ProfileResponse(BaseModel):
     municipality: Optional[str] = None
     remote_only: bool = False
     search_queries: List[str] = []
+    languages: List[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -86,6 +88,7 @@ class ProfileResponse(BaseModel):
             municipality=profile.municipality,
             remote_only=bool(profile.remote_only),
             search_queries=parse_json_list(profile.search_queries),
+            languages=parse_json_list(profile.languages),
             created_at=profile.created_at,
             updated_at=profile.updated_at,
             skills=parse_json_list(profile.skills),

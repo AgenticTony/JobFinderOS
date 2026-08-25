@@ -19,8 +19,9 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models import JobPosting, MatchResult, Profile, ScrapeRun
 from app.schemas.common import dump_json_list, parse_json_list
-from app.services.scrapers import SCRAPER_REGISTRY, NormalizedJob
 from app.services import matcher_service, source_packs
+from app.services.language_filter import passes_language_filter
+from app.services.scrapers import SCRAPER_REGISTRY, NormalizedJob
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ def build_scrape_context(db: Session) -> Optional[Dict]:
         "municipality": profile.municipality,
         "remote_only": bool(profile.remote_only),
         "queries": parse_json_list(profile.search_queries),
+        "languages": parse_json_list(profile.languages) or [],
     }
 
 
@@ -94,6 +96,19 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
             jobs = [nj for nj in jobs if passes_location_filter(nj, ctx)]
             if before != len(jobs):
                 logger.info("[%s] location filter: %d -> %d jobs", source_name, before, len(jobs))
+
+            # Language gate — postings in languages the user doesn't speak
+            # are dropped before storing (English always passes)
+            before = len(jobs)
+            jobs = [
+                nj
+                for nj in jobs
+                if passes_language_filter(nj.title, nj.description, ctx.get("languages", []))
+            ]
+            if before != len(jobs):
+                logger.info(
+                    "[%s] language filter: %d -> %d jobs", source_name, before, len(jobs)
+                )
 
         new_count = 0
         for nj in jobs:

@@ -369,7 +369,11 @@ export default function Home() {
 
       {/* Onboarding wizard — auto-shows until setup is done, re-openable anytime */}
       {showWizard && profile && (
-        <OnboardingWizard onComplete={handleOnboardingComplete} onClose={() => setShowWizard(false)} />
+        <OnboardingWizard
+          onComplete={handleOnboardingComplete}
+          onClose={() => setShowWizard(false)}
+          initialLanguages={profile.languages}
+        />
       )}
     </div>
   );
@@ -1242,6 +1246,12 @@ function ProfileView({
                     {profile.country === 'SE' ? 'Sweden' : profile.country === 'GB' ? 'United Kingdom' : profile.country}
                     {profile.municipality ? ` · ${profile.municipality}` : profile.region ? ` · ${profile.region}` : ''}
                     {profile.remote_only ? ' · remote only' : ''}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-low">Languages</p>
+                  <p className="mt-1 text-hi">
+                    {profile.languages?.length ? profile.languages.join(' · ') : 'not set — jobs in other languages still pass'}
                   </p>
                 </div>
                 <div>

@@ -94,6 +94,7 @@ export interface Profile {
   municipality: string | null;
   remote_only: boolean;
   search_queries: string[];
+  languages: string[];
   skills: { name: string; level?: string }[];
   recent_roles: { title?: string; company?: string; period?: string; highlights?: string }[];
   education: { degree?: string; field?: string; institution?: string; year?: string }[];
@@ -109,6 +110,7 @@ export interface OnboardingPayload {
   municipality?: string | null;
   remote_only: boolean;
   search_queries: string[];
+  languages: string[];
 }
 
 export interface GeoData {
