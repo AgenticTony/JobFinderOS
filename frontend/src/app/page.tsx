@@ -74,6 +74,19 @@ export default function Home() {
   const [pipelineResult, setPipelineResult] = useState<PipelineRunResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
+  // Sidebar rail/expanded choice — persisted so the console opens the way
+  // the user left it. Adopted after mount; written only on user toggle
+  // (never on mount, so a stray initial render can't clobber the choice).
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  useEffect(() => {
+    setRailCollapsed(localStorage.getItem('jfos-rail-collapsed') === '1');
+  }, []);
+  const toggleRail = () =>
+    setRailCollapsed((c) => {
+      const next = !c;
+      localStorage.setItem('jfos-rail-collapsed', next ? '1' : '0');
+      return next;
+    });
 
   const refresh = useCallback(async () => {
     const [statusRes, profileRes, pipeRes] = await Promise.allSettled([
@@ -232,7 +245,7 @@ export default function Home() {
         <Play className={cn(compact ? 'h-4 w-4' : 'h-4 w-4')} aria-hidden />
       )}
       {!compact && (
-        <span className="hidden lg:inline">
+        <span className={railCollapsed ? 'hidden' : 'hidden lg:inline'}>
           {pipelineBusy ? 'Hunting…' : matchPolling ? 'Matching in background…' : 'Hunt now'}
         </span>
       )}
@@ -291,6 +304,8 @@ export default function Home() {
           intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
           profile={profile}
           onEditSetup={() => (profile ? setShowWizard(true) : setView('profile'))}
+          collapsed={railCollapsed}
+          onToggleCollapsed={toggleRail}
         >
           {huntButton(false)}
         </Sidebar>
@@ -337,6 +352,7 @@ export default function Home() {
                     onDecision={handleDecision}
                     onPrepare={handlePrepare}
                     onSwitch={(v) => setView(v)}
+                    subTabsAlways={railCollapsed}
                   />
                 )}
 
@@ -348,6 +364,7 @@ export default function Home() {
                     onChanged={refresh}
                     onPrepare={handlePrepare}
                     onSwitch={(v) => setView(v)}
+                    subTabsAlways={railCollapsed}
                   />
                 )}
 
@@ -592,12 +609,19 @@ function DashboardView({
 function SubTabs({
   options,
   onSwitch,
+  forceVisible = false,
 }: {
   options: { id: View; label: string; active: boolean }[];
   onSwitch: (v: View) => void;
+  forceVisible?: boolean; // when the sidebar is folded to an icon rail
 }) {
   return (
-    <div className="mb-5 inline-flex rounded-lg border border-line bg-ink p-1 lg:hidden">
+    <div
+      className={cn(
+        'mb-5 inline-flex rounded-lg border border-line bg-ink p-1',
+        !forceVisible && 'lg:hidden'
+      )}
+    >
       {options.map((o) => (
         <button
           key={o.id}
@@ -622,6 +646,7 @@ function MatchesView({
   onDecision,
   onPrepare,
   onSwitch,
+  subTabsAlways = false,
 }: {
   approved: boolean;
   matches: Match[];
@@ -630,6 +655,7 @@ function MatchesView({
   onDecision: (matchId: number, decision: 'approved' | 'rejected') => Promise<void>;
   onPrepare: (jobId: number) => Promise<void>;
   onSwitch: (v: View) => void;
+  subTabsAlways?: boolean;
 }) {
   // Approved page = in flight: approved and not yet sent. Once sent, the
   // job's record lives in Applications → Sent — it leaves Matches for good.
@@ -652,6 +678,7 @@ function MatchesView({
       )}
       <SubTabs
         onSwitch={onSwitch}
+        forceVisible={subTabsAlways}
         options={[
           { id: 'matches', label: 'Awaiting my decision', active: !approved },
           { id: 'matches-approved', label: 'Approved', active: approved },
@@ -702,6 +729,7 @@ function ApplicationsView({
   applications,
   onChanged,
   onSwitch,
+  subTabsAlways = false,
 }: {
   page: 'apps-review' | 'apps-sent';
   drafts: ApplicationDraft[];
@@ -709,6 +737,7 @@ function ApplicationsView({
   onChanged: () => Promise<void>;
   onPrepare: (jobId: number) => Promise<void>;
   onSwitch: (v: View) => void;
+  subTabsAlways?: boolean;
 }) {
   const openDrafts = drafts.filter((d) => d.status !== 'submitted');
   // Accordion: one draft open at a time; a single draft opens by itself
@@ -721,6 +750,7 @@ function ApplicationsView({
   const subTabs = (
     <SubTabs
       onSwitch={onSwitch}
+      forceVisible={subTabsAlways}
       options={[
         { id: 'apps-review', label: 'Review & send', active: page === 'apps-review' },
         { id: 'apps-sent', label: 'Sent', active: page === 'apps-sent' },

@@ -2,16 +2,26 @@
 
 // Sidebar — the console's instrument rail. Navigation with expandable
 // groups (Better Stack / Midday pattern): Matches and Applications each
-// own two dedicated pages. Collapses to an icon rail on md screens; on
-// small screens the page renders a mobile top bar instead (this
-// component is hidden below md).
+// own two dedicated pages. Collapsible: the user can fold it to the icon
+// rail at any width (Hootsuite-style rail; choice persists), which also
+// surfaces the in-page sub-tabs on desktop. Below md the page renders a
+// mobile top bar instead (this component is hidden there).
 
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronDown, Crosshair, LayoutDashboard, Radar, Send, User } from 'lucide-react';
+import {
+  ChevronDown,
+  Crosshair,
+  LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Radar,
+  Send,
+  User,
+} from 'lucide-react';
 import type { Profile } from '@/types';
 import { cn } from '@/lib/utils';
-import NextHunt from './NextHunt';
+import NextHunt, { useNextRunLabel } from './NextHunt';
 
 export type View =
   | 'dashboard'
@@ -25,7 +35,7 @@ export const NAV: {
   id: View;
   label: string;
   icon: typeof Radar;
-  children?: { id: View; label: string; count?: number }[];
+  children?: { id: View; label: string }[];
 }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   {
@@ -59,6 +69,8 @@ export default function Sidebar({
   intervalMinutes,
   profile,
   onEditSetup,
+  collapsed,
+  onToggleCollapsed,
   children,
 }: {
   view: View;
@@ -70,6 +82,8 @@ export default function Sidebar({
   intervalMinutes: number;
   profile: Profile | null;
   onEditSetup: () => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   children?: React.ReactNode; // slot under the nav (e.g. hunt trigger)
 }) {
   // Which group is unfolded; the group owning the active page stays open
@@ -82,6 +96,9 @@ export default function Sidebar({
   const countFor = (id: View) =>
     id === 'matches' ? pendingCount : id === 'apps-review' ? reviewCount : 0;
 
+  // Labels/children only show on a full-width rail: lg+ AND not collapsed
+  const showLabels = !collapsed; // combined with `lg:` classes below
+
   const initials =
     (profile?.full_name ?? '')
       .split(/\s+/)
@@ -91,16 +108,33 @@ export default function Sidebar({
       .join('') || null;
 
   return (
-    <aside className="sticky top-0 hidden h-dvh w-16 shrink-0 flex-col border-r border-line bg-surface/60 px-3 py-5 md:flex lg:w-60 lg:px-4">
-      {/* Brand */}
-      <div className="mb-8 flex items-center gap-3 px-1 lg:px-2">
+    <aside
+      className={cn(
+        'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-line bg-surface/60 px-3 py-5 md:flex',
+        collapsed ? 'w-16' : 'w-16 lg:w-60 lg:px-4'
+      )}
+    >
+      {/* Brand + collapse toggle */}
+      <div className={cn('mb-8 flex items-center gap-3', collapsed ? 'flex-col gap-3 px-0' : 'px-1 lg:px-2')}>
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-signal/30 bg-signal/10">
           <Radar className="h-5 w-5 text-signal" aria-hidden />
         </div>
-        <div className="hidden min-w-0 lg:block">
+        <div className={cn('min-w-0 flex-1', showLabels ? 'hidden lg:block' : 'hidden')}>
           <p className="truncate font-semibold tracking-tight text-hi">JobFinderOS</p>
           <p className="num text-[10px] uppercase tracking-widest text-low">TalentHive engine</p>
         </div>
+        <button
+          onClick={onToggleCollapsed}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-low transition-colors hover:bg-surface-2 hover:text-hi md:flex"
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="h-4 w-4" aria-hidden />
+          ) : (
+            <PanelLeftClose className="hidden h-4 w-4 lg:block" aria-hidden />
+          )}
+        </button>
       </div>
 
       {/* Nav */}
@@ -124,24 +158,32 @@ export default function Sidebar({
                 }}
                 aria-current={active ? 'page' : undefined}
                 aria-expanded={navChildren ? isOpen : undefined}
+                title={collapsed ? label : undefined}
                 className={cn(
                   'group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                  active ? 'text-signal' : 'text-mid hover:bg-surface-2 hover:text-hi'
+                  active ? 'text-signal' : 'text-mid hover:bg-surface-2 hover:text-hi',
+                  collapsed && 'justify-center px-0'
                 )}
               >
                 {active && !navChildren && (
                   <motion.span
                     layoutId="nav-indicator"
-                    className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-signal"
+                    className={cn(
+                      'absolute top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-signal',
+                      collapsed ? 'right-1' : 'left-0'
+                    )}
                     transition={{ type: 'spring', stiffness: 100, damping: 20 }}
                   />
                 )}
                 <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
-                <span className="hidden min-w-0 flex-1 text-left lg:inline">{label}</span>
+                <span className={cn('min-w-0 flex-1 text-left', showLabels ? 'hidden lg:inline' : 'hidden')}>
+                  {label}
+                </span>
                 {navChildren && (
                   <ChevronDown
                     className={cn(
-                      'hidden h-4 w-4 shrink-0 transition-transform lg:block',
+                      'hidden h-4 w-4 shrink-0 transition-transform',
+                      showLabels && 'lg:block',
                       groupActive && 'text-signal',
                       isOpen && 'rotate-180'
                     )}
@@ -150,9 +192,9 @@ export default function Sidebar({
                 )}
               </button>
 
-              {/* Sub-pages */}
+              {/* Sub-pages — only on the full-width rail */}
               {navChildren && isOpen && (
-                <div className="mt-0.5 hidden space-y-0.5 lg:block">
+                <div className={cn('mt-0.5 space-y-0.5', showLabels ? 'hidden lg:block' : 'hidden')}>
                   {navChildren.map((c) => {
                     const childActive = view === c.id;
                     const count = countFor(c.id);
@@ -189,28 +231,36 @@ export default function Sidebar({
       {children && <div className="mt-5">{children}</div>}
 
       <div className="mt-auto space-y-3">
-        {/* Live hunt status */}
-        <div className="rounded-lg border border-line bg-ink/60 px-3 py-2.5">
-          <p className="hidden text-[10px] font-medium uppercase tracking-widest text-mid lg:block">
-            Hunt cycle
-          </p>
-          <NextHunt
+        {/* Live hunt status — full rail: countdown; icon rail: dot + tooltip */}
+        {collapsed ? (
+          <RailHuntDot
             nextRunAt={nextRunAt}
             schedulerEnabled={schedulerEnabled}
             intervalMinutes={intervalMinutes}
           />
-        </div>
+        ) : (
+          <div className="rounded-lg border border-line bg-ink/60 px-3 py-2.5">
+            <p className="hidden text-[10px] font-medium uppercase tracking-widest text-mid lg:block">
+              Hunt cycle
+            </p>
+            <NextHunt
+              nextRunAt={nextRunAt}
+              schedulerEnabled={schedulerEnabled}
+              intervalMinutes={intervalMinutes}
+            />
+          </div>
+        )}
 
         {/* User chip */}
         <button
           onClick={onEditSetup}
+          title={collapsed ? (profile?.full_name ?? 'Your profile') : 'Edit your search setup'}
           className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2"
-          title="Edit your search setup"
         >
           <span className="num flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-xs text-mid">
             {initials ?? <User className="h-4 w-4" aria-hidden />}
           </span>
-          <span className="hidden min-w-0 lg:block">
+          <span className={cn('min-w-0', showLabels ? 'hidden lg:block' : 'hidden')}>
             <span className="block truncate text-sm font-medium text-hi">
               {profile?.full_name ?? 'Your profile'}
             </span>
@@ -225,5 +275,30 @@ export default function Sidebar({
         </button>
       </div>
     </aside>
+  );
+}
+
+// Icon-rail hunt status: just the breathing dot, tooltip carries the words
+function RailHuntDot({
+  nextRunAt,
+  schedulerEnabled,
+  intervalMinutes,
+}: {
+  nextRunAt: string | null;
+  schedulerEnabled: boolean;
+  intervalMinutes: number;
+}) {
+  const label = useNextRunLabel(nextRunAt, schedulerEnabled, intervalMinutes);
+  return (
+    <div
+      className="flex justify-center rounded-lg border border-line bg-ink/60 py-2.5"
+      title={label}
+    >
+      <span className="relative inline-flex h-2 w-2" aria-hidden>
+        <span className="absolute inset-0 animate-ping rounded-full bg-signal opacity-60 [animation-duration:2s]" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-signal" />
+      </span>
+      <span className="sr-only">{label}</span>
+    </div>
   );
 }
