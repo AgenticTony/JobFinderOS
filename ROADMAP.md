@@ -27,11 +27,17 @@ Pipeline: harvest → gate → store → match/score → decide → tailor → s
   shared pool (dedupe is global); all personal gates apply at match time with
   per-user last-matched watermarks. Storage is trivial (~13KB/job; 50k jobs ≈
   650MB). Rationale: per-user scraping dies on Adzuna free caps at ~3 users.
-- **Stack:** Vercel Pro (frontend, CDN, Blob for CVs, cron) + Neon Postgres
-  (Vercel Marketplace — Vercel no longer has first-party Postgres) + Render
-  worker (FastAPI + scheduler + queue; can't be serverless: long-running
-  scrapes/matching) + fastapi-users (email/JWT auth, no auth vendor).
-  Beta ≈ $27/mo. 1k users ≈ $100–300/mo infra.
+- **Stack (lean-beta first):** Cloudflare Pages (static frontend, free,
+  commercial-OK — Vercel Hobby forbids commercial use) + Supabase free tier
+  (500MB Postgres + 50k-MAU auth + 1GB CV storage — auth vendor included
+  while free lasts) + Render worker $7 (the only mandatory bill: always-on
+  scheduler/scraper; free tiers sleep and kill the 06:30 hunt). GLM rides the
+  founder's existing Z.ai yearly plan during beta; move to API billing when
+  paying users arrive (~$0.30–1.20/user/mo).
+  Beta ≈ $7/mo. Growing (50–500) ≈ $25–45. 1k users ≈ $250–400 against
+  ~£12k revenue. Vercel Pro + Neon is the comfort upgrade once revenue
+  justifies it, not a prerequisite (Vercel has no first-party Postgres
+  anymore regardless).
 - **Cadence:** 2 scrapes/day per country via cron triggers (06:30 local =
   main run, lands fresh matches before morning logins; optional 14:00 top-titles
   light run; weekends 1 run). The 3h interval was single-user-era; lower
