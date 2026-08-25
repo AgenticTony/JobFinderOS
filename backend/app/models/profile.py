@@ -55,6 +55,7 @@ class Profile(Base):
     region = Column(String(255), nullable=True)  # e.g. "Skåne län", "Greater London"
     municipality = Column(String(255), nullable=True)  # e.g. "Malmö"
     remote_only = Column(Integer, default=0, nullable=False)  # 1 = drop on-site jobs
+    include_remote = Column(Integer, default=0, nullable=False)  # 1 = opt in to worldwide remote jobs
     search_queries = Column(Text, nullable=True)  # JSON array — AI-suggested, user-approved
     languages = Column(Text, nullable=True)  # JSON array — languages the user works in
 

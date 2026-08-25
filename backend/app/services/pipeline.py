@@ -38,6 +38,7 @@ def build_scrape_context(db: Session) -> Optional[Dict]:
         "region": profile.region,
         "municipality": profile.municipality,
         "remote_only": bool(profile.remote_only),
+        "include_remote": bool(profile.include_remote),
         "queries": parse_json_list(profile.search_queries),
         "languages": parse_json_list(profile.languages) or [],
     }
@@ -47,21 +48,22 @@ def passes_location_filter(job: NormalizedJob, ctx: Dict) -> bool:
     """
     Universal location gate — applied to every source identically.
 
-    - Remote jobs always pass
-    - Jobs with no location text always pass (let AI matching judge them)
-    - Otherwise the job's location must mention the user's municipality or region
+    - Jobs located in the user's municipality/region always pass
+      (local on-site, local remote, hybrid)
+    - Remote jobs and location-less jobs only pass when the user opted
+      into remote work in onboarding (include_remote) — otherwise the
+      search is strictly local
     - remote_only users additionally drop non-remote jobs
     """
     if ctx.get("remote_only") and not job.remote:
         return False
-    if job.remote or not job.location:
-        return True
 
     terms = [t.lower() for t in (ctx.get("municipality"), ctx.get("region")) if t]
-    if not terms:
+    if terms and job.location and any(term in job.location.lower() for term in terms):
         return True
-    location = job.location.lower()
-    return any(term in location for term in terms)
+
+    # Outside the area (or no location text): only for remote-opted users
+    return bool(ctx.get("include_remote")) and bool(job.remote)
 
 
 def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> ScrapeRun:
@@ -188,6 +190,12 @@ def run_pipeline(
             requested = sources
         elif ctx:
             requested = [s for s in source_packs.pack_for_country(ctx["country"]) if s in SCRAPER_REGISTRY]
+            # Worldwide remote boards are pointless for a strictly-local
+            # user — don't even spend the requests
+            if not ctx.get("include_remote"):
+                requested = [s for s in requested if s not in source_packs.SHARED_REMOTE_SOURCES]
+                if not requested:
+                    logger.info("Strictly-local user — remote boards skipped")
         else:
             requested = settings.get_scrape_sources()
         scrape_summaries = []

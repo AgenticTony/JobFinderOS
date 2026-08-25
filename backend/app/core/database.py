@@ -72,6 +72,7 @@ def init_db():
         ("profiles", "remote_only", "INTEGER DEFAULT 0"),
         ("profiles", "search_queries", "TEXT"),
         ("profiles", "languages", "TEXT"),
+        ("profiles", "include_remote", "INTEGER DEFAULT 0"),
         ("applications", "draft_id", "INTEGER"),
     ]
     try:

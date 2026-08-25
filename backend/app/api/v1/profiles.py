@@ -109,6 +109,7 @@ async def save_onboarding(payload: OnboardingRequest, db: Session = Depends(get_
     profile.region = payload.region
     profile.municipality = payload.municipality
     profile.remote_only = 1 if payload.remote_only else 0
+    profile.include_remote = 1 if (payload.include_remote or payload.remote_only) else 0
     profile.search_queries = dump_json_list(payload.search_queries)
     profile.languages = dump_json_list(payload.languages or ["English"])
     profile.onboarded = 1

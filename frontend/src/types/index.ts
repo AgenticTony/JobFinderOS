@@ -93,6 +93,7 @@ export interface Profile {
   region: string | null;
   municipality: string | null;
   remote_only: boolean;
+  include_remote: boolean;
   search_queries: string[];
   languages: string[];
   skills: { name: string; level?: string }[];
@@ -109,6 +110,7 @@ export interface OnboardingPayload {
   region?: string | null;
   municipality?: string | null;
   remote_only: boolean;
+  include_remote: boolean;
   search_queries: string[];
   languages: string[];
 }

@@ -373,6 +373,7 @@ export default function Home() {
           onComplete={handleOnboardingComplete}
           onClose={() => setShowWizard(false)}
           initialLanguages={profile.languages}
+          initialIncludeRemote={profile.include_remote || profile.remote_only}
         />
       )}
     </div>
@@ -1245,7 +1246,7 @@ function ProfileView({
                   <p className="mt-1 text-hi">
                     {profile.country === 'SE' ? 'Sweden' : profile.country === 'GB' ? 'United Kingdom' : profile.country}
                     {profile.municipality ? ` · ${profile.municipality}` : profile.region ? ` · ${profile.region}` : ''}
-                    {profile.remote_only ? ' · remote only' : ''}
+                    {profile.remote_only ? ' · remote only' : profile.include_remote ? ' · local + remote' : ' · strictly local'}
                   </p>
                 </div>
                 <div>

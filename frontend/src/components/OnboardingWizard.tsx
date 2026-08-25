@@ -29,6 +29,7 @@ interface Props {
   onComplete: (payload: OnboardingPayload) => Promise<void>;
   onClose?: () => void; // optional — wizard is modal but re-openable from Profile
   initialLanguages?: string[]; // prefill when re-running setup
+  initialIncludeRemote?: boolean; // prefill when re-running setup
 }
 
 const STEPS = ['Country', 'Location', 'Languages', 'Job titles', 'Confirm'] as const;
@@ -56,13 +57,14 @@ const MODES: { id: SearchMode; label: string; hint: string; icon: typeof Target 
   },
 ];
 
-export default function OnboardingWizard({ onComplete, onClose, initialLanguages }: Props) {
+export default function OnboardingWizard({ onComplete, onClose, initialLanguages, initialIncludeRemote }: Props) {
   const [step, setStep] = useState(0);
   const [geo, setGeo] = useState<GeoData | null>(null);
   const [country, setCountry] = useState('');
   const [region, setRegion] = useState('');
   const [municipality, setMunicipality] = useState('');
   const [remoteOnly, setRemoteOnly] = useState(false);
+  const [includeRemote, setIncludeRemote] = useState(Boolean(initialIncludeRemote));
   const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']);
   const [mode, setMode] = useState<SearchMode>('field');
   const [directQueries, setDirectQueries] = useState<string[]>([]);
@@ -150,6 +152,7 @@ export default function OnboardingWizard({ onComplete, onClose, initialLanguages
         region: region || null,
         municipality: municipality || null,
         remote_only: remoteOnly,
+        include_remote: includeRemote || remoteOnly,
         search_queries: [...selected],
         languages,
       });
@@ -277,7 +280,37 @@ export default function OnboardingWizard({ onComplete, onClose, initialLanguages
                       </select>
                     </label>
                     <button
-                      onClick={() => setRemoteOnly(!remoteOnly)}
+                      onClick={() => setIncludeRemote(!includeRemote)}
+                      aria-pressed={includeRemote}
+                      className="flex w-full items-center justify-between rounded-lg border border-line p-3 text-left transition-colors hover:border-line-2"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-hi">Include remote jobs</p>
+                        <p className="text-xs text-low">
+                          Also search worldwide remote boards (remotive, jobicy…). Leave off to
+                          search strictly your area.
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          'h-6 w-11 shrink-0 rounded-full p-0.5 transition-colors',
+                          includeRemote ? 'bg-signal' : 'bg-line-2'
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'block h-5 w-5 rounded-full bg-hi transition-transform',
+                            includeRemote && 'translate-x-5'
+                          )}
+                        />
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        const next = !remoteOnly;
+                        setRemoteOnly(next);
+                        if (next) setIncludeRemote(true); // remote-only implies remote opt-in
+                      }}
                       aria-pressed={remoteOnly}
                       className="flex w-full items-center justify-between rounded-lg border border-line p-3 text-left transition-colors hover:border-line-2"
                     >
@@ -287,7 +320,7 @@ export default function OnboardingWizard({ onComplete, onClose, initialLanguages
                       </div>
                       <span
                         className={cn(
-                          'h-6 w-11 rounded-full p-0.5 transition-colors',
+                          'h-6 w-11 shrink-0 rounded-full p-0.5 transition-colors',
                           remoteOnly ? 'bg-signal' : 'bg-line-2'
                         )}
                       >
@@ -453,7 +486,7 @@ export default function OnboardingWizard({ onComplete, onClose, initialLanguages
                   <div className="mt-5 space-y-2.5 rounded-xl border border-line bg-ink/60 p-4 text-sm">
                     <SummaryRow label="Country" value={`${flagFor(country)} ${nameFor(geo, country)}`} />
                     <SummaryRow label="Area" value={[municipality, region].filter(Boolean).join(', ') || 'everywhere'} />
-                    <SummaryRow label="Remote" value={remoteOnly ? 'remote jobs only' : 'on-site + remote'} />
+                    <SummaryRow label="Remote" value={remoteOnly ? 'remote jobs only' : includeRemote ? 'local + remote' : 'strictly local'} />
                     <SummaryRow label="Languages" value={languages.join(', ')} />
                     <SummaryRow label="Strategy" value={MODES.find((m) => m.id === mode)?.label ?? mode} />
                     <SummaryRow label="Job titles" value={`${selected.size} search queries`} />
