@@ -644,6 +644,9 @@ function ApplicationsView({
   const [openId, setOpenId] = useState<number | null>(() =>
     openDrafts.length === 1 ? openDrafts[0].id : null
   );
+  const draftById = new Map(drafts.map((d) => [d.id, d]));
+  const draftFor = (a: (Application & { job?: { title: string; company: string | null } })) =>
+    a.draft_id ? draftById.get(a.draft_id) : undefined;
 
   return (
     <div className="space-y-10">
@@ -676,7 +679,10 @@ function ApplicationsView({
 
       {/* Stage 2: sent history */}
       <section>
-        <ViewHeader title="Sent applications" sub="Everything you've released — by email or through a browser." />
+        <ViewHeader
+          title="Sent applications"
+          sub="Everything you've released — by email or through a browser. Open one to re-read the letter or re-download the PDFs."
+        />
         {applications.length === 0 ? (
           <Empty
             icon={<Send className="h-8 w-8" />}
@@ -686,56 +692,144 @@ function ApplicationsView({
         ) : (
           <div className="space-y-3">
             {applications.map((a) => (
-              <div
-                key={a.id}
-                className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface/80 p-4"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-hi">
-                    {a.job?.title ?? `Job #${a.job_id}`}
-                  </p>
-                  <p className="text-sm text-low">
-                    {a.job?.company} · {a.method} · {timeAgo(a.created_at)}
-                  </p>
-                  {a.error && <p className="mt-1 text-sm text-bad">{a.error}</p>}
-                </div>
-                <span
-                  className={cn(
-                    'rounded-full px-2.5 py-1 text-xs font-medium',
-                    a.status === 'sent' && 'bg-ok/15 text-ok',
-                    a.status === 'manual_pending' && 'bg-signal/15 text-signal',
-                    a.status === 'failed' && 'bg-bad/15 text-bad',
-                    a.status === 'queued' && 'bg-surface-2 text-mid'
-                  )}
-                >
-                  {a.status === 'sent' ? 'sent ✓' : a.status.replace('_', ' ')}
-                </span>
-                {a.status === 'manual_pending' && a.apply_url && (
-                  <a
-                    href={a.apply_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
-                  >
-                    <ExternalLink className="h-4 w-4" /> Open posting
-                  </a>
-                )}
-                {a.status === 'failed' && a.method === 'email' && (
-                  <button
-                    onClick={async () => {
-                      await retryApplication(a.id);
-                      onChanged();
-                    }}
-                    className="rounded-lg bg-signal px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-signal/90"
-                  >
-                    Retry
-                  </button>
-                )}
-              </div>
+              <SentApplicationCard key={a.id} application={a} draft={draftFor(a)} onChanged={onChanged} />
             ))}
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+// A sent application: header row with status/actions; expands to re-read
+// the letter and re-download the PDFs (the draft survives submission).
+function SentApplicationCard({
+  application,
+  draft,
+  onChanged,
+}: {
+  application: Application & { job?: { title: string; company: string | null } };
+  draft?: ApplicationDraft;
+  onChanged: () => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const a = application;
+  const hasDocuments = Boolean(draft && (draft.cover_letter || draft.tailored_cv));
+
+  return (
+    <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-3 p-4',
+          hasDocuments && 'cursor-pointer'
+        )}
+        onClick={hasDocuments ? () => setExpanded(!expanded) : undefined}
+      >
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium text-hi">
+            {a.job?.title ?? `Job #${a.job_id}`}
+          </p>
+          <p className="text-sm text-low">
+            {a.job?.company} · {a.method} · {timeAgo(a.created_at)}
+          </p>
+          {a.error && <p className="mt-1 text-sm text-bad">{a.error}</p>}
+        </div>
+        <span
+          className={cn(
+            'rounded-full px-2.5 py-1 text-xs font-medium',
+            a.status === 'sent' && 'bg-ok/15 text-ok',
+            a.status === 'manual_pending' && 'bg-signal/15 text-signal',
+            a.status === 'failed' && 'bg-bad/15 text-bad',
+            a.status === 'queued' && 'bg-surface-2 text-mid'
+          )}
+        >
+          {a.status === 'sent'
+            ? 'sent ✓'
+            : a.status === 'manual_pending'
+              ? 'finish on portal'
+              : a.status.replace('_', ' ')}
+        </span>
+        {a.status === 'manual_pending' && a.apply_url && (
+          <a
+            href={a.apply_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
+          >
+            <ExternalLink className="h-4 w-4" /> Open posting
+          </a>
+        )}
+        {a.status === 'failed' && a.method === 'email' && (
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              await retryApplication(a.id);
+              onChanged();
+            }}
+            className="rounded-lg bg-signal px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-signal/90"
+          >
+            Retry
+          </button>
+        )}
+        {hasDocuments && (
+          <ChevronDown
+            className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
+          />
+        )}
+      </div>
+
+      <AnimatePresence>
+        {expanded && hasDocuments && draft && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden border-t border-line"
+          >
+            <div className="space-y-4 p-4">
+              {draft.cover_letter && (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
+                      Cover letter
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => window.open(draftCoverLetterPdfUrl(draft.id), '_blank', 'noopener')}
+                        className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
+                      >
+                        <Download className="h-3.5 w-3.5" /> PDF
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-ink p-3 font-mono text-xs leading-relaxed text-mid">
+                    {draft.cover_letter}
+                  </pre>
+                </div>
+              )}
+              {draft.tailored_cv && (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
+                      CV sent
+                    </p>
+                    <button
+                      onClick={() => window.open(draftCvPdfUrl(draft.id), '_blank', 'noopener')}
+                      className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
+                    >
+                      <Download className="h-3.5 w-3.5" /> PDF
+                    </button>
+                  </div>
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-ink p-3 font-mono text-xs leading-relaxed text-mid">
+                    {draft.tailored_cv}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
