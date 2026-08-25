@@ -28,7 +28,7 @@ import MatchCard from '@/components/MatchCard';
 import OnboardingWizard from '@/components/OnboardingWizard';
 import Sidebar, { NAV, type View } from '@/components/Sidebar';
 import HuntPulse from '@/components/HuntPulse';
-import NextHunt, { LiveDot } from '@/components/NextHunt';
+import NextHunt from '@/components/NextHunt';
 import {
   decideMatch,
   draftCoverLetterPdfUrl,
@@ -526,8 +526,7 @@ function DashboardView({
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-low">
               Automatic hunts
             </p>
-            <div className="mt-2 flex items-center gap-2.5">
-              <LiveDot />
+            <div className="mt-2">
               <NextHunt
                 nextRunAt={pipeStatus?.next_run_at ?? null}
                 schedulerEnabled={pipeStatus?.scheduler_enabled ?? false}
