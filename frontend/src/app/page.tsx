@@ -232,12 +232,11 @@ export default function Home() {
                 TalentHive key works) to enable AI matching.
               </Warning>
             )}
-            {status.ai_enabled && !status.email_apply_enabled && (
-              <Warning tone="amber">
-                Email auto-apply disabled — set RESEND_API_KEY + APPLY_FROM_EMAIL in{' '}
-                <code>backend/.env</code> to enable one-click email applications.
-              </Warning>
-            )}
+            {/* Email-apply config is deliberately NOT banner-warned: the platform's
+                email path is Composio connected-email (see CLAUDE.md decided
+                architecture), and the draft card already shows a precise error at
+                submit time if Resend keys are missing. Warn at the action, not
+                permanently. */}
           </div>
         )}
 
@@ -951,16 +950,9 @@ function ProfileView({
 
 // ---------------- Shared ----------------
 
-function Warning({ children, tone = 'rose' }: { children: React.ReactNode; tone?: 'rose' | 'amber' }) {
+function Warning({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className={cn(
-        'flex items-start gap-2 rounded-lg border p-3 text-sm',
-        tone === 'rose'
-          ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
-          : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-      )}
-    >
+    <div className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
       <div>{children}</div>
     </div>
