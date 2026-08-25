@@ -193,10 +193,15 @@ within 1-6 pts. Both rank approved > junk correctly every run. Conclusion:
 and rubric anchors in the prompt. Re-run the harness after anchoring; 5.1's
 case is consistency + speed + concurrency. Caveat: user approvals partly echo
 4.6's on-screen scores (circular labels) — clean signal = approved→sent→reply.
-Decision: matcher stays 4.6 until ~3-5k users (embeddings-filtered load);
-upgrade path = batch-5-per-call -> glm-5.1 with threshold recalibration (A/B over
-~50 stored jobs with known decisions) -> Z.ai tier bump. 5.1 goes first to the
-interactive/tailoring lane when adopted.
+DECISION (same day): switched the whole service to glm-5.1 (GLM_MODEL in
+.env/config). After rubric anchors + temperature 0 were added to the matching
+prompt, 4.6 STILL swung 84/42 on a borderline job; 5.1's worst spread was 13
+and its anchored scores land correctly in the existing tier bands (top approved
+82-85, mid 65-72, borderline 42-55, junk 8-15) — existing thresholds hold
+(keep-min 25, excellent >=80). 5.1 also ~30% faster + 10x concurrent; user's
+max yearly plan makes cost moot. Tailor/profile/suggest calls also run on 5.1
+(better writing, single calls) at their own temperature (0.3 via default).
+Remaining upgrade levers: batch-5-per-call, Z.ai tier.
 
 ## Pipeline gates & hygiene (all enforced every run)
 
