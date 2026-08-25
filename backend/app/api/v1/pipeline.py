@@ -64,7 +64,7 @@ async def status(db: Session = Depends(get_db)):
     from app.services.scheduler import get_next_run_time
 
     next_run = get_next_run_time()
-    runs = list_scrape_runs(db, limit=10)
+    runs = list_scrape_runs(db, limit=12)
     return {
         "sources_available": sorted(SCRAPER_REGISTRY.keys()),
         "sources_enabled": settings.get_scrape_sources(),

@@ -423,16 +423,14 @@ function DashboardView({
 }) {
   const decisions = [...pendingMatches].sort((a, b) => b.score - a.score).slice(0, 5);
   const matchFailed = pipelineResult?.match?.status === 'failed';
-  const lastRuns = (pipeStatus?.recent_runs ?? []).slice(0, 6);
-  // New jobs from the most recent hunt (rows sharing the newest started_at)
-  const allRuns = pipeStatus?.recent_runs ?? [];
-  const latestAt = allRuns.reduce<string | null>(
-    (max, r) => (!max || r.started_at > max ? r.started_at : max),
-    null
-  );
-  const newSinceLastRun = latestAt
-    ? allRuns.filter((r) => r.started_at === latestAt).reduce((sum, r) => sum + r.jobs_new, 0)
-    : 0;
+  // Group rows into whole hunts: a run's sources finish seconds apart, separate
+  // hunts are hours apart. Rows within 10 minutes of the newest row = last hunt.
+  const runs = pipeStatus?.recent_runs ?? [];
+  const latestAt = runs[0] ? new Date(runs[0].started_at).getTime() : 0;
+  const lastHunt = latestAt
+    ? runs.filter((r) => latestAt - new Date(r.started_at).getTime() < 10 * 60 * 1000)
+    : [];
+  const newSinceLastRun = lastHunt.reduce((sum, r) => sum + r.jobs_new, 0);
 
   return (
     <section className="space-y-6">
@@ -545,14 +543,14 @@ function DashboardView({
             )}
           </div>
 
-          {/* Source health */}
-          {lastRuns.length > 0 && (
+          {/* Source health — the complete last hunt, every source */}
+          {lastHunt.length > 0 && (
             <div className="rounded-xl border border-line bg-surface/80 p-4">
               <p className="mb-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-low">
                 Last hunt · sources
               </p>
               <div className="space-y-1.5">
-                {lastRuns.map((r, i) => (
+                {lastHunt.map((r, i) => (
                   <div key={`${r.source}-${i}`} className="flex items-center justify-between gap-3 text-xs">
                     <span className="truncate text-mid">{r.source}</span>
                     <span
@@ -560,11 +558,17 @@ function DashboardView({
                         'num shrink-0',
                         r.status === 'completed'
                           ? 'text-ok'
-                          : 'text-bad'
+                          : r.status === 'skipped'
+                            ? 'text-low'
+                            : 'text-bad'
                       )}
                       title={r.error ?? undefined}
                     >
-                      {r.status === 'completed' ? `${r.jobs_found}↑ ${r.jobs_new}+` : 'failed'}
+                      {r.status === 'completed'
+                        ? `${r.jobs_found}↑ ${r.jobs_new}+`
+                        : r.status === 'skipped'
+                          ? 'skipped'
+                          : 'failed'}
                     </span>
                   </div>
                 ))}
