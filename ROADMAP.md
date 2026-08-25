@@ -59,8 +59,18 @@ Pipeline: harvest → gate → store → match/score → decide → tailor → s
 - **Composio:** one platform key brokers all connections; users OAuth their
   own Gmail, filed under per-user entity IDs (already implemented). Sending
   applications through user Gmail = the MailSender follow-up.
-- **Pricing:** £10–15/mo holds. AI ≈ $0.30–1.20/user/mo realistic; board APIs
-  free through beta; storage a rounding line.
+- **Pricing (deep-dived Aug 2026):** £12/mo VAT-inclusive launch → £19 once
+  outcome stats justify it (grandfather early users); annual ~£99 (2 months
+  free) to fight job-seeker churn; explicit refund-friendly policy.
+  Unit economics (measured): COGS ≈ £1.10–1.50/user/mo (GLM £0.35–0.65,
+  infra £0.25–0.45, Stripe £0.40, boards £0) → ~85% net margin after VAT
+  (£9.6 net of UK 20%). Lifetime ≈ 2–4 months (job-seeker churn) → LTV
+  ≈ £24–25 profit; CAC must stay <£10 → organic-only at launch (Reddit,
+  outcome stats, word of mouth). Break-even: 1 user (beta) / 5 (growth) /
+  ~30 (1k-user scale). Competitor scale reality: AIApply 2M registered but
+  ~1K paying (0.05-0.1% conversion, $19/mo @ ~30% margin, profits from
+  credits); JobRight $39.99; flat pricing at £12 is bottom-of-market with
+  best-in-class margin because scraping/OpenAI-retail costs aren't in our stack.
 
 ## Phases
 
