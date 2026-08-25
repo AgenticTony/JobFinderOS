@@ -77,13 +77,15 @@ function HuntPulseBase({
   openDrafts,
   matchingRunning,
   onOpenMatches,
-  onOpenApplications,
+  onOpenReview,
+  onOpenSent,
 }: {
   stats: Stats | undefined;
   openDrafts: number;
   matchingRunning: boolean;
   onOpenMatches: () => void;
-  onOpenApplications: () => void;
+  onOpenReview: () => void;
+  onOpenSent: () => void;
 }) {
   const pending = stats?.matches_pending_decision ?? 0;
   const last24 = stats?.jobs_last_24h ?? 0;
@@ -162,9 +164,11 @@ function HuntPulseBase({
               onClick={
                 stage.id === 'awaiting'
                   ? onOpenMatches
-                  : stage.id === 'drafts' || stage.id === 'sent'
-                    ? onOpenApplications
-                    : undefined
+                  : stage.id === 'drafts'
+                    ? onOpenReview
+                    : stage.id === 'sent'
+                      ? onOpenSent
+                      : undefined
               }
             />
           </div>

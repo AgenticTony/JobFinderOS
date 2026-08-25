@@ -1,22 +1,51 @@
 'use client';
 
-// Sidebar — the console's instrument rail. Holds navigation, the hunt
-// trigger, the live next-hunt status, and the user chip. Collapses to an
-// icon rail on md screens; on small screens the page renders a mobile
-// top bar instead (this component is hidden below md).
+// Sidebar — the console's instrument rail. Navigation with expandable
+// groups (Better Stack / Midday pattern): Matches and Applications each
+// own two dedicated pages. Collapses to an icon rail on md screens; on
+// small screens the page renders a mobile top bar instead (this
+// component is hidden below md).
 
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Crosshair, LayoutDashboard, Radar, Send, User } from 'lucide-react';
+import { ChevronDown, Crosshair, LayoutDashboard, Radar, Send, User } from 'lucide-react';
 import type { Profile } from '@/types';
 import { cn } from '@/lib/utils';
-import NextHunt, { useNextRunLabel } from './NextHunt';
+import NextHunt from './NextHunt';
 
-export type View = 'dashboard' | 'matches' | 'applications' | 'profile';
+export type View =
+  | 'dashboard'
+  | 'matches'
+  | 'matches-approved'
+  | 'apps-review'
+  | 'apps-sent'
+  | 'profile';
 
-export const NAV: { id: View; label: string; icon: typeof Radar }[] = [
+export const NAV: {
+  id: View;
+  label: string;
+  icon: typeof Radar;
+  children?: { id: View; label: string; count?: number }[];
+}[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'matches', label: 'Matches', icon: Crosshair },
-  { id: 'applications', label: 'Applications', icon: Send },
+  {
+    id: 'matches',
+    label: 'Matches',
+    icon: Crosshair,
+    children: [
+      { id: 'matches', label: 'Awaiting you' },
+      { id: 'matches-approved', label: 'Approved' },
+    ],
+  },
+  {
+    id: 'apps-review',
+    label: 'Applications',
+    icon: Send,
+    children: [
+      { id: 'apps-review', label: 'Review & send' },
+      { id: 'apps-sent', label: 'Sent' },
+    ],
+  },
   { id: 'profile', label: 'Profile', icon: User },
 ];
 
@@ -24,6 +53,7 @@ export default function Sidebar({
   view,
   onNavigate,
   pendingCount,
+  reviewCount,
   nextRunAt,
   schedulerEnabled,
   intervalMinutes,
@@ -34,6 +64,7 @@ export default function Sidebar({
   view: View;
   onNavigate: (v: View) => void;
   pendingCount: number;
+  reviewCount: number;
   nextRunAt: string | null;
   schedulerEnabled: boolean;
   intervalMinutes: number;
@@ -41,6 +72,16 @@ export default function Sidebar({
   onEditSetup: () => void;
   children?: React.ReactNode; // slot under the nav (e.g. hunt trigger)
 }) {
+  // Which group is unfolded; the group owning the active page stays open
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  useEffect(() => {
+    const group = NAV.find((n) => n.children?.some((c) => c.id === view));
+    setOpenGroup(group ? group.label : null);
+  }, [view]);
+
+  const countFor = (id: View) =>
+    id === 'matches' ? pendingCount : id === 'apps-review' ? reviewCount : 0;
+
   const initials =
     (profile?.full_name ?? '')
       .split(/\s+/)
@@ -64,33 +105,82 @@ export default function Sidebar({
 
       {/* Nav */}
       <nav className="flex flex-col gap-1" aria-label="Main">
-        {NAV.map(({ id, label, icon: Icon }) => {
-          const active = view === id;
+        {NAV.map(({ id, label, icon: Icon, children: navChildren }) => {
+          const active =
+            view === id || (navChildren?.some((c) => c.id === view) && id !== view) || false;
+          const groupActive = Boolean(navChildren?.some((c) => c.id === view));
+          const isOpen = openGroup === label;
+
           return (
-            <button
-              key={id}
-              onClick={() => onNavigate(id)}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                active ? 'text-signal' : 'text-mid hover:bg-surface-2 hover:text-hi'
+            <div key={id}>
+              <button
+                onClick={() => {
+                  if (navChildren) {
+                    setOpenGroup(isOpen && !groupActive ? null : label);
+                    if (!groupActive || !isOpen) onNavigate(navChildren[0].id);
+                  } else {
+                    onNavigate(id);
+                  }
+                }}
+                aria-current={active ? 'page' : undefined}
+                aria-expanded={navChildren ? isOpen : undefined}
+                className={cn(
+                  'group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  active ? 'text-signal' : 'text-mid hover:bg-surface-2 hover:text-hi'
+                )}
+              >
+                {active && !navChildren && (
+                  <motion.span
+                    layoutId="nav-indicator"
+                    className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-signal"
+                    transition={{ type: 'spring', stiffness: 100, damping: 20 }}
+                  />
+                )}
+                <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                <span className="hidden min-w-0 flex-1 text-left lg:inline">{label}</span>
+                {navChildren && (
+                  <ChevronDown
+                    className={cn(
+                      'hidden h-4 w-4 shrink-0 transition-transform lg:block',
+                      groupActive && 'text-signal',
+                      isOpen && 'rotate-180'
+                    )}
+                    aria-hidden
+                  />
+                )}
+              </button>
+
+              {/* Sub-pages */}
+              {navChildren && isOpen && (
+                <div className="mt-0.5 hidden space-y-0.5 lg:block">
+                  {navChildren.map((c) => {
+                    const childActive = view === c.id;
+                    const count = countFor(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => onNavigate(c.id)}
+                        aria-current={childActive ? 'page' : undefined}
+                        className={cn(
+                          'relative flex w-full items-center gap-2.5 rounded-lg py-1.5 pl-10 pr-3 text-[13px] transition-colors',
+                          childActive ? 'text-signal' : 'text-low hover:bg-surface-2 hover:text-mid'
+                        )}
+                      >
+                        {childActive && (
+                          <span className="absolute left-[22px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-signal" />
+                        )}
+                        <span className="min-w-0 flex-1 text-left">{c.label}</span>
+                        {count > 0 && (
+                          <span className="num rounded-full bg-signal/15 px-1.5 text-[11px] text-signal">
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            >
-              {active && (
-                <motion.span
-                  layoutId="nav-indicator"
-                  className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-signal"
-                  transition={{ type: 'spring', stiffness: 100, damping: 20 }}
-                />
-              )}
-              <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
-              <span className="hidden lg:inline">{label}</span>
-              {id === 'matches' && pendingCount > 0 && (
-                <span className="num ml-auto hidden rounded-full bg-signal/15 px-1.5 py-0.5 text-[11px] text-signal lg:inline">
-                  {pendingCount}
-                </span>
-              )}
-            </button>
+            </div>
           );
         })}
       </nav>
@@ -136,18 +226,4 @@ export default function Sidebar({
       </div>
     </aside>
   );
-}
-
-// Compact label used by the mobile top bar ("next hunt in 1h 22m")
-export function NextHuntLabel({
-  nextRunAt,
-  schedulerEnabled,
-  intervalMinutes,
-}: {
-  nextRunAt: string | null;
-  schedulerEnabled: boolean;
-  intervalMinutes: number;
-}) {
-  const label = useNextRunLabel(nextRunAt, schedulerEnabled, intervalMinutes);
-  return <span className="num text-xs text-low">{label}</span>;
 }

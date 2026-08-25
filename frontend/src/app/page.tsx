@@ -70,7 +70,6 @@ export default function Home() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [drafts, setDrafts] = useState<ApplicationDraft[]>([]);
   const [applications, setApplications] = useState<(Application & { job?: { title: string; company: string | null } })[]>([]);
-  const [matchesFilter, setMatchesFilter] = useState<'pending' | 'approved'>('pending');
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [matchPolling, setMatchPolling] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<PipelineRunResponse | null>(null);
@@ -183,7 +182,7 @@ export default function Home() {
 
   const handlePrepare = async (jobId: number) => {
     await prepareDraft(jobId); // tailors CV + cover letter (~5-20s)
-    setView('applications'); // take the user straight to the review stage
+    setView('apps-review'); // take the user straight to the review stage
     await refresh();
   };
 
@@ -198,10 +197,6 @@ export default function Home() {
     .filter((m) => m.decision === 'approved' && !appliedJobIds.has(m.job_id))
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
-
-  const filteredMatches = matches.filter((m) =>
-    matchesFilter === 'approved' ? m.decision === 'approved' : !m.decision
-  );
 
   const stats = pipeStatus?.stats ?? status?.stats;
   const openDrafts = drafts.filter((d) => d.status !== 'submitted').length;
@@ -245,17 +240,21 @@ export default function Home() {
           {huntButton(true)}
         </div>
         <nav className="flex border-t border-line" aria-label="Main">
-          {NAV.map(({ id, label, icon: Icon }) => (
+          {NAV.map(({ id, label, icon: Icon }) => {
+            const active =
+              view === id ||
+              Boolean(NAV.find((n) => n.id === id)?.children?.some((c) => c.id === view));
+            return (
             <button
               key={id}
               onClick={() => setView(id)}
-              aria-current={view === id ? 'page' : undefined}
+              aria-current={active ? 'page' : undefined}
               className={cn(
                 'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium',
-                view === id ? 'text-signal' : 'text-low hover:text-mid'
+                active ? 'text-signal' : 'text-low hover:text-mid'
               )}
             >
-              {view === id && <span className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-signal" />}
+              {active && <span className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-signal" />}
               <Icon className="h-[18px] w-[18px]" aria-hidden />
               {label}
               {id === 'matches' && pendingCount > 0 && (
@@ -264,7 +263,8 @@ export default function Home() {
                 </span>
               )}
             </button>
-          ))}
+            );
+          })}
         </nav>
       </header>
 
@@ -273,6 +273,7 @@ export default function Home() {
           view={view}
           onNavigate={setView}
           pendingCount={pendingCount}
+          reviewCount={openDrafts}
           nextRunAt={pipeStatus?.next_run_at ?? null}
           schedulerEnabled={pipeStatus?.scheduler_enabled ?? false}
           intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
@@ -305,7 +306,8 @@ export default function Home() {
                     profileStatus={status}
                     openDrafts={openDrafts}
                     onOpenMatches={() => setView('matches')}
-                    onOpenApplications={() => setView('applications')}
+                    onOpenReview={() => setView('apps-review')}
+                    onOpenSent={() => setView('apps-sent')}
                     onHunt={handleRunPipeline}
                     pendingMatches={matches.filter((m) => !m.decision)}
                     finishApplying={finishApplying}
@@ -315,61 +317,25 @@ export default function Home() {
                   />
                 )}
 
-                {view === 'matches' && (
-                  <section>
-                    <ViewHeader
-                      title="Matches"
-                      sub="Every job the AI has ranked against your CV. Approve the ones worth your time."
-                    />
-                    <div className="mb-5 inline-flex rounded-lg border border-line bg-ink p-1">
-                      {(
-                        [
-                          ['pending', 'Awaiting my decision'],
-                          ['approved', 'Approved'],
-                        ] as const
-                      ).map(([id, label]) => (
-                        <button
-                          key={id}
-                          onClick={() => setMatchesFilter(id)}
-                          className={cn(
-                            'rounded-md px-3 py-1.5 text-sm transition-colors',
-                            matchesFilter === id
-                              ? 'bg-surface-2 text-hi'
-                              : 'text-low hover:text-mid'
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    {filteredMatches.length === 0 ? (
-                      <Empty
-                        icon={<Inbox className="h-8 w-8" />}
-                        title="No matches here yet"
-                        body="Hunt now to scrape job sites and match them against your CV."
-                      />
-                    ) : (
-                      <div className="space-y-3">
-                        {filteredMatches.map((m) => (
-                          <MatchCard
-                            key={m.id}
-                            match={m}
-                            onDecision={handleDecision}
-                            onPrepare={handlePrepare}
-                            prepared={preparedJobIds.has(m.job_id)}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </section>
+                {(view === 'matches' || view === 'matches-approved') && (
+                  <MatchesView
+                    approved={view === 'matches-approved'}
+                    matches={matches}
+                    preparedJobIds={preparedJobIds}
+                    onDecision={handleDecision}
+                    onPrepare={handlePrepare}
+                    onSwitch={(v) => setView(v)}
+                  />
                 )}
 
-                {view === 'applications' && (
+                {(view === 'apps-review' || view === 'apps-sent') && (
                   <ApplicationsView
+                    page={view}
                     drafts={drafts}
                     applications={applications}
                     onChanged={refresh}
                     onPrepare={handlePrepare}
+                    onSwitch={(v) => setView(v)}
                   />
                 )}
 
@@ -406,7 +372,8 @@ function DashboardView({
   profileStatus,
   openDrafts,
   onOpenMatches,
-  onOpenApplications,
+  onOpenReview,
+  onOpenSent,
   onHunt,
   pendingMatches,
   finishApplying,
@@ -422,7 +389,8 @@ function DashboardView({
   profileStatus: ProfileStatus | null;
   openDrafts: number;
   onOpenMatches: () => void;
-  onOpenApplications: () => void;
+  onOpenReview: () => void;
+  onOpenSent: () => void;
   onHunt: () => void;
   pendingMatches: Match[];
   finishApplying: Match[];
@@ -450,7 +418,8 @@ function DashboardView({
         openDrafts={openDrafts}
         matchingRunning={matchPolling}
         onOpenMatches={onOpenMatches}
-        onOpenApplications={onOpenApplications}
+        onOpenReview={onOpenReview}
+        onOpenSent={onOpenSent}
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
@@ -472,7 +441,7 @@ function DashboardView({
                     match={m}
                     onDecision={onDecision}
                     onPrepare={onPrepare}
-                    onReview={onOpenApplications}
+                    onReview={onOpenReview}
                     prepared={preparedJobIds.has(m.job_id)}
                   />
                 ))}
@@ -618,6 +587,98 @@ function DashboardView({
   );
 }
 
+// ---------------- Matches ----------------
+
+// Sub-page switcher — only below lg, where the sidebar can't show children
+function SubTabs({
+  options,
+  onSwitch,
+}: {
+  options: { id: View; label: string; active: boolean }[];
+  onSwitch: (v: View) => void;
+}) {
+  return (
+    <div className="mb-5 inline-flex rounded-lg border border-line bg-ink p-1 lg:hidden">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          onClick={() => onSwitch(o.id)}
+          className={cn(
+            'rounded-md px-3 py-1.5 text-sm transition-colors',
+            o.active ? 'bg-surface-2 text-hi' : 'text-low hover:text-mid'
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MatchesView({
+  approved,
+  matches,
+  preparedJobIds,
+  onDecision,
+  onPrepare,
+  onSwitch,
+}: {
+  approved: boolean;
+  matches: Match[];
+  preparedJobIds: Set<number>;
+  onDecision: (matchId: number, decision: 'approved' | 'rejected') => Promise<void>;
+  onPrepare: (jobId: number) => Promise<void>;
+  onSwitch: (v: View) => void;
+}) {
+  const list = matches.filter((m) => (approved ? m.decision === 'approved' : !m.decision));
+
+  return (
+    <section>
+      {approved ? (
+        <ViewHeader
+          title="Approved"
+          sub="The jobs you sent forward — prepare or review their applications."
+        />
+      ) : (
+        <ViewHeader
+          title="Awaiting you"
+          sub="Every job the AI has ranked against your CV. Approve the ones worth your time."
+        />
+      )}
+      <SubTabs
+        onSwitch={onSwitch}
+        options={[
+          { id: 'matches', label: 'Awaiting my decision', active: !approved },
+          { id: 'matches-approved', label: 'Approved', active: approved },
+        ]}
+      />
+      {list.length === 0 ? (
+        <Empty
+          icon={<Inbox className="h-8 w-8" />}
+          title={approved ? 'Nothing approved yet' : 'No matches waiting'}
+          body={
+            approved
+              ? 'Approve a match and it moves here, ready for its tailored application.'
+              : 'Hunt now to scrape job sites and match them against your CV.'
+          }
+        />
+      ) : (
+        <div className="space-y-3">
+          {list.map((m) => (
+            <MatchCard
+              key={m.id}
+              match={m}
+              onDecision={onDecision}
+              onPrepare={onPrepare}
+              prepared={preparedJobIds.has(m.job_id)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ---------------- Applications (draft review + sent history) ----------------
 
 function ViewHeader({ title, sub }: { title: string; sub: string }) {
@@ -630,14 +691,18 @@ function ViewHeader({ title, sub }: { title: string; sub: string }) {
 }
 
 function ApplicationsView({
+  page,
   drafts,
   applications,
   onChanged,
+  onSwitch,
 }: {
+  page: 'apps-review' | 'apps-sent';
   drafts: ApplicationDraft[];
   applications: (Application & { job?: { title: string; company: string | null } })[];
   onChanged: () => Promise<void>;
   onPrepare: (jobId: number) => Promise<void>;
+  onSwitch: (v: View) => void;
 }) {
   const openDrafts = drafts.filter((d) => d.status !== 'submitted');
   // Accordion: one draft open at a time; a single draft opens by itself
@@ -647,42 +712,24 @@ function ApplicationsView({
   const draftById = new Map(drafts.map((d) => [d.id, d]));
   const draftFor = (a: (Application & { job?: { title: string; company: string | null } })) =>
     a.draft_id ? draftById.get(a.draft_id) : undefined;
+  const subTabs = (
+    <SubTabs
+      onSwitch={onSwitch}
+      options={[
+        { id: 'apps-review', label: 'Review & send', active: page === 'apps-review' },
+        { id: 'apps-sent', label: 'Sent', active: page === 'apps-sent' },
+      ]}
+    />
+  );
 
-  return (
-    <div className="space-y-10">
-      {/* Stage 1: drafted applications awaiting review */}
+  if (page === 'apps-sent') {
+    return (
       <section>
         <ViewHeader
-          title="Review before sending"
-          sub="AI tailored your CV and cover letter to each approved job. Open one to read and edit it, then send. Nothing goes out without you."
-        />
-        {openDrafts.length === 0 ? (
-          <Empty
-            icon={<FileText className="h-8 w-8" />}
-            title="No drafts waiting"
-            body="Approve a match and press “Prepare application” — the AI will tailor your CV and cover letter for that job."
-          />
-        ) : (
-          <div className="space-y-3">
-            {openDrafts.map((d) => (
-              <DraftCard
-                key={d.id}
-                draft={d}
-                expanded={openId === d.id}
-                onToggle={() => setOpenId(openId === d.id ? null : d.id)}
-                onChanged={onChanged}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Stage 2: sent history */}
-      <section>
-        <ViewHeader
-          title="Sent applications"
+          title="Sent"
           sub="Everything you've released — by email or through a browser. Open one to re-read the letter or re-download the PDFs."
         />
+        {subTabs}
         {applications.length === 0 ? (
           <Empty
             icon={<Send className="h-8 w-8" />}
@@ -697,7 +744,38 @@ function ApplicationsView({
           </div>
         )}
       </section>
-    </div>
+    );
+  }
+
+  // Accordion state lives up top (rules of hooks); only the review page uses it
+
+  return (
+    <section>
+      <ViewHeader
+        title="Review & send"
+        sub="AI tailored your CV and cover letter to each approved job. Open one to read and edit it, then send. Nothing goes out without you."
+      />
+      {subTabs}
+      {openDrafts.length === 0 ? (
+        <Empty
+          icon={<FileText className="h-8 w-8" />}
+          title="No drafts waiting"
+          body="Approve a match and press “Prepare application” — the AI will tailor your CV and cover letter for that job."
+        />
+      ) : (
+        <div className="space-y-3">
+          {openDrafts.map((d) => (
+            <DraftCard
+              key={d.id}
+              draft={d}
+              expanded={openId === d.id}
+              onToggle={() => setOpenId(openId === d.id ? null : d.id)}
+              onChanged={onChanged}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
