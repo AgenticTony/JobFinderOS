@@ -186,6 +186,13 @@ glm-5.1: ~6.2s/call, 10 concurrent, ~139k/day. Scores 72/22/8 — ordering prese
 systematically lower (thresholds are calibrated to 4.6; recalibrate before switching).
 glm-5.2: ~6s, 10 concurrent. 62/18/8 — lower still.
 glm-4-plus: 429 insufficient quota on current plan — unavailable.
+Follow-up evaluation (same day, user-approved vs junk jobs, 2 runs each):
+4.6 is NOISY — same job scored 92/68 run-to-run (24-pt swing); 5.1 stable
+within 1-6 pts. Both rank approved > junk correctly every run. Conclusion:
+4.6's weakness is variance, not direction; the free fixes are temperature 0.3→0
+and rubric anchors in the prompt. Re-run the harness after anchoring; 5.1's
+case is consistency + speed + concurrency. Caveat: user approvals partly echo
+4.6's on-screen scores (circular labels) — clean signal = approved→sent→reply.
 Decision: matcher stays 4.6 until ~3-5k users (embeddings-filtered load);
 upgrade path = batch-5-per-call -> glm-5.1 with threshold recalibration (A/B over
 ~50 stored jobs with known decisions) -> Z.ai tier bump. 5.1 goes first to the
