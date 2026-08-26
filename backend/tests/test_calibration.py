@@ -98,40 +98,91 @@ class TestTierBands:
 # ---------------------------------------------------------------- layer 2
 
 RUN_LIVE = os.getenv("RUN_CALIBRATION") == "1" and bool(settings.GLM_API_KEY)
-# 50 pooled samples at temp 0: SD 5.5. Alert if SD exceeds 8 — that's
-# the point where ±2×SD (=16) exceeds the dead-band width (12) and the
-# re-score mechanism can no longer absorb the noise.
+# 50 pooled samples at temp 0 across real jobs: SD 5.5. Alert if pooled
+# SD exceeds 8 — that's where ±2×SD (=16) exceeds the dead-band width (12)
+# and the re-score mechanism can no longer absorb the noise.
 MAX_ACCEPTABLE_SD = 8.0
+
+# Ambiguous fixtures: the model must JUDGE these, not pattern-match them.
+# The original synthetic pair (every requirement verbatim in the CV) read
+# SD ~1.1 — five times headroom vs the real 5.5. A calibration test that
+# can't detect real variance is an API smoke test wearing a guard's name.
+CALIBRATION_PAIRS = [
+    {
+        "name": "partial overlap + seniority gap",
+        "cv": (
+            "Career changer with 20 years in casino operations management. "
+            "Recently completed intensive programming bootcamp. Built fullstack "
+            "web app with Python, FastAPI, React. Familiar with SQL and basic "
+            "Docker. No professional software development experience yet — "
+            "seeking first junior developer role."
+        ),
+        "job": (
+            "Senior Fullstack Developer. Requirements: 5+ years professional "
+            "software development. Expert-level React and TypeScript. Strong "
+            "Python backend experience with FastAPI or Django. Production "
+            "experience with PostgreSQL, Redis, and AWS. CI/CD and Kubernetes "
+            "experience preferred. You will lead architecture decisions and "
+            "mentor junior developers."
+        ),
+    },
+    {
+        "name": "adjacent domain + tool gap",
+        "cv": (
+            "Registered nurse with 8 years ICU experience. Master's in Health "
+            "Informatics. Built clinical dashboards with Python and pandas. "
+            "Experience with HL7/FHIR data standards. Learning web development "
+            "with basic HTML/CSS/JavaScript. Strong analytical and "
+            "documentation skills."
+        ),
+        "job": (
+            "Healthcare Data Integration Engineer. Requirements: Experience "
+            "with HL7 v2 and FHIR APIs. Python programming for data pipelines. "
+            "SQL and database design. RESTful API development. Nice to have: "
+            "clinical background, Epic or Cerner integration experience, "
+            "TypeScript/Node.js."
+        ),
+    },
+    {
+        "name": "stack match + domain mismatch",
+        "cv": (
+            "Junior developer. Proficient in Python, JavaScript, React, "
+            "Node.js. Built e-commerce platform and real-time chat app. "
+            "Comfortable with Git, basic AWS, and MongoDB. Self-taught with "
+            "2 years of freelance projects. No formal CS education."
+        ),
+        "job": (
+            "Embedded Systems Developer. Requirements: C/C++ programming for "
+            "ARM microcontrollers. Experience with RTOS, device drivers, and "
+            "hardware-software interface. Familiarity with firmware debugging "
+            "tools (JTAG, oscilloscope). Nice to have: Python for test "
+            "automation, CI/CD for embedded targets."
+        ),
+    },
+]
 
 
 @pytest.mark.skipif(not RUN_LIVE, reason="needs RUN_CALIBRATION=1 and GLM_API_KEY")
 class TestLiveVariance:
     """Re-measures the real model. Costs API calls; opt-in only.
 
-    Asserts on STANDARD DEVIATION, not max−min. Spread only moves up with
-    sample count, so every spread-based threshold is a lower bound pretending
-    to be a limit — three honest runs at n=5 measured 7.0 / 9.8 / 14.0 and
-    disagreed about whether the model was within tolerance. SD is the
-    statistic the dead-band width is derived from (2×SD), so it's the
-    statistic this test must measure.
+    Asserts on POOLED STANDARD DEVIATION across multiple ambiguous pairs,
+    not max−min of a single easy pair. Spread only moves up with sample
+    count; SD across diverse inputs is the statistic the dead-band width
+    is derived from. The fixtures are deliberately ambiguous (partial
+    overlap, seniority gaps, domain mismatches) because the model must
+    JUDGE them — a near-perfect match by construction produces artificially
+    low variance (~1.1 SD vs the ~5.5 measured on real jobs).
     """
 
     RUNS = 5
 
-    def test_same_input_scores_within_tolerance(self):
-        """Self-contained: creates its own profile + job in the TEST database
-        (conftest sets DATABASE_URL) so the live calibration never depends
-        on or touches the production database."""
-        import uuid
-
+    def _ensure_schema(self):
         from alembic.config import Config
-
-        # Ensure schema exists (conftest's test DB may not have tables yet)
         from sqlalchemy import inspect
 
         from alembic import command
-        from app.core.database import SessionLocal, engine
-        from app.models import JobPosting, Profile
+        from app.core.database import engine
         if not inspect(engine).get_table_names():
             cfg = Config("alembic.ini")
             cfg.set_main_option(
@@ -140,57 +191,74 @@ class TestLiveVariance:
             )
             command.upgrade(cfg, "head")
 
-        db = SessionLocal()
-        # Minimal but realistic inputs — enough for a meaningful score
-        profile = Profile(
-            user_id=uuid.uuid4(), is_active=1,
-            full_name="Calibration Test",
-            cv_text="Junior fullstack developer. Python, FastAPI, React, TypeScript. "
-                    "Built AI CV-screening tool with Next.js frontend and FastAPI backend. "
-                    "Experience with PostgreSQL, Docker, Azure. Currently studying AI development.",
-        )
-        job = JobPosting(
-            source="calibration", source_id=uuid.uuid4().hex[:8],
-            title="Junior Fullstack Developer",
-            company="Calibration Corp",
-            url=f"https://calibration.test/{uuid.uuid4().hex[:6]}",
-            description="We are looking for a junior fullstack developer with React, "
-                        "TypeScript and Python experience. You will build web applications "
-                        "using modern frameworks and work with PostgreSQL databases.",
-            status="new",
-        )
-        db.add_all([profile, job])
-        db.commit()
-        db.refresh(profile)
-        db.refresh(job)
+    def test_same_input_scores_within_tolerance(self):
+        import uuid
 
+        self._ensure_schema()
+
+        from app.core.database import SessionLocal
+        from app.models import JobPosting, Profile
         from app.services.cv_service import build_profile_context
         from app.services.matcher_service import _job_text
 
-        ctx, cv, text = build_profile_context(profile), profile.cv_text, _job_text(job)
-        profile_id, job_id = profile.id, job.id
-        db.query(JobPosting).filter(JobPosting.id == job_id).delete()
-        db.query(Profile).filter(Profile.id == profile_id).delete()
-        db.commit()
-        db.close()
-
         svc = AIService()
-        scores = []
-        for _ in range(self.RUNS):
-            scores.append(
-                svc.match_job(profile_context=ctx, cv_text=cv, job_description=text)["score"]
+        all_scores = []
+        pair_summaries = []
+
+        for pair in CALIBRATION_PAIRS:
+            db = SessionLocal()
+            profile = Profile(
+                user_id=uuid.uuid4(), is_active=1,
+                full_name="Calibration Test",
+                cv_text=pair["cv"],
             )
-        sd = statistics.stdev(scores)
-        spread = max(scores) - min(scores)
+            job = JobPosting(
+                source="calibration", source_id=uuid.uuid4().hex[:8],
+                title=pair["name"],
+                company="Calibration Corp",
+                url=f"https://calibration.test/{uuid.uuid4().hex[:6]}",
+                description=pair["job"],
+                status="new",
+            )
+            db.add_all([profile, job])
+            db.commit()
+            db.refresh(profile)
+            db.refresh(job)
+
+            ctx = build_profile_context(profile)
+            text = _job_text(job)
+            profile_id, job_id = profile.id, job.id
+            db.query(JobPosting).filter(JobPosting.id == job_id).delete()
+            db.query(Profile).filter(Profile.id == profile_id).delete()
+            db.commit()
+            db.close()
+
+            scores = []
+            for _ in range(self.RUNS):
+                scores.append(
+                    svc.match_job(profile_context=ctx, cv_text=pair["cv"], job_description=text)["score"]
+                )
+            pair_sd = statistics.stdev(scores) if len(scores) > 1 else 0
+            all_scores.extend(scores)
+            pair_summaries.append((pair["name"], sorted(scores), pair_sd))
+
+        # Average WITHIN-JOB SD — the variance of scoring the SAME input
+        # repeatedly. Pooled SD across different jobs would include between-
+        # job variance (real score differences), which is not noise.
+        within_job_sds = [sd for _, _, sd in pair_summaries]
+        avg_within_sd = statistics.mean(within_job_sds)
+
+        for name, scores, sd in pair_summaries:
+            print(f"  {name}: scores={scores} SD={sd:.1f} mean={statistics.mean(scores):.1f}")
         print(
             f"\n  model={svc.model} version={AIService.matching_prompt_version()} "
-            f"scores={sorted(scores)} SD={sd:.1f} spread={spread} "
-            f"mean={statistics.mean(scores):.1f}"
+            f"avg within-job SD={avg_within_sd:.1f} (per-pair: {[f'{s:.1f}' for s in within_job_sds]}) "
+            f"n={len(all_scores)} total samples"
         )
-        assert sd <= MAX_ACCEPTABLE_SD, (
-            f"Score SD {sd:.1f} over {self.RUNS} runs exceeds {MAX_ACCEPTABLE_SD}. "
-            f"scores={sorted(scores)}, spread={spread}. At SD > 8, 2×SD exceeds "
-            "the dead-band width and borderline jobs are again dismissed on noise. "
-            "Check that match_job still passes temperature=0.0 — the fix has "
-            "silently moved to another call before."
+        assert avg_within_sd <= MAX_ACCEPTABLE_SD, (
+            f"Average within-job SD {avg_within_sd:.1f} exceeds {MAX_ACCEPTABLE_SD}. "
+            f"Per-pair SDs: {[f'{name}: {sd:.1f}' for name, _, sd in pair_summaries]}. "
+            "At SD > 8, 2×SD exceeds the dead-band width and borderline jobs "
+            "are again dismissed on noise. Check that match_job still passes "
+            "temperature=0.0 — the fix has silently moved to another call before."
         )
