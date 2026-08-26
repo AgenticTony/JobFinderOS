@@ -527,6 +527,54 @@ class TestLayer1Routes:
             f"subject built from the wrong profile: {r.json()['subject']!r}"
         )
 
+    def test_submit_route_resolves_the_callers_profile_not_the_newest(self, client, db, monkeypatch):
+        """The tenancy boundary, crossed: TWO profiles in the table.
+
+        The route tests above seed one profile each, so a route that
+        resolves 'the' profile instead of 'the caller's' returns the right
+        one by accident — the reviewer regressed the submit route to the
+        literal pre-Layer-0 lookup (order_by(Profile.id.desc()).first())
+        and all 62 passed. B is registered AFTER A, so B is the newest
+        profile: exactly what the historical 'any profile' resolution
+        returned when it emailed a stranger's CV. Act as A; the subject
+        must carry A's name and never B's."""
+        _, uid, job = self._seed_for_prepare(client, db, monkeypatch, name="Alice Route")
+
+        # The trap tenant: registered later -> higher profiles.id -> what a
+        # newest-first lookup resolves. Not authenticated as — just present.
+        b_email = f"l1b-{uuid.uuid4().hex[:6]}@test.example"
+        b_uid = uuid.UUID(_register(client, b_email))
+        bp = db.query(Profile).filter(Profile.user_id == b_uid).first()
+        if bp is None:
+            bp = Profile(user_id=b_uid)
+            db.add(bp)
+        bp.is_active = 1
+        bp.full_name = "Bob Newest"
+        bp.email = b_email
+        bp.cv_text = "BOB TRAP CV"
+        bp.cv_file_name = "bob.pdf"
+        db.commit()
+
+        # client.headers still carry ALICE's token (registration is
+        # unauthenticated) — prepare and submit as A
+        r = client.post(f"/api/v1/applications/draft/{job.id}")
+        assert r.status_code == 201, r.text[:200]
+        draft_id = r.json()["id"]
+
+        r = client.post(f"/api/v1/applications/draft/{draft_id}/submit",
+                        json={"method": "browser"})
+        assert r.status_code == 201, f"{r.status_code}: {r.text[:300]}"
+        subject = r.json()["subject"]
+        assert "Alice Route" in subject, (
+            f"subject '{subject}' does not carry the CALLER's name — the "
+            "route resolved someone else's profile (tenancy regression)"
+        )
+        assert "Bob Newest" not in subject, (
+            f"CROSS-TENANT: Bob's name reached Alice's application subject "
+            f"({subject!r}) — the route resolved the newest profile, the "
+            "exact pre-Layer-0 pattern"
+        )
+
     def test_retry_route_binds_the_service_signature(self, client, db, monkeypatch):
         _, uid, job = self._seed_for_prepare(client, db, monkeypatch)
         r = client.post(f"/api/v1/applications/draft/{job.id}")
