@@ -99,7 +99,12 @@ def list_matches(
     query = (
         db.query(MatchResult)
         .join(JobPosting, MatchResult.job_id == JobPosting.id)
-        .filter(MatchResult.user_id == user_id)
+        .filter(
+            MatchResult.user_id == user_id,
+            # Pipeline-dismissed rows exist only to stop re-evaluation and
+            # keep an audit trail — they are never part of the user's queue
+            MatchResult.dismissed_reason.is_(None),
+        )
     )
     if tier:
         query = query.filter(MatchResult.tier == tier)
@@ -173,7 +178,11 @@ def get_stats(db: Session, *, user_id) -> dict:
     applied state from applications — job.status carries no user state.
     (job_* counts describe the shared scraped pool, which is not per-user.)
     """
-    match_q = db.query(MatchResult).filter(MatchResult.user_id == user_id)
+    # Stats describe the user's real queue — pipeline-dismissed rows are
+    # bookkeeping, not matches, and would inflate every count
+    match_q = db.query(MatchResult).filter(
+        MatchResult.user_id == user_id, MatchResult.dismissed_reason.is_(None)
+    )
     job_q = db.query(JobPosting)
     app_q = db.query(Application).filter(Application.user_id == user_id)
 

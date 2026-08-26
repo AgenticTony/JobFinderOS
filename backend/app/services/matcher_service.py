@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models import JobPosting, MatchResult, Profile
 from app.schemas.common import dump_json_list, parse_json_list
-from app.services.ai_service import ai_service_available, get_ai_service
+from app.services.ai_service import AIService, ai_service_available, get_ai_service
 from app.services.cv_service import build_profile_context, get_active_profile
 from app.services.language_filter import passes_language_filter
 
@@ -161,8 +161,7 @@ def _run_matching_inner(
     for j in unmatched:
         key = j.dedupe_key or dedupe_key_for(j.title, j.company, j.location)
         if key in matched_keys:
-            j.status = "dismissed"
-            db.add(j)
+            _dismiss_for_user(db, user_id, j, "duplicate", service.model)
             deduped.append(j)
         else:
             matched_keys.add(key)  # also guards duplicates within this batch
@@ -178,14 +177,16 @@ def _run_matching_inner(
             # Cheap pre-filter: hard excludes skip the AI call entirely
             haystack = f"{job.title} {job.company or ''}".lower()
             if any(kw in haystack for kw in exclude_keywords):
-                job.status = "dismissed"
-                db.add(job)
+                # THIS user's exclude list — never the shared job row, or one
+                # user's "senior" filter hides senior roles from everyone
+                _dismiss_for_user(db, user_id, job, "excluded_keyword", service.model)
+                db.commit()
                 continue
 
             if not job.description:
                 # Nothing to assess — dismiss rather than waste an AI call
-                job.status = "dismissed"
-                db.add(job)
+                _dismiss_for_user(db, user_id, job, "no_description", service.model)
+                db.commit()
                 continue
 
             if time.time() > deadline:
@@ -208,6 +209,36 @@ def _run_matching_inner(
                 continue  # leave as 'new' for the next run
 
             elapsed_ms = int((time.time() - started) * 1000)
+
+            # DEAD-BAND: scores carry about +/-7 of run-to-run noise even at
+            # temperature 0 (measured: spread 6-10 over 5 runs on glm-5.1),
+            # and dismissal is permanent. A job whose true score is just over
+            # the keep line would be dropped forever on one unlucky sample.
+            # Re-score once inside the band and average the two — halving the
+            # noise exactly where it changes the outcome. Confidently-bad
+            # scores below the band never pay for the second call.
+            if (
+                settings.MATCH_DEADBAND_MIN_SCORE
+                <= result["score"]
+                < settings.MATCH_KEEP_MIN_SCORE
+            ):
+                try:
+                    second = service.match_job(
+                        profile_context=profile_context,
+                        cv_text=profile.cv_text,
+                        job_description=_job_text(job),
+                    )
+                    averaged = round((result["score"] + second["score"]) / 2)
+                    logger.info(
+                        "Dead-band re-score job %s: %d + %d -> %d",
+                        job.id, result["score"], second["score"], averaged,
+                    )
+                    result = second if second["score"] > result["score"] else result
+                    result["score"] = averaged
+                    result["tier"] = AIService._tier_for_score(averaged)
+                except Exception as e:  # noqa: BLE001 — fall back to the first sample
+                    logger.warning("Dead-band re-score failed for job %s: %s", job.id, e)
+
             if result["score"] < settings.MATCH_KEEP_MIN_SCORE:
                 # Too weak for the queue: record an AUTO-PASSED match for THIS
                 # user (decision='rejected') so it's never re-evaluated, never
@@ -226,6 +257,8 @@ def _run_matching_inner(
                     model_used=service.model,
                     processing_time_ms=elapsed_ms,
                     decision="rejected",
+                    dismissed_reason="below_threshold",
+                    prompt_version=AIService.matching_prompt_version(),
                 )
                 db.add(auto_pass)
                 try:
@@ -247,6 +280,7 @@ def _run_matching_inner(
                 confidence=result.get("confidence"),
                 model_used=service.model,
                 processing_time_ms=elapsed_ms,
+                prompt_version=AIService.matching_prompt_version(),
             )
             job.status = "matched"
             db.add(job)
@@ -276,6 +310,31 @@ def _run_matching_inner(
         }
     finally:
         _matching_in_progress = False
+
+
+def _dismiss_for_user(db, user_id, job: JobPosting, reason: str, model: str) -> None:
+    """Record that THIS user's pipeline dropped this job.
+
+    Dismissal is per-user state and must never touch job_postings.status:
+    the job row is shared, so writing one user's exclude-keyword or
+    duplicate decision onto it removed the posting from every other user's
+    queue. The row also stops re-evaluation (the candidate query joins on
+    (user_id, job_id)) and keeps an audit trail of why.
+    """
+    db.add(
+        MatchResult(
+            user_id=user_id,
+            job_id=job.id,
+            score=0,
+            tier="poor_match",
+            recommendation="skip",
+            reasoning=f"Not shown: {reason.replace('_', ' ')}.",
+            dismissed_reason=reason,
+            decision="rejected",
+            model_used=model,
+            prompt_version=AIService.matching_prompt_version(),
+        )
+    )
 
 
 def _job_text(job: JobPosting) -> str:

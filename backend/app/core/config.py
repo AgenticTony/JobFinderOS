@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     # Matching
     MAX_JOBS_PER_MATCH_RUN: int = 25  # glm-4.6 no-thinking: ~5-10s per job
     MATCH_KEEP_MIN_SCORE: int = 25  # below this a match never enters the queue
+    # Dead-band floor. Scores in [DEADBAND, KEEP_MIN) are re-scored once and
+    # AVERAGED before the keep/dismiss call: with +/-7 run-to-run noise a 22
+    # is a coin flip against a 28, and dismissal is permanent — the same
+    # reasoning that made parse failures retry instead of scoring 0. Below
+    # the floor a job is confidently bad and never pays for a second AI call.
+    # (Averaging, not "leave as new": re-queuing would re-score the same
+    # borderline jobs on every run forever, unbounded.)
+    MATCH_DEADBAND_MIN_SCORE: int = 18
     MATCH_STALE_DAYS: int = 30  # pending matches older than this are auto-passed
     MAX_POSTING_AGE_DAYS: int = 30  # postings older than this are never stored
     MATCH_TIME_BUDGET_SECONDS: int = 420  # hard stop; frontend pipeline timeout is 600s

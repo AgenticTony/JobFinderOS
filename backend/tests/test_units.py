@@ -10,9 +10,6 @@ import os
 import uuid
 from datetime import timedelta
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_units.db")
-os.environ.setdefault("GLM_API_KEY", "")
-os.environ.setdefault("DEBUG", "true")  # test env — production guards relaxed
 
 import pytest  # noqa: E402
 
@@ -219,3 +216,123 @@ class TestStaleSweep:
         _maintenance_sweeps(db)
         db.refresh(old)
         assert old.status == "dismissed"
+
+
+class TestDeadBand:
+    """Scores move +/-7 between runs at temp 0 and dismissal is permanent,
+    so the keep/dismiss call near the line is re-scored and averaged."""
+
+    def _run_with_scores(self, db, monkeypatch, scores):
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        profile = _profile(db)
+        job = _job_row(db, status="new")
+        job.description = "A real description long enough to be assessed."
+        db.commit()
+
+        calls = {"n": 0}
+
+        def fake_match(**kwargs):
+            i = min(calls["n"], len(scores) - 1)
+            calls["n"] += 1
+            return {
+                "score": scores[i], "tier": AIService._tier_for_score(scores[i]),
+                "reasoning": "r", "matched_skills": [], "missing_skills": [],
+                "transferable_skills": [], "recommendation": "maybe",
+                "cover_note": "c", "confidence": "medium",
+            }
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        svc.match_job = fake_match
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+
+        matcher_service.run_matching(db, user_id=profile.user_id)
+        return calls["n"], job, profile
+
+    def test_borderline_is_rescored_and_averaged_up(self, db, monkeypatch):
+        """22 then 30 averages to 26 — above the keep line, so it survives."""
+        from app.models import MatchResult
+
+        n, job, profile = self._run_with_scores(db, monkeypatch, [22, 30])
+        assert n == 2, "a dead-band score must trigger exactly one re-score"
+        row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
+        assert row.score == 26
+        assert row.dismissed_reason is None, "averaged above keep-min must stay in the queue"
+
+    def test_borderline_averaging_down_is_dismissed(self, db, monkeypatch):
+        from app.models import MatchResult
+
+        n, job, profile = self._run_with_scores(db, monkeypatch, [24, 18])
+        assert n == 2
+        row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
+        assert row.score == 21
+        assert row.dismissed_reason == "below_threshold"
+
+    def test_confidently_bad_never_pays_for_a_second_call(self, db, monkeypatch):
+        n, job, profile = self._run_with_scores(db, monkeypatch, [8, 90])
+        assert n == 1, "below the dead-band floor must not re-score"
+
+    def test_clear_pass_never_pays_for_a_second_call(self, db, monkeypatch):
+        n, job, profile = self._run_with_scores(db, monkeypatch, [70, 10])
+        assert n == 1, "comfortably above keep-min must not re-score"
+
+    def test_every_match_row_is_stamped_with_the_prompt_version(self, db, monkeypatch):
+        from app.models import MatchResult
+        from app.services.ai_service import AIService
+
+        n, job, profile = self._run_with_scores(db, monkeypatch, [70])
+        row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
+        assert row.prompt_version == AIService.matching_prompt_version()
+
+
+class TestDismissalIsPerUser:
+    """One user's exclude keyword must not hide a shared job from others."""
+
+    def test_exclude_keyword_does_not_touch_the_shared_job(self, db, monkeypatch):
+        import uuid as _uuid
+
+        from sqlalchemy import and_
+
+        from app.models import JobPosting as JP
+        from app.models import MatchResult
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        a = _profile(db, user_id=_uuid.uuid4())
+        a.exclude_keywords = '["senior"]'
+        db.commit()
+        job = _job_row(db, status="new")
+        job.title = "Senior Developer"
+        job.description = "Long enough description to be assessed properly."
+        db.commit()
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        svc.match_job = lambda **k: pytest.fail("excluded job must not reach the AI")
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+
+        matcher_service.run_matching(db, user_id=a.user_id)
+
+        db.refresh(job)
+        assert job.status != "dismissed", (
+            "CROSS-TENANT: one user's exclude keyword dismissed the SHARED job row"
+        )
+        row = db.query(MatchResult).filter(MatchResult.user_id == a.user_id).one()
+        assert row.dismissed_reason == "excluded_keyword"
+
+        # User B, with no exclude list, still sees the job as a candidate
+        b = _profile(db, user_id=_uuid.uuid4())
+        candidates = (
+            db.query(JP)
+            .outerjoin(MatchResult, and_(MatchResult.job_id == JP.id,
+                                         MatchResult.user_id == b.user_id))
+            .filter(MatchResult.id.is_(None), JP.status != "dismissed")
+            .all()
+        )
+        assert job.id in [j.id for j in candidates], (
+            "user B lost a job because user A excluded it"
+        )

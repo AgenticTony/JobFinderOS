@@ -15,6 +15,7 @@ Two operations:
                        recommendation, tailored cover note
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -448,6 +449,29 @@ Respond with ONLY valid JSON (no markdown):
 }"""
 
     # ------------------------------------------------------------------
+    # Prompt versioning
+    # ------------------------------------------------------------------
+
+    #: Bump when the scoring RUBRIC changes meaning (new anchors, new tier
+    #: bands). The hash suffix is derived from the prompt text itself, so an
+    #: accidental edit changes the version even if this constant is not
+    #: touched — tests/test_calibration.py fails loudly when that happens.
+    MATCHING_PROMPT_MAJOR = "m2"
+
+    @classmethod
+    def matching_prompt_version(cls) -> str:
+        """Stable id for the scoring prompt that produced a score.
+
+        Scores from different versions are NOT comparable: re-running the
+        SAME model on the SAME job across a prompt change moved scores by
+        up to 26 points. Stored on match_results.prompt_version so a stale
+        backlog is detectable instead of silently mis-ranked.
+        """
+        body = cls._build_matching_prompt(cls.__new__(cls))
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:8]
+        return f"{cls.MATCHING_PROMPT_MAJOR}-{digest}"
+
+    # ------------------------------------------------------------------
     # Shared plumbing (TalentHive patterns)
     # ------------------------------------------------------------------
 
@@ -459,7 +483,12 @@ Respond with ONLY valid JSON (no markdown):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            temperature=temperature,  # scoring calls pass 0.0 — identical inputs must give identical scores
+            # Scoring calls pass 0.0. NOTE: temperature 0 makes sampling
+            # greedy, NOT deterministic — MoE routing and batched GPU
+            # reduction still vary. Measured on glm-5.1, same CV + same job,
+            # 5 runs: spread 6-10 points at 0.0 (vs 12-16 at 0.3). Treat
+            # scores as noisy to about +/-7, never as reproducible values.
+            temperature=temperature,
             max_tokens=self.max_tokens,
             extra_body={"thinking": {"type": self.thinking}},
         )

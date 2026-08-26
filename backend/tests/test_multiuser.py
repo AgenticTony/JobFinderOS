@@ -6,9 +6,6 @@ per-user matching. Runs on throwaway SQLite via TestClient — no network.
 import os
 import uuid
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_mu.db")
-os.environ.setdefault("GLM_API_KEY", "")
-os.environ.setdefault("DEBUG", "true")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

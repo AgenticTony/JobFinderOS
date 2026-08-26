@@ -49,8 +49,22 @@ class MatchResult(Base):
     decision = Column(String(20), nullable=True)  # approved, rejected — NULL = pending review
     decided_at = Column(DateTime, nullable=True)
 
+    # Per-user dismissal. NULL = a live match the user should see.
+    # Set = "this user's pipeline evaluated and dropped it" — invisible in
+    # the queue, but it stops re-evaluation and keeps the audit trail.
+    # Dismissal MUST live here and never on job_postings.status: the job row
+    # is shared, so writing one user's exclude-keyword or duplicate decision
+    # onto it hid the posting from every other user.
+    # Values: excluded_keyword | duplicate | no_description | below_threshold
+    dismissed_reason = Column(String(30), nullable=True, index=True)
+
     # Metadata (TalentHive pattern)
     model_used = Column(String(50), nullable=True)
+    # Which scoring prompt produced this score. Scores from different prompt
+    # versions are NOT comparable — the backlog was scored before the rubric
+    # anchors landed and re-running the SAME model on the SAME job moved
+    # scores by up to 26 points. NULL = pre-versioning (stale).
+    prompt_version = Column(String(32), nullable=True, index=True)
     processing_time_ms = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=utc_now, nullable=False)
