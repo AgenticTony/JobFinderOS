@@ -6,10 +6,8 @@ Run: .venv/bin/python -m pytest tests/test_units.py -q
 (uses a throwaway SQLite DB; no network, no keys)
 """
 
-import os
 import uuid
 from datetime import timedelta
-
 
 import pytest  # noqa: E402
 

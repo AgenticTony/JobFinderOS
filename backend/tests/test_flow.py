@@ -10,7 +10,11 @@ import os
 import sys
 import uuid
 
-os.environ["DATABASE_URL"] = "sqlite:///./test_flow.db"
+# Under pytest, tests/conftest.py owns DATABASE_URL for the whole
+# session (a hard set here overrode it and re-introduced the
+# import-order database roulette). setdefault keeps this script
+# runnable standalone: PYTHONPATH=. python tests/test_flow.py
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test_flow.db")
 os.environ.setdefault("DEBUG", "true")  # test env — production guards relaxed
 
 from app.core.database import Base, SessionLocal, engine  # noqa: E402

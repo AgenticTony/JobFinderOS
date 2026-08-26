@@ -6,7 +6,6 @@ per-user matching. Runs on throwaway SQLite via TestClient — no network.
 import os
 import uuid
 
-
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 

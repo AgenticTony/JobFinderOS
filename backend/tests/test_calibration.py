@@ -21,7 +21,6 @@ import statistics
 # DATABASE_URL is set once, for the whole session, in tests/conftest.py.
 # No test module selects its own database: that used to depend on import
 # order and let the suite bind to (and drop_all) the live database.
-
 import pytest  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
