@@ -6,6 +6,7 @@ against one job; JobFinderOS loops jobs against one profile.
 """
 
 import logging
+import statistics
 import threading
 import time
 from typing import Dict
@@ -266,6 +267,35 @@ def _run_matching_inner(
                 except Exception:
                     db.rollback()
                 continue
+
+            # KEEPER: re-sample to 3 and store the MEAN. One value stored —
+            # badge, sort, filter and display all read it. At single-sample
+            # noise of ±11, a stored 78 and 82 are the same job; the mean
+            # of 3 tightens to ±6. Cost: 2 extra calls per keeper, and most
+            # jobs never clear the keep line (single-sample triage as before).
+            # The dead-band re-score above is now redundant for keepers —
+            # the 3-sample mean subsumes it — but stays for the sub-25 band.
+            keeper_scores = [result["score"]]
+            for _ in range(2):
+                try:
+                    extra = service.match_job(
+                        profile_context=profile_context,
+                        cv_text=profile.cv_text,
+                        job_description=_job_text(job),
+                    )
+                    keeper_scores.append(extra["score"])
+                except Exception as e:  # noqa: BLE001 — use what we have
+                    logger.warning("Keeper re-sample failed for job %s: %s", job.id, e)
+                    break
+            if len(keeper_scores) > 1:
+                averaged = round(statistics.mean(keeper_scores))
+                logger.info(
+                    "Keeper 3-sample job %s: %s -> %d",
+                    job.id, sorted(keeper_scores), averaged,
+                )
+                result["score"] = averaged
+                result["tier"] = AIService._tier_for_score(averaged)
+
             match = MatchResult(
                 user_id=user_id,
                 job_id=job.id,
