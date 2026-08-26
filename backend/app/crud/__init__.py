@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Application, JobPosting, MatchResult, ScrapeRun
 
-
 # ---------------- Jobs ----------------
 
 def list_jobs(

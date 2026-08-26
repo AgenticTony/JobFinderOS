@@ -10,7 +10,12 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from app.services.scrapers.base import BaseScraper, NormalizedJob, extract_apply_email, strip_html
+from app.services.scrapers.base import (
+    BaseScraper,
+    NormalizedJob,
+    extract_apply_email,
+    strip_html,
+)
 
 logger = logging.getLogger(__name__)
 
