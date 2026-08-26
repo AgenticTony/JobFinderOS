@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jobfinderos.backup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/anthonyforan/Desktop/JobFinderOS/ops/backup.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/anthonyforan/Desktop/JobFinderOS</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>4</integer>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/tmp/jobfinderos-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/jobfinderos-backup.log</string>
+</dict>
+</plist>
