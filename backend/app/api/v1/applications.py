@@ -220,7 +220,7 @@ async def submit(
 
     try:
         application = await run_in_threadpool(
-            submit_draft, db, draft, payload.method, profile, user.id
+            submit_draft, db, draft, payload.method, profile, user_id=user.id
         )
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))

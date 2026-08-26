@@ -449,3 +449,138 @@ class TestOutboundEmailBoundary:
         assert "Alice Anderson" in str(sent.get("from")), (
             f"sender identity is not Alice: {sent.get('from')!r}"
         )
+
+
+class TestLayer1Routes:
+    """The Layer 1 tests in test_units enter BELOW the HTTP boundary — a
+    signature/caller mismatch at the route was invisible to all of them
+    (the submit route 500'd on every request while 58 tests passed: the
+    tests called submit_draft() with user_id= as a keyword, precisely the
+    form the route did not use). One test per changed route, through the
+    TestClient with a real token, exactly as the browser does."""
+
+    def _seed_for_prepare(self, client, db, monkeypatch, name="Route Tester"):
+        """Register a user, give them a profile + approved match on a job,
+        and mock the tailoring AI. Returns (email, uid, job)."""
+        from app.services import draft_service
+        from app.services.ai_service import AIService
+
+        email = f"l1-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+
+        # registration creates an empty profile row — fill it in
+        profile = db.query(Profile).filter(Profile.user_id == uid).first()
+        if profile is None:
+            profile = Profile(user_id=uid)
+            db.add(profile)
+        profile.is_active = 1
+        profile.full_name = name
+        profile.email = email
+        profile.cv_text = "ROUTE PROFILE CV python"
+        profile.cv_file_name = "cv.pdf"
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Route Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         description="A role that goes through the real route.",
+                         application_url="https://apply.example")
+        db.add_all([profile, job])
+        db.flush()
+        db.add(MatchResult(user_id=uid, job_id=job.id, score=61,
+                           tier="good_match", decision="approved"))
+        db.commit()
+
+        def fake_tailor(self, profile_context, cv_text, job_description):
+            return {"cover_letter": "Dear Acme", "tailored_cv": "TAILORED",
+                    "changes_summary": ["n/a"]}
+
+        fake = AIService.__new__(AIService)
+        fake.model = "glm-test"
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "tailor_application", fake_tailor)
+        return email, uid, job
+
+    def test_prepare_route_binds_the_service_signature(self, client, db, monkeypatch):
+        """POST /applications/draft/{job_id} must reach create_draft_for_job
+        with a bound signature — not 500 on a TypeError."""
+        _, uid, job = self._seed_for_prepare(client, db, monkeypatch)
+        r = client.post(f"/api/v1/applications/draft/{job.id}")
+        assert r.status_code == 201, f"{r.status_code}: {r.text[:200]}"
+        assert r.json()["status"] == "ready", r.text[:200]
+
+    def test_submit_route_binds_the_service_signature(self, client, db, monkeypatch):
+        """POST /applications/draft/{id}/submit — the endpoint that actually
+        sends applications. The keyword-only user_id was passed positionally
+        here and every request 500'd; this test enters through the route so
+        that class of mismatch cannot ship silently again."""
+        _, uid, job = self._seed_for_prepare(client, db, monkeypatch)
+        r = client.post(f"/api/v1/applications/draft/{job.id}")
+        assert r.status_code == 201, r.text[:200]
+        draft_id = r.json()["id"]
+
+        r = client.post(f"/api/v1/applications/draft/{draft_id}/submit",
+                        json={"method": "browser"})
+        assert r.status_code == 201, f"{r.status_code}: {r.text[:300]}"
+        assert r.json()["status"] == "manual_pending", r.text[:200]
+        assert "Route Tester" in r.json()["subject"], (
+            f"subject built from the wrong profile: {r.json()['subject']!r}"
+        )
+
+    def test_retry_route_binds_the_service_signature(self, client, db, monkeypatch):
+        _, uid, job = self._seed_for_prepare(client, db, monkeypatch)
+        r = client.post(f"/api/v1/applications/draft/{job.id}")
+        assert r.status_code == 201, r.text[:200]
+        draft_id = r.json()["id"]
+        client.post(f"/api/v1/applications/draft/{draft_id}/submit",
+                    json={"method": "browser"})
+
+        # Turn it into a failed email application eligible for retry
+        app_row = db.query(Application).filter(Application.draft_id == draft_id).first()
+        app_row.method = "email"
+        app_row.status = "failed"
+        app_row.error = "boom"
+        db.commit()
+
+        from app.services import draft_service
+        monkeypatch.setattr(
+            draft_service, "_send_with_pdfs",
+            lambda db_, app_, draft_, job_, profile_: setattr(app_, "status", "sent"),
+        )
+        r = client.post(f"/api/v1/applications/{app_row.id}/retry")
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+        assert r.json()["status"] == "sent", r.text[:200]
+
+    def test_matches_run_route_passes_the_profile(self, client, db, monkeypatch):
+        """POST /matches/run must resolve the caller's profile on the task
+        session and hand it to run_matching — not 500, not a silent skip."""
+        from app.services import matcher_service
+
+        email = f"l1m-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        mp = db.query(Profile).filter(Profile.user_id == uid).first()
+        if mp is None:
+            mp = Profile(user_id=uid)
+            db.add(mp)
+        mp.is_active = 1
+        mp.full_name = "Match Runner"
+        mp.email = email
+        mp.cv_text = "MATCH ROUTE CV"
+        mp.cv_file_name = "cv.pdf"
+        db.commit()
+
+        captured = {}
+
+        def fake_run_matching(db_, **kwargs):
+            captured.update(kwargs)
+            return {"status": "completed", "jobs_considered": 0, "matches_created": 0}
+
+        monkeypatch.setattr(matcher_service, "run_matching", fake_run_matching)
+        r = client.post("/api/v1/matches/run")
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:200]}"
+        assert captured.get("profile") is not None, (
+            "run_matching was called without a profile — the task did not "
+            "resolve and inject it (Layer 1 regression)"
+        )
+        assert captured["profile"].full_name == "Match Runner"
