@@ -209,8 +209,6 @@ def _run_matching_inner(
                 logger.error("Match failed for job %s (%s): %s", job.id, type(e).__name__, e)
                 continue  # leave as 'new' for the next run
 
-            elapsed_ms = int((time.time() - started) * 1000)
-
             # SCORING PROTOCOL (review-hardened):
             # - Collect full result dicts (not just scores) from each sample
             # - Average scores once
@@ -283,6 +281,8 @@ def _run_matching_inner(
                     sorted(s["score"] for s in samples),
                     final_score, final_tier, best_payload["score"],
                 )
+
+            elapsed_ms = int((time.time() - started) * 1000)
 
             # Keep-min check on the FINAL averaged value
             if final_score < settings.MATCH_KEEP_MIN_SCORE:

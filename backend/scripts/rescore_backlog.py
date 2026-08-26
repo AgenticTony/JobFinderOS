@@ -39,6 +39,22 @@ def main() -> int:
     db = SessionLocal()
     svc = AIService()
 
+    # MANDATORY pre-write snapshot — a destructive script must never rely on
+    # the operator having taken a manual backup (that's a habit, not a control)
+    import subprocess
+    import time as _time
+
+    snapshot_name = f"jfos-rescore-{_time.strftime('%Y%m%d-%H%M%S')}.db"
+    snapshot_dst = Path.home() / "backups" / "jobfinderos" / snapshot_name
+    snapshot_dst.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["sqlite3", "jobfinderos.db", f".backup '{snapshot_dst}'"],
+        check=True,
+        capture_output=True,
+    )
+    print(f"Snapshot: {snapshot_dst}")
+    print(f"Restore:  cp {snapshot_dst} backend/jobfinderos.db")
+
     backlog = (
         db.query(MatchResult)
         .filter(MatchResult.prompt_version == "legacy-unversioned")

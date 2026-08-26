@@ -247,7 +247,9 @@ class TestDeadBand:
     """Scores move +/-7 between runs at temp 0 and dismissal is permanent,
     so the keep/dismiss call near the line is re-scored and averaged."""
 
-    def _run_with_scores(self, db, monkeypatch, scores):
+    def _run_with_scores(self, db, monkeypatch, scores, recommendations=None, fail_on_call=None):
+        """fail_on_call: index of a call that should raise (simulating 429/timeout).
+        recommendations: optional list of rec values per sample, for payload tests."""
         from app.services import matcher_service
         from app.services.ai_service import AIService
 
@@ -259,12 +261,17 @@ class TestDeadBand:
         calls = {"n": 0}
 
         def fake_match(**kwargs):
-            i = min(calls["n"], len(scores) - 1)
+            i = calls["n"]
             calls["n"] += 1
+            if fail_on_call is not None and i == fail_on_call:
+                raise ConnectionError("simulated 429")
+            i = min(i, len(scores) - 1)
+            rec = recommendations[i] if recommendations else "maybe"
             return {
                 "score": scores[i], "tier": AIService._tier_for_score(scores[i]),
-                "reasoning": "r", "matched_skills": [], "missing_skills": [],
-                "transferable_skills": [], "recommendation": "maybe",
+                "reasoning": f"reasoning for score {scores[i]}",
+                "matched_skills": [], "missing_skills": [],
+                "transferable_skills": [], "recommendation": rec,
                 "cover_note": "c", "confidence": "medium",
             }
 
@@ -354,6 +361,56 @@ class TestDeadBand:
         n, job, profile = self._run_with_scores(db, monkeypatch, [70])
         row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
         assert row.prompt_version == AIService.matching_prompt_version()
+
+    def test_f1_payload_comes_from_sample_closest_to_mean(self, db, monkeypatch):
+        """F1 regression: score is a 3-sample mean but the prose/recommendation/
+        confidence must come from the sample CLOSEST to that mean — not always
+        from sample 1. Samples [26, 45, 49] mean 40; the sample scoring 45 is
+        closest, so recommendation and reasoning must be from that sample.
+        Old buggy behavior: payload always from sample 1 (score 26, rec=skip,
+        reasoning='barely match') paired with a displayed score of 40."""
+        from app.models import MatchResult
+
+        n, job, profile = self._run_with_scores(
+            db, monkeypatch,
+            scores=[26, 45, 49],
+            recommendations=["skip", "apply", "apply"],
+        )
+        row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
+        assert row.score == 40, "mean(26,45,49) = 40"
+        assert row.recommendation == "apply", (
+            f"recommendation is '{row.recommendation}' — should be 'apply' "
+            "(from the 45-sample closest to the mean). If 'skip', the payload "
+            "came from sample 1 (F1 regression: prose contradicts the score)"
+        )
+        assert "45" in (row.reasoning or ""), (
+            f"reasoning is '{row.reasoning}' — must reference the score-45 "
+            "sample (closest to mean 40). If it references 26, F1 regressed."
+        )
+
+    def test_f3_deadband_failure_leaves_job_new_for_retry(self, db, monkeypatch):
+        """F3 regression: a transient API failure during dead-band sampling
+        (429, timeout) must leave the job as 'new' for retry on the next
+        run — NOT permanently dismiss it on one ±11 sample. The old buggy
+        behavior continued to the keep-min check with a single uncertain
+        sample and dismissed the job forever."""
+        from app.models import MatchResult
+
+        # Score 20 (dead-band range [13,25)); the re-score call fails
+        n, job, profile = self._run_with_scores(
+            db, monkeypatch, scores=[20], fail_on_call=1,
+        )
+        db.refresh(job)
+        assert job.status == "new", (
+            f"job.status is '{job.status}' — must be 'new' for retry. "
+            "If 'dismissed' or 'matched', F3 regressed: a single uncertain "
+            "sample was used for a permanent decision"
+        )
+        rows = db.query(MatchResult).filter(MatchResult.job_id == job.id).all()
+        assert len(rows) == 0, (
+            f"{len(rows)} match rows written — must be 0. A dead-band "
+            "sampling failure writes nothing and retries next run."
+        )
 
 
 class TestDismissalIsPerUser:
