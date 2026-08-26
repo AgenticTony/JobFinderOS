@@ -14,7 +14,7 @@ GEO: dict = {
     "SE": {
         "Blekinge län": ["Karlshamn", "Karlskrona", "Olofström", "Ronneby", "Sölvesborg"],
         "Dalarnas län": ["Avesta", "Borlänge", "Falun", "Gagnef", "Hedemora", "Leksand", "Ludvika", "Malung-Sälen", "Mora", "Orsa", "Rättvik", "Smedjebacken", "Säter", "Vansbro", "Älvdalen"],
-        "Gotlands län": ["Gotland (Visby)"],
+        "Gotlands län": ["Gotland"],
         "Gävleborgs län": ["Bollnäs", "Gävle", "Hofors", "Hudiksvall", "Ljusdal", "Nordanstig", "Ockelbo", "Ovanåker", "Sandviken", "Söderhamn"],
         "Hallands län": ["Falkenberg", "Halmstad", "Hylte", "Kungsbacka", "Laholm", "Varberg"],
         "Jämtlands län": ["Berg", "Bräcke", "Krokom", "Ragunda", "Strömsund", "Åre", "Östersund"],

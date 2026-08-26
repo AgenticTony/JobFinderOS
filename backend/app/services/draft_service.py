@@ -176,8 +176,18 @@ def submit_draft(
     else:
         application.status = "manual_pending"
 
-    draft.status = "submitted"
-    job.status = "applied"
+    # State follows the outcome: a FAILED email send leaves the draft
+    # editable and the job approved, so "Finish applying" still shows it
+    # (the whole point of that safety net). Only real outcomes advance.
+    if application.status == "failed":
+        draft.status = "ready"
+        # job stays 'approved'
+    elif application.status == "manual_pending":
+        draft.status = "submitted"
+        job.status = "applied"  # user's next step is on the portal
+    else:  # sent
+        draft.status = "submitted"
+        job.status = "applied"
     db.add(draft)
     db.add(job)
     db.commit()
@@ -222,15 +232,17 @@ def _send_with_pdfs(
                 {"filename": filename, "content": base64.b64encode(blob).decode("utf-8")}
             )
 
-        # Also attach the original CV PDF when available
-        if profile and profile.cv_file_path and os.path.exists(profile.cv_file_path):
-            with open(profile.cv_file_path, "rb") as fh:
-                attachments.append(
-                    {
-                        "filename": profile.cv_file_name or "CV.pdf",
-                        "content": base64.b64encode(fh.read()).decode("utf-8"),
-                    }
-                )
+        # Also attach the original CV PDF when available (storage-aware)
+        from app.services.storage import read_original_cv
+
+        original_cv = read_original_cv(profile)
+        if original_cv:
+            attachments.append(
+                {
+                    "filename": profile.cv_file_name or "CV.pdf",
+                    "content": base64.b64encode(original_cv).decode("utf-8"),
+                }
+            )
 
         resend.api_key = settings.RESEND_API_KEY
         from_email = (

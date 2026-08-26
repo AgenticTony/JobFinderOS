@@ -269,10 +269,20 @@ def _maintenance_sweeps(db: Session) -> None:
     pending matches. Runs inside every pipeline run."""
     now = datetime.utcnow()
 
+    from sqlalchemy import or_
+
     stale_cutoff = now - timedelta(days=settings.MAX_POSTING_AGE_DAYS)
+    # Postings with a publication date expire by it; date-less postings
+    # (NULL published_at never satisfies `<`) expire by when we scraped them.
     stale_new = (
         db.query(JobPosting)
-        .filter(JobPosting.status == "new", JobPosting.published_at < stale_cutoff)
+        .filter(
+            JobPosting.status == "new",
+            or_(
+                JobPosting.published_at < stale_cutoff,
+                (JobPosting.published_at.is_(None)) & (JobPosting.scraped_at < stale_cutoff),
+            ),
+        )
         .all()
     )
     for job in stale_new:
@@ -290,7 +300,7 @@ def _maintenance_sweeps(db: Session) -> None:
     for m in old_pending:
         m.decision = "rejected"
         m.decided_at = now
-        job = db.query(JobPosting).get(m.job_id)
+        job = db.get(JobPosting, m.job_id)
         if job and job.status == "matched":
             job.status = "rejected"
     if old_pending:

@@ -20,8 +20,17 @@ export function scoreColor(score: number): string {
   return 'text-bad';
 }
 
+/**
+ * The API returns naive UTC datetimes (no offset suffix). Per ECMA-262,
+ * `new Date()` treats an offsetless date-time as LOCAL time, skewing every
+ * relative timestamp by the browser's UTC offset — so append 'Z' first.
+ */
+export function parseUtcDate(iso: string): Date {
+  return new Date(/[Zz]$|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+}
+
 export function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const seconds = Math.floor((Date.now() - parseUtcDate(iso).getTime()) / 1000);
   if (seconds < 60) return 'just now';
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;

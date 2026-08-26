@@ -70,7 +70,21 @@ class TeamtailorScraper(BaseScraper):
                         source_id=f"{slug}:{item.get('id')}",
                         title=item.get("title") or "Untitled",
                         company=company,
-                        remote=True,  # Teamtailor feeds don't flag location; posting has details
+                        # Never hardcode remote=True: the location gate drops every
+                        # remote-flagged job for strictly-local users, which silently
+                        # discarded 100% of this source. Extract what the feed offers
+                        # (item-level fields or tags) and flag remote only when real.
+                        location=(
+                            item.get("location")
+                            or (item.get("custom_fields") or {}).get("location")
+                        ),
+                        remote=bool(
+                            item.get("remote")
+                            or any(
+                                "remote" in str(t).lower()
+                                for t in (item.get("tags") or item.get("keywords") or [])
+                            )
+                        ),
                         url=item.get("url") or f"https://{slug}.teamtailor.com",
                         description=strip_html(item.get("content_html")),
                         published_at=_parse_dt(item.get("date_published")),

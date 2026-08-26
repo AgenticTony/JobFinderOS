@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileUp, Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { apiErrorMessage } from '@/lib/api';
 
 interface Props {
   onUploaded: (file: File) => Promise<void>;
@@ -41,7 +42,7 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
     try {
       await onUploaded(file);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      setError(apiErrorMessage(err));
     } finally {
       setUploading(false);
     }

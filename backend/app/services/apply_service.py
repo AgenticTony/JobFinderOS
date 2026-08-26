@@ -13,7 +13,6 @@ application email is published with the posting.
 
 import base64
 import logging
-import os
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -30,13 +29,37 @@ class ApplyError(Exception):
 
 
 def retry_application(db: Session, application: Application) -> Application:
-    """Retry sending a failed email application."""
+    """Retry a failed email application — with the SAME reviewed package.
+
+    If the application came from a draft, the retry rebuilds and reattaches
+    the tailored cover letter + CV PDFs the user approved (never a weaker
+    original-CV-only email). Falls back to the plain email only for
+    legacy applications without a draft.
+    """
     if application.method != "email":
         raise ApplyError("Only email applications can be retried")
+    from app.models import ApplicationDraft
+
     job = db.query(JobPosting).filter(JobPosting.id == application.job_id).first()
     profile = get_active_profile(db)
     application.error = None
-    _send_email_application(db, application, job, profile)
+
+    draft = (
+        db.query(ApplicationDraft).filter(ApplicationDraft.id == application.draft_id).first()
+        if application.draft_id
+        else None
+    )
+    if draft and draft.cover_letter is not None:
+        from app.services.draft_service import _send_with_pdfs
+
+        _send_with_pdfs(db, application, draft, job, profile)
+    else:
+        _send_email_application(db, application, job, profile)
+
+    # Mirror the submit state machine: a failed retry leaves the draft ready
+    if application.status == "failed" and draft is not None:
+        draft.status = "ready"
+        db.add(draft)
     db.commit()
     db.refresh(application)
     return application
@@ -66,15 +89,17 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
             else settings.APPLY_FROM_EMAIL
         )
 
+        from app.services.storage import read_original_cv
+
         attachments = []
-        if profile and profile.cv_file_path and os.path.exists(profile.cv_file_path):
-            with open(profile.cv_file_path, "rb") as fh:
-                attachments.append(
-                    {
-                        "filename": profile.cv_file_name or "CV.pdf",
-                        "content": base64.b64encode(fh.read()).decode("utf-8"),
-                    }
-                )
+        original_cv = read_original_cv(profile)
+        if original_cv:
+            attachments.append(
+                {
+                    "filename": profile.cv_file_name or "CV.pdf",
+                    "content": base64.b64encode(original_cv).decode("utf-8"),
+                }
+            )
 
         params: dict = {
             "from": from_email,

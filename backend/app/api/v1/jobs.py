@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.dedupe import dedupe_key_for
 from app.crud import delete_job, get_job, list_jobs
-from app.models import JobPosting
+from app.models import JobPosting, MatchResult
 from app.schemas.common import dump_json_list
 from app.schemas.job import JobCreate, JobDetailResponse, JobResponse, JobStatusUpdate
 
@@ -51,6 +52,7 @@ async def create_manual_job(payload: JobCreate, db: Session = Depends(get_db)):
         application_email=payload.application_email,
         application_url=payload.application_url,
     )
+    job.dedupe_key = dedupe_key_for(job.title, job.company, job.location)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -69,6 +71,12 @@ async def update_job_status(
     job = get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    if payload.status == "new" and db.query(MatchResult.id).filter(MatchResult.job_id == job.id).first():
+        # Re-queuing a matched job collides with UNIQUE(match_results.job_id)
+        raise HTTPException(
+            status_code=400,
+            detail="Job already has a match — cannot re-queue as new (delete its match first)",
+        )
     job.status = payload.status
     db.add(job)
     db.commit()

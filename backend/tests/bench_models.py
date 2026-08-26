@@ -15,7 +15,10 @@ from app.models import JobPosting, Profile
 from app.services.ai_service import AIService
 from app.services.cv_service import build_profile_context
 
-CANDIDATES = ["glm-4.5", "glm-4.6", "glm-4.7", "glm-5"]
+# As measured 2026-08-25/26 (CLAUDE.md bake-off): 4.6 = 3 concurrent + noisy
+# scoring; 5.1 = 10 concurrent, stable, CURRENT production matcher. 4-plus
+# is unavailable on the current plan (429 insufficient quota).
+CANDIDATES = ["glm-4.6", "glm-5.1", "glm-5.2"]
 
 
 def main():

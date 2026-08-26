@@ -9,6 +9,7 @@ so an existing TalentHive key works unchanged.
 from functools import lru_cache
 from typing import List
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,7 +19,7 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "JobFinderOS"
     APP_VERSION: str = "0.1.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
 
     # Database — SQLite by default for zero-config local use.
@@ -97,7 +98,10 @@ class Settings(BaseSettings):
     SCRAPE_INTERVAL_MINUTES: int = 60
 
     # CORS
-    CORS_ORIGINS: str = "*"
+    # Explicit origins ONLY. With allow_credentials=True a wildcard origin is
+    # reflected verbatim by Starlette, letting any website read the API from
+    # the user's browser (CV/PII exfil). Production sets its real origin.
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     def get_cors_origins(self) -> List[str]:
         """Parse CORS origins from comma-separated string."""
@@ -110,6 +114,27 @@ class Settings(BaseSettings):
         return [s.strip().lower() for s in self.SCRAPE_SOURCES.split(",") if s.strip()]
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+
+    @model_validator(mode="after")
+    def _production_guards(self) -> "Settings":
+        """Fail fast on insecure production config (never serve on the
+        committed AUTH_SECRET; never reflect-echo CORS by accident)."""
+        import logging
+
+        if not self.DEBUG:
+            if self.AUTH_SECRET.startswith("dev-insecure") or len(self.AUTH_SECRET) < 32:
+                raise ValueError(
+                    "AUTH_SECRET must be set to a strong random value "
+                    '(>=32 chars) when DEBUG=false — generate with '
+                    'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+                )
+            if "*" in self.get_cors_origins():
+                raise ValueError("CORS_ORIGINS=* is not allowed when DEBUG=false")
+        else:
+            logging.getLogger(__name__).warning(
+                "DEBUG=true — development mode (relaxed auth/CORS guards)"
+            )
+        return self
 
 
 @lru_cache()

@@ -21,7 +21,7 @@ import type { Match } from '@/types';
 import ScoreRing from './ScoreRing';
 import TierBadge from './TierBadge';
 import AdzunaAttribution from './AdzunaAttribution';
-import { cn, timeAgo } from '@/lib/utils';
+import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
 
 interface Props {
   match: Match;
@@ -36,9 +36,11 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
   const [busy, setBusy] = useState<string | null>(null);
   // Rolling 24h "new" — decays per-card instead of everything going stale at
   // midnight; recomputed on every data refresh.
-  const isNew = Date.now() - new Date(match.created_at).getTime() < 24 * 60 * 60 * 1000;
+  const isNew = Date.now() - parseUtcDate(match.created_at).getTime() < 24 * 60 * 60 * 1000;
   // Posting age (when the board publishes it) — old postings get a red hint
-  const postedMs = match.job?.published_at ? Date.now() - new Date(match.job.published_at).getTime() : null;
+  const postedMs = match.job?.published_at
+    ? Date.now() - parseUtcDate(match.job.published_at).getTime()
+    : null;
   const postedAgeDays = postedMs !== null ? Math.floor(postedMs / 86_400_000) : null;
   const postedStale = postedAgeDays !== null && postedAgeDays >= 21;
 

@@ -9,7 +9,7 @@
 import { memo } from 'react';
 import { Crosshair, FileText, Radar, Scale, Send } from 'lucide-react';
 import type { Stats } from '@/types';
-import { cn, timeAgo } from '@/lib/utils';
+import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
 import { LiveDot, useCountdown } from './NextHunt';
 
 interface Stage {
@@ -81,7 +81,7 @@ function PulseSchedule({
   const at = nextRunAt ? new Date(nextRunAt) : null;
   const overdue =
     lastHuntAt !== null &&
-    Date.now() - new Date(lastHuntAt).getTime() > intervalMinutes * 60_000 * 1.5;
+    Date.now() - parseUtcDate(lastHuntAt).getTime() > intervalMinutes * 60_000 * 1.5;
 
   if (!schedulerEnabled) {
     return <p className="text-xs text-low">Automatic hunts off</p>;

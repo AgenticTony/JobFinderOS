@@ -19,6 +19,19 @@ import type {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// Surface the backend's carefully written error `detail` (axios docs:
+// response interceptors) — err.message alone is the useless
+// "Request failed with status code 400" string.
+function apiErrorMessage(error: unknown): string {
+  const axios = error as { response?: { data?: { detail?: unknown } }; message?: string };
+  const detail = axios?.response?.data?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (detail) return JSON.stringify(detail);
+  return axios?.message ?? 'Request failed';
+}
+
+export { apiErrorMessage };
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000,

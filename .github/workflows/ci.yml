@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt ruff
+        run: pip install -r requirements.txt ruff pytest
 
       - name: Lint (imports + errors)
         run: ruff check --select I,F app/
@@ -80,6 +80,9 @@ jobs:
               assert r.json()['email'] == 'ci@test.com', r.text
               print('auth roundtrip on Postgres: OK')
           "
+
+      - name: Unit tests (gates, dedupe, language, state machines)
+        run: PYTHONPATH=. python -m pytest tests/test_units.py -q
 
       - name: Flow test (mocked AI, SQLite)
         run: PYTHONPATH=. python tests/test_flow.py

@@ -35,12 +35,13 @@ def safe_name(name: str) -> str:
 
 class StorageBackend(Protocol):
     def save(self, filename: str, content: bytes, content_type: str) -> str:
-        """Persist bytes; returns the storage key (path or public URL)."""
+        """Persist bytes; returns the storage key (local path or object path)."""
         ...
 
     def read(self, key: str) -> bytes:
-        """Read bytes back (local backend only; remote keys are URLs)."""
+        """Read bytes back from a key (path or object path)."""
         ...
+
 
 
 class LocalStorage:
@@ -79,17 +80,19 @@ class SupabaseStorage:
                 content=content,
             )
             resp.raise_for_status()
-        public = (
-            f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/public/"
-            f"{settings.SUPABASE_STORAGE_BUCKET}/{object_path}"
-        )
         logger.info("Stored %s in Supabase bucket %s", object_path, settings.SUPABASE_STORAGE_BUCKET)
-        return public
+        # Return the OBJECT PATH as the key — never a public URL: CVs are PII,
+        # the bucket stays private, and downloads use read() with the service
+        # key. A URL here would also break every os.path.exists() consumer.
+        return f"{settings.SUPABASE_STORAGE_BUCKET}/{object_path}"
 
     def read(self, key: str) -> bytes:
-        # Remote keys are public URLs — download when local bytes are needed
+        # Keys are "<bucket>/<object path>" — authenticated object GET
+        # (supabase.com/docs/reference/api/storage-download)
+        bucket, _, object_path = key.partition("/")
+        url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{bucket}/{object_path}"
         with httpx.Client(timeout=httpx.Timeout(10, read=60)) as client:
-            resp = client.get(key)
+            resp = client.get(url, headers=self._headers())
             resp.raise_for_status()
             return resp.content
 
@@ -98,3 +101,15 @@ def get_storage() -> StorageBackend:
     if settings.STORAGE_BACKEND == "supabase":
         return SupabaseStorage()
     return LocalStorage()
+
+
+def read_original_cv(profile) -> bytes | None:
+    """Original CV bytes through the storage backend, or None if unavailable.
+    Storage-aware: works for local paths AND remote object keys."""
+    if not profile or not profile.cv_file_path:
+        return None
+    try:
+        return get_storage().read(profile.cv_file_path)
+    except Exception as e:  # noqa: BLE001 — missing CV must never kill a send
+        logger.warning("Could not read original CV (%s): %s", profile.cv_file_path, e)
+        return None

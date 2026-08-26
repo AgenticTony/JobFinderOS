@@ -149,8 +149,13 @@ Respond with ONLY valid JSON (no markdown):
 Evaluate this job for me and respond with ONLY valid JSON in the required format.
 """
 
-        raw = self._complete(system_prompt, user_message)
+        raw = self._complete(system_prompt, user_message, temperature=0.0)  # scoring: deterministic
         parsed = self._parse_json(raw)
+        if not parsed:
+            # Unparseable output is a TRANSPORT/FORMAT failure, not a score.
+            # Raise so the matcher leaves the job 'new' for retry — never
+            # treat it as a 0-point match (which would dismiss it forever).
+            raise ValueError("Unparseable JSON from model (truncated/malformed response)")
 
         return {
             "score": self._clamp_score(parsed.get("score", 0)),
@@ -232,7 +237,7 @@ Respond with ONLY valid JSON (no markdown):
 Prepare my tailored application package.
 """
 
-        raw = self._complete(system_prompt, user_message, temperature=0.0)  # scoring: deterministic
+        raw = self._complete(system_prompt, user_message)
         parsed = self._parse_json(raw)
 
         return {

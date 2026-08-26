@@ -9,6 +9,7 @@ Built on the TalentHive foundation (github.com/AgenticTony/TalentHiv).
 
 import logging
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,7 +32,19 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
+# Lifespan replaces the deprecated @app.on_event (FastAPI docs:
+# fastapi.tiangolo.com/advanced/events/). init_db failure RAISES — a
+# half-migrated schema must never serve traffic while /health says "up".
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
+    init_db()  # raises on failure — boot stops, deploy fails loudly
+    logger.info("Database initialized successfully")
+    start_scheduler()
+    yield
+    stop_scheduler()
+
+app = FastAPI(lifespan=lifespan,
     title=settings.APP_NAME,
     description=(
         "Job hunting OS: scrape job sites -> AI-match against your CV -> "
@@ -78,7 +91,7 @@ app.include_router(
 
 
 @app.get("/health", tags=["Ops"])
-async def health():
+def health():
     """Liveness + database readiness for uptime monitors and deploy checks."""
     from app.core.database import SessionLocal
 
@@ -97,23 +110,6 @@ async def health():
     }
 
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
-    try:
-        init_db()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error("Failed to initialize database: %s", e)
-    try:
-        start_scheduler()
-    except Exception as e:
-        logger.error("Failed to start scheduler: %s", e)
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    stop_scheduler()
 
 
 @app.get("/")

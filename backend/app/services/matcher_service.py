@@ -6,6 +6,7 @@ against one job; JobFinderOS loops jobs against one profile.
 """
 
 import logging
+import threading
 import time
 from typing import Dict
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Process-wide flag so the UI can poll "is a matching run active?"
 _matching_in_progress = False
+_matching_lock = threading.Lock()
 
 
 def is_matching_running() -> bool:
@@ -48,6 +50,25 @@ def run_matching(
     Returns:
         Summary dict {status, jobs_considered, matches_created, error}
     """
+    if not _matching_lock.acquire(blocking=False):
+        return {
+            "status": "skipped",
+            "jobs_considered": 0,
+            "matches_created": 0,
+            "error": "A matching run is already in progress",
+        }
+    try:
+        return _run_matching_inner(db, limit=limit, profile=profile, max_seconds=max_seconds)
+    finally:
+        _matching_lock.release()
+
+
+def _run_matching_inner(
+    db: Session,
+    limit: int = None,
+    profile: Profile = None,
+    max_seconds: int = 300,
+) -> Dict:
     if not ai_service_available():
         return {
             "status": "skipped",
@@ -183,10 +204,22 @@ def run_matching(
             job.status = "matched"
             db.add(job)
             db.add(match)
-            matches_created += 1
-            # Commit per job so the frontend's live polling sees matches
-            # stream in instead of one dump when the batch ends
-            db.commit()
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                db.commit()  # per-job commit, contained
+                matches_created += 1
+            except IntegrityError:
+                # Duplicate MatchResult (job reset to 'new', manual job, race):
+                # reconcile instead of aborting the whole batch
+                db.rollback()
+                job.status = "matched"
+                db.add(job)
+                db.commit()
+                logger.warning(
+                    "Job %s already had a match — reconciled status, batch continues", job.id
+                )
+                continue
 
         logger.info("Matching run: %d jobs considered, %d matches created", len(unmatched), matches_created)
         return {

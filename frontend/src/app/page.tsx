@@ -59,8 +59,8 @@ import type {
   Profile,
   ProfileStatus,
 } from '@/types';
-import { cn, timeAgo } from '@/lib/utils';
-import { connectComposio, getIntegrations } from '@/lib/api';
+import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
+import { apiErrorMessage, connectComposio, getIntegrations } from '@/lib/api';
 import type { IntegrationsStatus } from '@/types';
 
 export default function Home() {
@@ -393,6 +393,10 @@ export default function Home() {
           onClose={() => setShowWizard(false)}
           initialLanguages={profile.languages}
           initialIncludeRemote={profile.include_remote || profile.remote_only}
+          initialCountry={profile.country ?? ''}
+          initialRegion={profile.region ?? ''}
+          initialMunicipality={profile.municipality ?? ''}
+          initialQueries={profile.search_queries}
         />
       )}
     </div>
@@ -437,7 +441,7 @@ function DashboardView({
   const DAY_MS = 24 * 60 * 60 * 1000;
   // Fresh arrivals first, then the rest of the decision queue (deduped)
   const newMatches = [...pendingMatches]
-    .filter((m) => Date.now() - new Date(m.created_at).getTime() < DAY_MS)
+    .filter((m) => Date.now() - parseUtcDate(m.created_at).getTime() < DAY_MS)
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
   const newIds = new Set(newMatches.map((m) => m.id));
@@ -819,6 +823,42 @@ function ApplicationsView({
   );
 }
 
+// Retry with visible busy/error feedback — never a silent unhandled rejection
+function RetryButton({
+  applicationId,
+  onChanged,
+}: {
+  applicationId: number;
+  onChanged: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <span className="flex items-center gap-2">
+      {error && <span className="text-xs text-bad">{error}</span>}
+      <button
+        onClick={async (e) => {
+          e.stopPropagation();
+          setBusy(true);
+          setError(null);
+          try {
+            await retryApplication(applicationId);
+            await onChanged();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : 'Retry failed');
+          } finally {
+            setBusy(false);
+          }
+        }}
+        disabled={busy}
+        className="rounded-lg bg-signal px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-signal/90 disabled:opacity-50"
+      >
+        {busy ? 'Retrying…' : 'Retry'}
+      </button>
+    </span>
+  );
+}
+
 // A sent application: header row with status/actions; expands to re-read
 // the letter and re-download the PDFs (the draft survives submission).
 function SentApplicationCard({
@@ -1000,7 +1040,7 @@ function DraftCard({
       }
       await onChanged();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Submission failed');
+      setSubmitError(apiErrorMessage(err));
     } finally {
       setBusy(null);
     }
@@ -1212,10 +1252,21 @@ function ProfileView({
   const [saving, setSaving] = useState(false);
   const [preferredRoles, setPreferredRoles] = useState('');
   const [excludeKeywords, setExcludeKeywords] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  // Background refresh() replaces the profile object every poll; syncing
+  // inputs from it mid-edit wiped what the user was typing. Sync only
+  // while the inputs are pristine (first load / after a save).
+  const prefsDirty = useRef(false);
 
   useEffect(() => {
+    if (prefsDirty.current) return;
     setPreferredRoles(profile?.preferred_roles?.join(', ') ?? '');
     setExcludeKeywords(profile?.exclude_keywords?.join(', ') ?? '');
+    setFullName(profile?.full_name ?? '');
+    setContactEmail(profile?.email ?? '');
+    setPhone(profile?.phone ?? '');
   }, [profile]);
 
   const save = async () => {
@@ -1224,8 +1275,11 @@ function ProfileView({
       await updateProfile({
         preferred_roles: preferredRoles.split(',').map((s) => s.trim()).filter(Boolean),
         exclude_keywords: excludeKeywords.split(',').map((s) => s.trim()).filter(Boolean),
-        ...(profile?.full_name ? {} : {}),
+        full_name: fullName.trim() || undefined,
+        email: contactEmail.trim() || undefined,
+        phone: phone.trim() || undefined,
       });
+      prefsDirty.current = false;
       await onSaved();
     } finally {
       setSaving(false);
@@ -1318,6 +1372,40 @@ function ProfileView({
           </div>
 
           <div className="rounded-xl border border-line bg-surface/80 p-5">
+            <h3 className="mb-1 font-semibold text-hi">Contact details</h3>
+            <p className="mb-3 text-xs text-low">
+              Extracted from your CV — correct anything the AI misread. This name and
+              email go on your applications and both PDFs.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <label className="block">
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">Full name</span>
+                <input
+                  value={fullName}
+                  onChange={(e) => { prefsDirty.current = true; setFullName(e.target.value); }}
+                  className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">Email</span>
+                <input
+                  value={contactEmail}
+                  onChange={(e) => { prefsDirty.current = true; setContactEmail(e.target.value); }}
+                  className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">Phone</span>
+                <input
+                  value={phone}
+                  onChange={(e) => { prefsDirty.current = true; setPhone(e.target.value); }}
+                  className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-line bg-surface/80 p-5">
             <h3 className="mb-3 font-semibold text-hi">Job search preferences</h3>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
@@ -1326,7 +1414,7 @@ function ProfileView({
                 </span>
                 <input
                   value={preferredRoles}
-                  onChange={(e) => setPreferredRoles(e.target.value)}
+                  onChange={(e) => { prefsDirty.current = true; setPreferredRoles(e.target.value); }}
                   placeholder="Backend Developer, Python Developer"
                   className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                 />
@@ -1337,7 +1425,7 @@ function ProfileView({
                 </span>
                 <input
                   value={excludeKeywords}
-                  onChange={(e) => setExcludeKeywords(e.target.value)}
+                  onChange={(e) => { prefsDirty.current = true; setExcludeKeywords(e.target.value); }}
                   placeholder="senior, scala, on-site"
                   className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                 />
@@ -1383,7 +1471,7 @@ function SettingsView() {
       const { redirect_url } = await connectComposio('gmail');
       window.open(redirect_url, '_blank', 'noopener');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start the connection');
+      setError(apiErrorMessage(err));
     } finally {
       setBusy(false);
     }

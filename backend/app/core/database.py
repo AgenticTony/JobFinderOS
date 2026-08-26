@@ -7,7 +7,6 @@ Set DATABASE_URL to PostgreSQL for production.
 """
 
 import logging
-import os
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -15,7 +14,12 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./jobfinderos.db")
+# Single source of truth: settings (pydantic-settings) — this is the value
+# from real env vars AND backend/.env (model_config env_file). Never read
+# os.getenv here: it bypasses .env loading and silently ignores the file.
+from app.core.config import settings as _settings
+
+DATABASE_URL = _settings.DATABASE_URL
 
 
 def async_database_url(url: str) -> str:

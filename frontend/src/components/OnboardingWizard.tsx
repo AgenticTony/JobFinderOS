@@ -4,7 +4,7 @@
 // country (source pack) -> region/city + remote (location filter) ->
 // AI-suggested job titles from the CV (search queries) -> confirm.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowLeft,
@@ -30,6 +30,12 @@ interface Props {
   onClose?: () => void; // optional — wizard is modal but re-openable from Profile
   initialLanguages?: string[]; // prefill when re-running setup
   initialIncludeRemote?: boolean; // prefill when re-running setup
+  // Edit-mode prefill: existing setup so "Edit setup" never wipes the
+  // user's curated search queries or forces re-picking country/region
+  initialCountry?: string;
+  initialRegion?: string;
+  initialMunicipality?: string;
+  initialQueries?: string[];
 }
 
 const STEPS = ['Country', 'Location', 'Languages', 'Job titles', 'Confirm'] as const;
@@ -57,19 +63,28 @@ const MODES: { id: SearchMode; label: string; hint: string; icon: typeof Target 
   },
 ];
 
-export default function OnboardingWizard({ onComplete, onClose, initialLanguages, initialIncludeRemote }: Props) {
+export default function OnboardingWizard({
+  onComplete,
+  onClose,
+  initialLanguages,
+  initialIncludeRemote,
+  initialCountry,
+  initialRegion,
+  initialMunicipality,
+  initialQueries,
+}: Props) {
   const [step, setStep] = useState(0);
   const [geo, setGeo] = useState<GeoData | null>(null);
-  const [country, setCountry] = useState('');
-  const [region, setRegion] = useState('');
-  const [municipality, setMunicipality] = useState('');
+  const [country, setCountry] = useState(initialCountry ?? '');
+  const [region, setRegion] = useState(initialRegion ?? '');
+  const [municipality, setMunicipality] = useState(initialMunicipality ?? '');
   const [remoteOnly, setRemoteOnly] = useState(false);
   const [includeRemote, setIncludeRemote] = useState(Boolean(initialIncludeRemote));
   const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']);
   const [mode, setMode] = useState<SearchMode>('field');
   const [directQueries, setDirectQueries] = useState<string[]>([]);
   const [pivotSuggestions, setPivotSuggestions] = useState<{ query: string; why: string }[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set(initialQueries ?? []));
   const [customQueries, setCustomQueries] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
   const [loadingQueries, setLoadingQueries] = useState(false);
@@ -85,24 +100,46 @@ export default function OnboardingWizard({ onComplete, onClose, initialLanguages
   );
 
   // Fetch AI suggestions when reaching the Job titles step (re-fetch when mode changes)
-  useEffect(() => {
-    if (step !== 3 || !country || loadingQueries) return;
-    if (directQueries.length > 0 || pivotSuggestions.length > 0) return; // already loaded for this mode
+  // Auto-fetch runs ONCE per (country, mode) — tracked by key, never by
+  // result-array contents, so a failed request cannot re-trigger itself
+  // (the old pattern reset the arrays in catch, re-satisfying the guard
+  // and looping forever). Failures surface a retry button instead.
+  const [suggestError, setSuggestError] = useState(false);
+  const fetchedKeyRef = useRef<string | null>(null);
+
+  const loadSuggestions = useCallback(async () => {
+    if (loadingQueries) return;
     setLoadingQueries(true);
-    suggestQueries(country, mode)
-      .then((result) => {
-        setDirectQueries(result.from_your_experience);
-        setPivotSuggestions(result.worth_a_look);
-        setSelected(
-          new Set([...result.from_your_experience, ...result.worth_a_look.map((p) => p.query)])
-        );
-      })
-      .catch(() => {
-        setDirectQueries([]);
-        setPivotSuggestions([]);
-      })
-      .finally(() => setLoadingQueries(false));
-  }, [step, country, mode, directQueries.length, pivotSuggestions.length, loadingQueries]);
+    setSuggestError(false);
+    try {
+      const result = await suggestQueries(country, mode);
+      setDirectQueries(result.from_your_experience);
+      setPivotSuggestions(result.worth_a_look);
+      setSelected(
+        new Set([...result.from_your_experience, ...result.worth_a_look.map((p) => p.query)])
+      );
+      fetchedKeyRef.current = `${country}|${mode}`;
+    } catch {
+      setDirectQueries([]);
+      setPivotSuggestions([]);
+      setSuggestError(true);
+    } finally {
+      setLoadingQueries(false);
+    }
+  }, [country, mode, loadingQueries]);
+
+  useEffect(() => {
+    const key = `${country}|${mode}`;
+    if (step !== 3 || !country || fetchedKeyRef.current === key) return;
+    // Edit mode with existing titles: keep the user's curated list — no
+    // auto-overwrite; they can request fresh suggestions explicitly.
+    if ((initialQueries?.length ?? 0) > 0 && fetchedKeyRef.current === null) {
+      fetchedKeyRef.current = key;
+      return;
+    }
+    loadSuggestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, country, mode]);
 
   const changeMode = (m: SearchMode) => {
     if (m === mode) return;
@@ -393,6 +430,34 @@ export default function OnboardingWizard({ onComplete, onClose, initialLanguages
                     ))}
                   </div>
 
+                  {!loadingQueries && directQueries.length === 0 && selected.size > 0 && (
+                    <div className="mt-5 rounded-lg border border-line bg-ink/60 p-3">
+                      <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
+                        Your current search titles ({selected.size})
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[...selected].map((q) => (
+                          <span key={q} className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs text-mid">
+                            {q}
+                          </span>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => { fetchedKeyRef.current = null; loadSuggestions(); }}
+                        className="mt-3 text-xs text-signal transition-colors hover:text-signal/80"
+                      >
+                        Get fresh AI suggestions for this strategy →
+                      </button>
+                    </div>
+                  )}
+                  {suggestError && (
+                    <div className="mt-5 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
+                      Couldn&apos;t load AI suggestions.{' '}
+                      <button onClick={loadSuggestions} className="font-semibold text-signal hover:underline">
+                        Try again
+                      </button>
+                    </div>
+                  )}
                   {loadingQueries ? (
                     <div className="flex flex-col items-center py-10 text-low" role="status">
                       <Loader2 className="mb-3 h-6 w-6 animate-spin text-signal" />

@@ -6,6 +6,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { parseUtcDate } from '@/lib/utils';
+
 function formatRemaining(ms: number): string {
   if (ms <= 0) return 'any moment…';
   const s = Math.floor(ms / 1000);
@@ -18,7 +20,10 @@ function formatRemaining(ms: number): string {
 }
 
 export function useCountdown(nextRunAt: string | null): string | null {
-  const target = useMemo(() => (nextRunAt ? new Date(nextRunAt).getTime() : null), [nextRunAt]);
+  const target = useMemo(
+    () => (nextRunAt ? parseUtcDate(nextRunAt).getTime() : null),
+    [nextRunAt]
+  );
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
