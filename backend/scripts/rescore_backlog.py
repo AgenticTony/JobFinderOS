@@ -29,6 +29,44 @@ from app.services.cv_service import build_profile_context  # noqa: E402
 from app.services.matcher_service import _job_text  # noqa: E402
 
 
+def derive_dismissal(match: MatchResult, keep_min: int) -> None:
+    """Bidirectional dismissal derivation — the SINGLE source of truth.
+
+    The one-directional version left 176 sub-threshold rows live in the
+    queue. After a score changes, apply the matcher's rules in BOTH
+    directions:
+
+    - score >= keep_min: a row that rose above keep-min sheds any auto-pass
+      stamp from the older, lower score. The stamp is three fields —
+      decision, dismissed_reason, AND recommendation='skip' — clearing only
+      the first two leaves a strong row carrying 'skip', which trips the
+      post-run invariant (and hides a keeper the user should review).
+    - score < keep_min: sub-threshold rows never stay live, whatever the
+      previous decision was — reject with below_threshold.
+
+    Mutates `match` in place; the caller commits. Tests import THIS
+    function, never a reimplementation — a copy in the test file only
+    guards itself (regressing this script to the one-directional bug left
+    26 tests passing when the test ran its own loop).
+    """
+    if match.score >= keep_min:
+        if (
+            match.decision == "rejected"
+            and match.dismissed_reason in ("below_threshold", "dead_band_confirmed")
+        ):
+            match.decision = None
+            match.decided_at = None
+            match.dismissed_reason = None
+            if match.recommendation == "skip":
+                match.recommendation = None
+    else:
+        match.decision = "rejected"
+        match.decided_at = None
+        match.dismissed_reason = "below_threshold"
+        match.recommendation = "skip"
+        match.reasoning = "Auto-passed: below the score threshold for your CV."
+
+
 def main() -> int:
     dry_run = "--dry-run" in sys.argv
 
@@ -139,26 +177,8 @@ def main() -> int:
             match.model_used = svc.model
 
             # BIDIRECTIONAL dismissal derivation (the one-directional version
-            # left 176 sub-threshold rows live in the queue). Apply the same
-            # rules the matcher uses, in both directions:
-            if averaged >= settings.MATCH_KEEP_MIN_SCORE:
-                # Score ROSE above keep-min: clear any auto-pass from the old
-                # scoring (the old rejection was on an obsolete prompt)
-                if (
-                    match.decision == "rejected"
-                    and match.dismissed_reason in ("below_threshold", "dead_band_confirmed")
-                ):
-                    match.decision = None
-                    match.decided_at = None
-                    match.dismissed_reason = None
-            else:
-                # Score FELL below keep-min: the old decision may have been
-                # 'approved' or pending — sub-threshold rows never stay live
-                match.decision = "rejected"
-                match.decided_at = None
-                match.dismissed_reason = "below_threshold"
-                match.recommendation = "skip"
-                match.reasoning = "Auto-passed: below the score threshold for your CV."
+            # left 176 sub-threshold rows live in the queue)
+            derive_dismissal(match, settings.MATCH_KEEP_MIN_SCORE)
 
             db.add(match)
             db.commit()

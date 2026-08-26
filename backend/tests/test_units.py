@@ -133,6 +133,25 @@ def _job_row(db, status="approved"):
     return j
 
 
+def _rescore_derivation():
+    """Load derive_dismissal from the PRODUCTION re-score script, by path.
+
+    scripts/ isn't a package and pytest doesn't put backend/ on sys.path,
+    hence importlib. The point: the invariant test must run the script's
+    own code. A reimplementation in this file only guards itself —
+    regressing the script to the one-directional 176-row bug left 26 tests
+    passing when the test ran its own inline copy of the rules.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "rescore_backlog.py"
+    spec = importlib.util.spec_from_file_location("rescore_backlog_under_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.derive_dismissal
+
+
 class TestSubmitStateMachine:
     """B6: a FAILED email send must not mark the job applied / lock the draft."""
 
@@ -413,65 +432,70 @@ class TestDeadBand:
         )
 
     def test_keep_min_invariant_bidirectional_dismissal(self, db):
-        """INVARIANT: score < MATCH_KEEP_MIN_SCORE must have dismissed_reason.
-        Tests the BIDIRECTIONAL dismissal derivation — the re-score script's
-        one-directional version left 176 sub-threshold rows live. Seeds both
-        violation types (sub-threshold without dismissal, strong with stale
-        dismissal), applies the derivation, then asserts all four invariants.
-
-        This test MUST be seen to fail — the db fixture truncates tables,
-        so a test that only queries an empty table is decoration (the third
-        check-that-can't-fail this session). This one seeds violations first.
-        """
+        """INVARIANT: the re-score script's dismissal derivation keeps all
+        four queue invariants intact. Seeds all three violation types (the
+        176-row bug and both of its mirrors), then runs the PRODUCTION
+        derivation imported from scripts/rescore_backlog.py — never a copy:
+        regressing the script to the one-directional bug left 26 tests
+        passing when this test ran its own inline loop."""
         from app.core.config import settings
         from app.models import MatchResult
 
+        derive_dismissal = _rescore_derivation()
         keep = settings.MATCH_KEEP_MIN_SCORE
 
-        # Seed: a user with a profile
         profile = _profile(db)
-        job_high = _job_row(db, status="matched")
         job_low = _job_row(db, status="matched")
+        job_high = _job_row(db, status="matched")
+        job_rose = _job_row(db, status="matched")
 
-        # VIOLATION TYPE 1: sub-threshold row WITHOUT dismissal (the 176-row bug)
+        # VIOLATION 1: sub-threshold row WITHOUT dismissal (the 176-row bug)
         db.add(MatchResult(
             user_id=profile.user_id, job_id=job_low.id, score=18,
             tier="poor_match", recommendation="maybe", decision=None,
             dismissed_reason=None, prompt_version="m2-62c2452b",
         ))
-        # VIOLATION TYPE 2: strong row with stale dismissal (score rose after re-score)
+        # VIOLATION 2: strong row with a stale auto-pass dismissal (score
+        # rose above keep-min after a re-score)
         db.add(MatchResult(
             user_id=profile.user_id, job_id=job_high.id, score=72,
             tier="good_match", recommendation="maybe", decision="rejected",
             dismissed_reason="below_threshold", prompt_version="m2-62c2452b",
         ))
+        # VIOLATION 3: strong row still carrying the FULL auto-pass stamp.
+        # The fall-below branch stamps recommendation='skip'; a row that
+        # later rises keeps that stamp unless the derivation clears it —
+        # a strong row recommending 'skip' hides a keeper from review.
+        db.add(MatchResult(
+            user_id=profile.user_id, job_id=job_rose.id, score=72,
+            tier="good_match", recommendation="skip", decision="rejected",
+            dismissed_reason="below_threshold", prompt_version="m2-62c2452b",
+        ))
         db.commit()
 
-        # Verify violations EXIST before the fix (proves the test can fail)
-        sub_violations = db.query(MatchResult).filter(
+        # Verify the violations EXIST before the derivation — an assertion
+        # over an empty set is decoration, not a test
+        v1_before = db.query(MatchResult).filter(
             MatchResult.score < keep, MatchResult.dismissed_reason.is_(None)
         ).count()
-        stale_dismissals = db.query(MatchResult).filter(
+        v2_before = db.query(MatchResult).filter(
+            MatchResult.score < keep, MatchResult.decision.is_(None)
+        ).count()
+        v3_before = db.query(MatchResult).filter(
             MatchResult.score >= keep,
             MatchResult.dismissed_reason == "below_threshold",
         ).count()
-        assert sub_violations == 1, f"expected 1 sub-threshold violation, got {sub_violations}"
-        assert stale_dismissals == 1, f"expected 1 stale dismissal, got {stale_dismissals}"
+        v4_before = db.query(MatchResult).filter(
+            MatchResult.score >= 50, MatchResult.recommendation == "skip"
+        ).count()
+        assert v1_before == 1, f"seed failed: {v1_before} sub-threshold rows without dismissal"
+        assert v2_before == 1, f"seed failed: {v2_before} sub-threshold rows with decision NULL"
+        assert v3_before == 2, f"seed failed: {v3_before} strong rows with stale dismissal"
+        assert v4_before == 1, f"seed failed: {v4_before} strong rows with skip stamp"
 
-        # Apply the BIDIRECTIONAL derivation (same rules as the re-score script)
-
+        # Run the PRODUCTION derivation over every row, exactly as main() does
         for m in db.query(MatchResult).all():
-            if m.score >= keep:
-                # Score is above keep-min: clear auto-pass dismissals
-                if m.dismissed_reason in ("below_threshold", "dead_band_confirmed"):
-                    m.decision = None
-                    m.decided_at = None
-                    m.dismissed_reason = None
-            else:
-                # Score is below keep-min: ensure dismissed
-                m.decision = "rejected"
-                m.dismissed_reason = "below_threshold"
-                m.recommendation = "skip"
+            derive_dismissal(m, keep)
         db.commit()
 
         # Assert ALL FOUR invariants at zero
