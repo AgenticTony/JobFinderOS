@@ -84,45 +84,94 @@ class TestTierBands:
         )
 
     def test_deadband_is_wide_enough_to_cover_measured_noise(self):
-        """Measured spread at temperature 0 is 6-10 points over 5 runs."""
+        """50 pooled samples: SD 5.5, ±11 at 95%. The dead-band must cover
+        2×SD below the keep line, or borderline jobs are still dismissed
+        on noise — the exact thing the band exists to prevent."""
         width = settings.MATCH_KEEP_MIN_SCORE - settings.MATCH_DEADBAND_MIN_SCORE
-        assert width >= 6, (
-            f"Dead-band is {width} points but scores move 6-10 between runs — "
-            "jobs just over the keep line would still be dismissed on noise."
+        assert width >= 11, (
+            f"Dead-band is {width} points but measured noise is SD 5.5 "
+            "(±11 at 95% CI). Jobs just over the keep line would still be "
+            "dismissed on noise. Width must be ≥ 11 = 2×SD."
         )
 
 
 # ---------------------------------------------------------------- layer 2
 
 RUN_LIVE = os.getenv("RUN_CALIBRATION") == "1" and bool(settings.GLM_API_KEY)
-MAX_ACCEPTABLE_SPREAD = 15  # measured 6-10 on glm-5.1 @ temp 0; alert above this
+# 50 pooled samples at temp 0: SD 5.5. Alert if SD exceeds 8 — that's
+# the point where ±2×SD (=16) exceeds the dead-band width (12) and the
+# re-score mechanism can no longer absorb the noise.
+MAX_ACCEPTABLE_SD = 8.0
 
 
 @pytest.mark.skipif(not RUN_LIVE, reason="needs RUN_CALIBRATION=1 and GLM_API_KEY")
 class TestLiveVariance:
-    """Re-measures the real model. Costs API calls; opt-in only."""
+    """Re-measures the real model. Costs API calls; opt-in only.
+
+    Asserts on STANDARD DEVIATION, not max−min. Spread only moves up with
+    sample count, so every spread-based threshold is a lower bound pretending
+    to be a limit — three honest runs at n=5 measured 7.0 / 9.8 / 14.0 and
+    disagreed about whether the model was within tolerance. SD is the
+    statistic the dead-band width is derived from (2×SD), so it's the
+    statistic this test must measure.
+    """
 
     RUNS = 5
 
     def test_same_input_scores_within_tolerance(self):
-        from app.core.database import SessionLocal
+        """Self-contained: creates its own profile + job in the TEST database
+        (conftest sets DATABASE_URL) so the live calibration never depends
+        on or touches the production database."""
+        import uuid
+
+        from alembic.config import Config
+
+        # Ensure schema exists (conftest's test DB may not have tables yet)
+        from sqlalchemy import inspect
+
+        from alembic import command
+        from app.core.database import SessionLocal, engine
         from app.models import JobPosting, Profile
+        if not inspect(engine).get_table_names():
+            cfg = Config("alembic.ini")
+            cfg.set_main_option(
+                "sqlalchemy.url",
+                os.environ.get("DATABASE_URL", "sqlite:///./test_suite.db"),
+            )
+            command.upgrade(cfg, "head")
+
+        db = SessionLocal()
+        # Minimal but realistic inputs — enough for a meaningful score
+        profile = Profile(
+            user_id=uuid.uuid4(), is_active=1,
+            full_name="Calibration Test",
+            cv_text="Junior fullstack developer. Python, FastAPI, React, TypeScript. "
+                    "Built AI CV-screening tool with Next.js frontend and FastAPI backend. "
+                    "Experience with PostgreSQL, Docker, Azure. Currently studying AI development.",
+        )
+        job = JobPosting(
+            source="calibration", source_id=uuid.uuid4().hex[:8],
+            title="Junior Fullstack Developer",
+            company="Calibration Corp",
+            url=f"https://calibration.test/{uuid.uuid4().hex[:6]}",
+            description="We are looking for a junior fullstack developer with React, "
+                        "TypeScript and Python experience. You will build web applications "
+                        "using modern frameworks and work with PostgreSQL databases.",
+            status="new",
+        )
+        db.add_all([profile, job])
+        db.commit()
+        db.refresh(profile)
+        db.refresh(job)
+
         from app.services.cv_service import build_profile_context
         from app.services.matcher_service import _job_text
 
-        db = SessionLocal()
-        profile = db.query(Profile).filter(Profile.cv_text.isnot(None)).first()
-        job = (
-            db.query(JobPosting)
-            .filter(JobPosting.description.isnot(None))
-            .filter(JobPosting.description != "")
-            .order_by(JobPosting.id)
-            .first()
-        )
-        if not profile or not job:
-            db.close()
-            pytest.skip("needs a profile with a CV and a job with a description")
         ctx, cv, text = build_profile_context(profile), profile.cv_text, _job_text(job)
+        profile_id, job_id = profile.id, job.id
+        db.query(JobPosting).filter(JobPosting.id == job_id).delete()
+        db.query(Profile).filter(Profile.id == profile_id).delete()
+        db.commit()
         db.close()
 
         svc = AIService()
@@ -131,14 +180,17 @@ class TestLiveVariance:
             scores.append(
                 svc.match_job(profile_context=ctx, cv_text=cv, job_description=text)["score"]
             )
+        sd = statistics.stdev(scores)
         spread = max(scores) - min(scores)
         print(
             f"\n  model={svc.model} version={AIService.matching_prompt_version()} "
-            f"scores={sorted(scores)} spread={spread} "
+            f"scores={sorted(scores)} SD={sd:.1f} spread={spread} "
             f"mean={statistics.mean(scores):.1f}"
         )
-        assert spread <= MAX_ACCEPTABLE_SPREAD, (
-            f"Score spread {spread} over {self.RUNS} runs exceeds {MAX_ACCEPTABLE_SPREAD}. "
-            f"scores={sorted(scores)}. Check that match_job still passes "
-            "temperature=0.0 — the fix has silently moved to another call before."
+        assert sd <= MAX_ACCEPTABLE_SD, (
+            f"Score SD {sd:.1f} over {self.RUNS} runs exceeds {MAX_ACCEPTABLE_SD}. "
+            f"scores={sorted(scores)}, spread={spread}. At SD > 8, 2×SD exceeds "
+            "the dead-band width and borderline jobs are again dismissed on noise. "
+            "Check that match_job still passes temperature=0.0 — the fix has "
+            "silently moved to another call before."
         )
