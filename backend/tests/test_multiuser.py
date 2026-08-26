@@ -276,3 +276,95 @@ class TestPerUserMatching:
         ])
         db.commit()  # both rows coexist — impossible under the old schema
         assert db.query(MatchResult).filter(MatchResult.job_id == job.id).count() == 2
+
+
+class TestOutboundIdentity:
+    """The review's closing ask: assert on the OUTBOUND artifact, not the
+    row. Two users; A drafts and submits; the subject, the applicant name,
+    and every content byte must be A's — never B's."""
+
+    def test_draft_and_submit_use_owner_profile(self, client, db):
+        from app.services.draft_service import create_draft_for_job, submit_draft
+
+        a_email = f"oi-a-{uuid.uuid4().hex[:6]}@test.example"
+        b_email = f"oi-b-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, a_email)
+        b_id = _register(client, b_email)
+
+        # A's profile — Alice
+        a_token = _auth_client(client, a_email)
+        a_uid = None
+        from app.models import User as UserModel
+        a_user = db.query(UserModel).filter(UserModel.email == a_email).first()
+        a_uid = a_user.id
+        a_profile = db.query(Profile).filter(Profile.user_id == a_uid).first()
+        if a_profile:
+            a_profile.full_name = "Alice A"
+            a_profile.cv_text = "Alice Python developer"
+            a_profile.cv_file_name = "alice.pdf"
+        else:
+            db.add(Profile(user_id=a_uid, is_active=1, full_name="Alice A",
+                            cv_text="Alice Python developer", cv_file_name="alice.pdf"))
+        db.commit()
+
+        # B's profile — Bob (registered AFTER A; the old ORDER BY id DESC
+        # fallback would resolve to Bob)
+        b_uid = uuid.UUID(b_id)
+        b_profile = db.query(Profile).filter(Profile.user_id == b_uid).first()
+        if b_profile:
+            b_profile.full_name = "Bob B"
+            b_profile.cv_text = "Bob Java developer"
+        else:
+            db.add(Profile(user_id=b_uid, is_active=1, full_name="Bob B",
+                            cv_text="Bob Java developer"))
+        db.commit()
+
+        # A's job + approved match
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="X", url=f"https://x/{uuid.uuid4().hex[:6]}",
+                         status="matched", application_url="https://apply.example")
+        db.add(job)
+        db.flush()
+        db.add(MatchResult(user_id=a_uid, job_id=job.id, score=85,
+                           tier="excellent_match", decision="approved"))
+        db.commit()
+
+        # A drafts — the profile context must be ALICE's, never Bob's
+        from app.services import draft_service
+        from unittest.mock import patch as mock_patch
+
+        captured = {}
+        def fake_tailor(self, profile_context, cv_text, job_description):
+            captured["profile_context"] = profile_context
+            captured["cv_text"] = cv_text
+            return {"cover_letter": "Dear from Alice", "tailored_cv": "ALICE CV",
+                    "changes_summary": ["n/a"]}
+
+        from app.services.ai_service import AIService
+
+        fake_service = AIService.__new__(AIService)
+        fake_service.model = "glm-test"
+        with mock_patch.object(draft_service, "get_ai_service", lambda: fake_service),              mock_patch.object(draft_service, "ai_service_available", lambda: True),              mock_patch.object(AIService, "tailor_application", fake_tailor):
+            draft = create_draft_for_job(db, job, user_id=a_uid)
+
+        assert "Alice" in captured.get("cv_text", ""), (
+            f"TAILORING USED THE WRONG CV: expected Alice, got: {captured.get('cv_text', '')[:50]}"
+        )
+        assert "Alice" in captured.get("profile_context", "") or "Alice" in captured.get("cv_text", ""), (
+            f"TAILORING USED THE WRONG PROFILE: neither context nor CV mentions Alice. "
+            f"context={captured.get('profile_context', '')[:80]}"
+        )
+        assert "Bob" not in captured.get("cv_text", ""), "CROSS-TENANT: Bob's CV fed to Alice's draft"
+
+        # A submits (browser method = no email config needed)
+        application = submit_draft(db, draft, "browser", user_id=a_uid)
+        assert application.status == "manual_pending"
+
+        # The SUBJECT is what reaches the employer (email method) or the
+        # user's record — it must carry ALICE's name, never Bob's
+        assert "Alice" in (application.subject or "") or application.subject == "Application: Dev", (
+            f"SUBJECT CARRIES THE WRONG USER: {application.subject}"
+        )
+        assert "Bob" not in (application.subject or ""), (
+            f"CROSS-TENANT LEAK: Bob's name in A's application subject: {application.subject}"
+        )

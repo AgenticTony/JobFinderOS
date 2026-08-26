@@ -1,7 +1,6 @@
 """Account API — GDPR erasure (right to be forgotten)."""
 
 import logging
-import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -33,15 +32,19 @@ async def delete_account(
         raise HTTPException(status_code=404, detail="Account not found")
     profile = get_active_profile(db, user_id=uid)
 
-    # Best-effort CV file removal (storage-backend aware)
+    # CV file removal through the storage backend — works for local paths
+    # AND remote object keys (the os.path.exists version silently skipped
+    # Supabase keys, leaving the CV in the bucket after "erasure")
+    from app.services.storage import get_storage
+
     cv_path = profile.cv_file_path if profile else None
     deleted_files = 0
-    if cv_path and os.path.exists(cv_path):
+    if cv_path:
         try:
-            os.remove(cv_path)
-            deleted_files = 1
-        except OSError:
-            logger.warning("GDPR delete: CV file removal failed for %s", cv_path)
+            if get_storage().delete(cv_path):
+                deleted_files = 1
+        except Exception:
+            logger.warning("GDPR delete: CV removal failed for %s", cv_path)
 
     matches = db.query(MatchResult).filter(MatchResult.user_id == uid).delete()
     drafts = db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).delete()
@@ -50,6 +53,9 @@ async def delete_account(
 
     db.delete(user)
     db.commit()
+
+    from app.core.ratelimit import clear_user
+    clear_user(uid)
     logger.info(
         "GDPR erasure: user=%s (%s) — %d matches, %d drafts, %d applications, "
         "%d profiles, %d CV file(s)",

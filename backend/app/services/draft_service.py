@@ -67,7 +67,7 @@ def create_draft_for_job(
     if existing and existing.status == "ready" and not force:
         return existing  # already prepared — user should review, not regenerate
 
-    profile = get_active_profile(db)
+    profile = get_active_profile(db, user_id=user_id)
     if not profile or not profile.cv_text:
         raise DraftError("Upload your CV before preparing applications")
 
@@ -160,7 +160,9 @@ def submit_draft(
     if job is None:
         job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()
     if profile is None:
-        profile = get_active_profile(db)
+        profile = get_active_profile(db, user_id=user_id)
+        if profile is None:
+            raise DraftError("No CV on file for this account — upload one first")
 
     target_email = job.application_email
     apply_url = job.application_url or job.url

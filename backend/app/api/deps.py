@@ -30,6 +30,12 @@ def get_user_profile(
 
 
 def owns_or_404(resource_user_id, user: User, what: str) -> None:
-    """IDOR guard: a row's user_id must match the caller's."""
-    if resource_user_id is not None and str(resource_user_id) != str(user.id):
+    """IDOR guard: a row's user_id must match the caller's.
+
+    FAILS CLOSED: a NULL user_id is treated as 'nobody's row' and rejected.
+    The old `is not None` check passed NULL rows to every authenticated
+    user — the database columns are nullable (pre-backfill rows), so the
+    guard must be stricter than the schema, not looser.
+    """
+    if resource_user_id is None or str(resource_user_id) != str(user.id):
         raise HTTPException(status_code=404, detail=f"{what} not found")

@@ -41,7 +41,9 @@ def retry_application(db: Session, application: Application) -> Application:
     from app.models import ApplicationDraft
 
     job = db.query(JobPosting).filter(JobPosting.id == application.job_id).first()
-    profile = get_active_profile(db)
+    profile = get_active_profile(db, user_id=application.user_id)
+    if profile is None:
+        raise ApplyError("No CV on file for this account")
     application.error = None
 
     draft = (

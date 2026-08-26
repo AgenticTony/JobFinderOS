@@ -21,6 +21,11 @@ class SlidingWindowLimiter:
         """Raise 429 when (key) exceeded `limit` calls in the window."""
         now = time.monotonic()
         with self._lock:
+            # Evict idle buckets so memory doesn't grow with dead accounts
+            if len(self._hits) > 10_000:
+                stale = [k for k, v in self._hits.items() if not v or now - v[-1] > window_seconds * 2]
+                for k in stale:
+                    del self._hits[k]
             bucket = self._hits[key]
             while bucket and now - bucket[0] > window_seconds:
                 bucket.popleft()
@@ -49,3 +54,10 @@ BUCKETS = {
 def enforce(user_id, bucket: str) -> None:
     limit, window = BUCKETS[bucket]
     limiter.check((str(user_id), bucket), limit, window)
+
+
+def clear_user(user_id) -> None:
+    """GDPR: purge a deleted account's in-memory rate-limit entries."""
+    with limiter._lock:
+        for key in [k for k in limiter._hits if k[0] == str(user_id)]:
+            del limiter._hits[key]

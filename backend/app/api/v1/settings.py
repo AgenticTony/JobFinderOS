@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from app.api.deps import get_authenticated_user
 from app.models import User
 from app.services import composio_service
-from app.services.cv_service import get_active_profile
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -17,21 +16,6 @@ router = APIRouter()
 class ComposioConnectRequest(BaseModel):
     app_name: str = "gmail"
     redirect_uri: str = "http://localhost:3000/"
-
-
-def _entity_id() -> str:
-    """Stable per-user entity for Composio: the profile's email when set,
-    else the profile id. Becomes the logged-in account id once auth lands."""
-    from app.core.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        profile = get_active_profile(db)
-        if not profile:
-            return "anonymous"
-        return (profile.email or f"profile-{profile.id}").strip().lower()
-    finally:
-        db.close()
 
 
 @router.get("/integrations")

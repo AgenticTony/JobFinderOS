@@ -43,6 +43,10 @@ class StorageBackend(Protocol):
         """Read bytes back from a key (path or object path)."""
         ...
 
+    def delete(self, key: str) -> bool:
+        """Delete the object at a key; True if something was removed."""
+        ...
+
 
 
 class LocalStorage:
@@ -54,6 +58,13 @@ class LocalStorage:
 
     def read(self, key: str) -> bytes:
         return Path(key).read_bytes()
+
+    def delete(self, key: str) -> bool:
+        path = Path(key)
+        if path.exists():
+            path.unlink()
+            return True
+        return False
 
 
 class SupabaseStorage:
@@ -96,6 +107,19 @@ class SupabaseStorage:
             resp = client.get(url, headers=self._headers())
             resp.raise_for_status()
             return resp.content
+
+    def delete(self, key: str) -> bool:
+        # DELETE /storage/v1/object/{bucket}/{path} (supabase.com/docs/
+        # reference/api/storage-delete — the official removal endpoint)
+        bucket, _, object_path = key.partition("/")
+        url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{bucket}/{object_path}"
+        try:
+            with httpx.Client(timeout=httpx.Timeout(10, read=30)) as client:
+                resp = client.delete(url, headers=self._headers())
+                return resp.status_code in (200, 204)
+        except Exception as e:  # noqa: BLE001 — never fail erasure over storage
+            logger.warning("Supabase delete failed for %s: %s", key, e)
+            return False
 
 
 def get_storage() -> StorageBackend:

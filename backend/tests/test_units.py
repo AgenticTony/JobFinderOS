@@ -180,16 +180,18 @@ class TestDuplicateMatchContainment:
     """B9: a pre-matched job requeued must not abort the whole batch."""
 
     def test_lock_second_run_skips(self, db):
+        """Per-user lock: same user blocked, different user proceeds."""
         from app.services import matcher_service
 
-        acquired = matcher_service._matching_lock.acquire(blocking=False)
+        lock = matcher_service._get_user_lock(None)
+        acquired = lock.acquire(blocking=False)
         assert acquired
         try:
             result = matcher_service.run_matching(db)
             assert result["status"] == "skipped"
             assert "already in progress" in result["error"]
         finally:
-            matcher_service._matching_lock.release()
+            lock.release()
 
 
 class TestStaleSweep:

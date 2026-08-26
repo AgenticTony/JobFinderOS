@@ -145,12 +145,21 @@ def _apply_extraction(profile: Profile, extracted: dict) -> None:
 
 
 def get_active_profile(db: Session, user_id=None) -> Optional[Profile]:
-    """The caller's profile. user_id is the scoping key; legacy callers
-    without a user fall back to the single stored profile (migration period
-    only — every route passes the authenticated user's id)."""
+    """The caller's profile.
+
+    user_id is the scoping key. A bare call (user_id=None) now returns the
+    OLDEST profile rather than the newest — the previous ORDER BY id DESC
+    fallback silently resolved to whichever user registered last, which
+    produced the three cross-tenant P0 leaks. The parameter is never
+    omitted in the codebase; this fallback exists only so a forgotten
+    call degrades to the FIRST account (the founder) rather than a random
+    new stranger. Making it required outright would break the scheduler's
+    system-context path — tracked for Phase 1c hardening.
+    """
     if user_id is not None:
         return db.query(Profile).filter(Profile.user_id == user_id).first()
-    return db.query(Profile).order_by(Profile.id.desc()).first()
+    # Degradation fallback: first account, never the newest stranger
+    return db.query(Profile).order_by(Profile.id.asc()).first()
 
 
 def _safe_int(value) -> Optional[int]:

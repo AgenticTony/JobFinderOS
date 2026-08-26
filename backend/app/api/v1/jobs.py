@@ -97,5 +97,5 @@ async def update_job_status(
 async def remove_job(
     job_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
 ):
-    if not delete_job(db, job_id):
+    if not delete_job(db, job_id, user_id=user.id):
         raise HTTPException(status_code=404, detail="Job not found")

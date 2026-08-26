@@ -31,8 +31,6 @@ import Sidebar, { NAV, type View } from '@/components/Sidebar';
 import HuntPulse from '@/components/HuntPulse';
 import {
   decideMatch,
-  draftCoverLetterPdfUrl,
-  draftCvPdfUrl,
   getApplications,
   getDrafts,
   getMatches,
@@ -60,7 +58,13 @@ import type {
   ProfileStatus,
 } from '@/types';
 import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
-import { apiErrorMessage, connectComposio, getIntegrations } from '@/lib/api';
+import {
+  apiErrorMessage,
+  connectComposio,
+  downloadDraftCoverLetterPdf,
+  downloadDraftCvPdf,
+  getIntegrations,
+} from '@/lib/api';
 import type { IntegrationsStatus } from '@/types';
 
 export default function Home() {
@@ -945,7 +949,7 @@ function SentApplicationCard({
                     </p>
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={() => window.open(draftCoverLetterPdfUrl(draft.id), '_blank', 'noopener')}
+                        onClick={() => downloadDraftCoverLetterPdf(draft.id).catch(console.error)}
                         className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                       >
                         <Download className="h-3.5 w-3.5" /> PDF
@@ -964,7 +968,7 @@ function SentApplicationCard({
                       CV sent
                     </p>
                     <button
-                      onClick={() => window.open(draftCvPdfUrl(draft.id), '_blank', 'noopener')}
+                      onClick={() => downloadDraftCvPdf(draft.id).catch(console.error)}
                       className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                     >
                       <Download className="h-3.5 w-3.5" /> PDF
@@ -1047,9 +1051,11 @@ function DraftCard({
       await updateDraft(draft.id, { cover_letter: coverLetter, tailored_cv: tailoredCv });
       setDirty(false);
     }
-    const url =
-      kind === 'cover-letter' ? draftCoverLetterPdfUrl(draft.id) : draftCvPdfUrl(draft.id);
-    window.open(url, '_blank', 'noopener');
+    if (kind === 'cover-letter') {
+      await downloadDraftCoverLetterPdf(draft.id);
+    } else {
+      await downloadDraftCvPdf(draft.id);
+    }
   };
 
   return (

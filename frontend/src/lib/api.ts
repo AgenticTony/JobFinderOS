@@ -207,11 +207,22 @@ export const submitDraft = async (
   return response.data;
 };
 
-// Direct PDF download URLs (browser handles the download via Content-Disposition)
-export const draftCoverLetterPdfUrl = (draftId: number) =>
-  `${API_BASE_URL}/api/v1/applications/draft/${draftId}/download/cover-letter`;
-export const draftCvPdfUrl = (draftId: number) =>
-  `${API_BASE_URL}/api/v1/applications/draft/${draftId}/download/cv`;
+// PDF downloads — fetched through the axios instance (Bearer token attached)
+// as blobs, then opened via object URLs. The old window.open() was a plain
+// navigation that carried no Authorization header and 401'd every time.
+async function downloadPdfBlob(path: string): Promise<void> {
+  const response = await api.get(path, { responseType: 'blob' });
+  const url = URL.createObjectURL(response.data);
+  const window2 = window.open(url, '_blank', 'noopener');
+  // Revoke after the browser has the blob (best-effort cleanup)
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  if (!window2) throw new Error('Popup blocked — allow popups to download PDFs');
+}
+
+export const downloadDraftCoverLetterPdf = (draftId: number) =>
+  downloadPdfBlob(`/api/v1/applications/draft/${draftId}/download/cover-letter`);
+export const downloadDraftCvPdf = (draftId: number) =>
+  downloadPdfBlob(`/api/v1/applications/draft/${draftId}/download/cv`);
 
 // ---------- Settings / integrations ----------
 

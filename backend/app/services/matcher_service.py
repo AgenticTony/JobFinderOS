@@ -23,7 +23,17 @@ logger = logging.getLogger(__name__)
 
 # Process-wide flag so the UI can poll "is a matching run active?"
 _matching_in_progress = False
-_matching_lock = threading.Lock()
+# Per-USER locks: one user's 7-minute hunt must never block another's.
+# Keyed by user_id; a global lock refused every other caller.
+_user_locks: dict = {}
+_user_locks_guard = threading.Lock()
+
+
+def _get_user_lock(user_id):
+    with _user_locks_guard:
+        if user_id not in _user_locks:
+            _user_locks[user_id] = threading.Lock()
+        return _user_locks[user_id]
 
 
 def is_matching_running() -> bool:
@@ -51,19 +61,20 @@ def run_matching(
     Returns:
         Summary dict {status, jobs_considered, matches_created, error}
     """
-    if not _matching_lock.acquire(blocking=False):
+    lock = _get_user_lock(user_id)
+    if not lock.acquire(blocking=False):
         return {
             "status": "skipped",
             "jobs_considered": 0,
             "matches_created": 0,
-            "error": "A matching run is already in progress",
+            "error": "Your matching run is already in progress",
         }
     try:
         return _run_matching_inner(
             db, limit=limit, profile=profile, max_seconds=max_seconds, user_id=user_id
         )
     finally:
-        _matching_lock.release()
+        lock.release()
 
 
 def _run_matching_inner(

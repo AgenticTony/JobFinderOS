@@ -44,12 +44,17 @@ def get_job(db: Session, job_id: int) -> Optional[JobPosting]:
     return db.query(JobPosting).filter(JobPosting.id == job_id).first()
 
 
-def delete_job(db: Session, job_id: int) -> bool:
+def delete_job(db: Session, job_id: int, user_id=None) -> bool:
     job = get_job(db, job_id)
     if not job:
         return False
-    db.query(MatchResult).filter(MatchResult.job_id == job_id).delete()
-    db.query(Application).filter(Application.job_id == job_id).delete()
+    match_q = db.query(MatchResult).filter(MatchResult.job_id == job_id)
+    app_q = db.query(Application).filter(Application.job_id == job_id)
+    if user_id is not None:
+        match_q = match_q.filter(MatchResult.user_id == user_id)
+        app_q = app_q.filter(Application.user_id == user_id)
+    match_q.delete(synchronize_session=False)
+    app_q.delete(synchronize_session=False)
     db.delete(job)
     db.commit()
     return True
