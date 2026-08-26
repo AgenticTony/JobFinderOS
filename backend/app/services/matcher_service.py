@@ -45,7 +45,8 @@ def run_matching(
     limit: int = None,
     profile: Profile = None,
     max_seconds: int = 300,
-    user_id=None,
+    *,
+    user_id,
 ) -> Dict:
     """
     Match all unmatched jobs against the active profile.
@@ -82,7 +83,8 @@ def _run_matching_inner(
     limit: int = None,
     profile: Profile = None,
     max_seconds: int = 300,
-    user_id=None,
+    *,
+    user_id,
 ) -> Dict:
     if not ai_service_available():
         return {

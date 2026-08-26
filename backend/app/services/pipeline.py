@@ -28,14 +28,18 @@ from app.services.scrapers import SCRAPER_REGISTRY, NormalizedJob
 logger = logging.getLogger(__name__)
 
 
-def build_scrape_context(db: Session, user_id=None) -> Optional[Dict]:
-    """Per-user scrape settings from the caller's onboarded profile."""
-    q = db.query(Profile).filter(Profile.country.isnot(None))
-    if user_id is not None:
-        q = q.filter(Profile.user_id == user_id)
-    else:
-        q = q.order_by(Profile.id.desc())
-    profile = q.first()
+def build_scrape_context(db: Session, *, user_id) -> Optional[Dict]:
+    """Per-user scrape settings from the caller's onboarded profile.
+
+    user_id is required: the old bare call fell back to ORDER BY id DESC,
+    so a forgotten argument would scrape against the newest stranger's
+    country, queries and languages.
+    """
+    profile = (
+        db.query(Profile)
+        .filter(Profile.country.isnot(None), Profile.user_id == user_id)
+        .first()
+    )
     if not profile:
         return None
     return {
@@ -197,7 +201,8 @@ def run_pipeline(
     sources: Optional[List[str]] = None,
     match: bool = True,
     max_matches: Optional[int] = None,
-    user_id=None,
+    *,
+    user_id,
 ) -> Dict:
     """
     Run the full pipeline (used by the API and the scheduler).

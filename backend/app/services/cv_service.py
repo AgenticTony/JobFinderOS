@@ -87,7 +87,8 @@ def create_or_replace_profile_from_pdf(
     db: Session,
     file_content: bytes,
     filename: str,
-    user_id=None,
+    *,
+    user_id,
 ) -> Profile:
     """
     Upload flow: validate + extract PDF text, store the file,
@@ -109,11 +110,7 @@ def create_or_replace_profile_from_pdf(
 
     # Per-user: replace THIS user's profile if it exists (the singleton
     # takeover — second upload stealing the whole app — died with this)
-    profile = (
-        db.query(Profile).filter(Profile.user_id == user_id).first()
-        if user_id is not None
-        else None
-    )
+    profile = db.query(Profile).filter(Profile.user_id == user_id).first()
     if profile is None:
         profile = Profile(user_id=user_id, is_active=1)
     profile.cv_text = cv_text
@@ -144,22 +141,22 @@ def _apply_extraction(profile: Profile, extracted: dict) -> None:
     profile.ai_summary = extracted.get("summary") or None
 
 
-def get_active_profile(db: Session, user_id=None) -> Optional[Profile]:
-    """The caller's profile.
+def get_active_profile(db: Session, *, user_id) -> Optional[Profile]:
+    """The caller's profile — never anyone else's.
 
-    user_id is the scoping key. A bare call (user_id=None) now returns the
-    OLDEST profile rather than the newest — the previous ORDER BY id DESC
-    fallback silently resolved to whichever user registered last, which
-    produced the three cross-tenant P0 leaks. The parameter is never
-    omitted in the codebase; this fallback exists only so a forgotten
-    call degrades to the FIRST account (the founder) rather than a random
-    new stranger. Making it required outright would break the scheduler's
-    system-context path — tracked for Phase 1c hardening.
+    user_id is REQUIRED and keyword-only. There is deliberately no
+    unscoped fallback: every previous version of this function resolved a
+    bare call to *some* profile (newest, then oldest), and that convenience
+    is exactly what produced the three cross-tenant P0 leaks — the tailoring
+    input, the outbound sender identity, and the attached original CV all
+    silently belonged to another account.
+
+    A forgotten user_id is now a TypeError at the call site instead of a
+    stranger's CV in an employer's inbox. The scheduler already resolves a
+    per-user id before every run (scheduler.py), so no system-context path
+    needs an unscoped lookup.
     """
-    if user_id is not None:
-        return db.query(Profile).filter(Profile.user_id == user_id).first()
-    # Degradation fallback: first account, never the newest stranger
-    return db.query(Profile).order_by(Profile.id.asc()).first()
+    return db.query(Profile).filter(Profile.user_id == user_id).first()
 
 
 def _safe_int(value) -> Optional[int]:

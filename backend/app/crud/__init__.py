@@ -7,7 +7,13 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import utc_now
-from app.models import Application, JobPosting, MatchResult, ScrapeRun
+from app.models import (
+    Application,
+    ApplicationDraft,
+    JobPosting,
+    MatchResult,
+    ScrapeRun,
+)
 
 # ---------------- Jobs ----------------
 
@@ -44,18 +50,35 @@ def get_job(db: Session, job_id: int) -> Optional[JobPosting]:
     return db.query(JobPosting).filter(JobPosting.id == job_id).first()
 
 
-def delete_job(db: Session, job_id: int, user_id=None) -> bool:
+def delete_job(db: Session, job_id: int, *, user_id) -> bool:
+    """Remove a job from ONE user's world.
+
+    job_postings is a shared pool: the row is only physically deleted when
+    no other user still references it. Otherwise the caller's own match and
+    application rows go and the shared posting stays, so a delete can never
+    dangle another tenant's foreign keys (MatchResult.job_id is NOT NULL).
+    """
     job = get_job(db, job_id)
     if not job:
         return False
-    match_q = db.query(MatchResult).filter(MatchResult.job_id == job_id)
-    app_q = db.query(Application).filter(Application.job_id == job_id)
-    if user_id is not None:
-        match_q = match_q.filter(MatchResult.user_id == user_id)
-        app_q = app_q.filter(Application.user_id == user_id)
-    match_q.delete(synchronize_session=False)
-    app_q.delete(synchronize_session=False)
-    db.delete(job)
+    db.query(MatchResult).filter(
+        MatchResult.job_id == job_id, MatchResult.user_id == user_id
+    ).delete(synchronize_session=False)
+    db.query(Application).filter(
+        Application.job_id == job_id, Application.user_id == user_id
+    ).delete(synchronize_session=False)
+    db.query(ApplicationDraft).filter(
+        ApplicationDraft.job_id == job_id, ApplicationDraft.user_id == user_id
+    ).delete(synchronize_session=False)
+    db.flush()  # make this user's removals visible to the reference checks
+
+    still_referenced = (
+        db.query(MatchResult.id).filter(MatchResult.job_id == job_id).first()
+        or db.query(Application.id).filter(Application.job_id == job_id).first()
+        or db.query(ApplicationDraft.id).filter(ApplicationDraft.job_id == job_id).first()
+    )
+    if not still_referenced:
+        db.delete(job)
     db.commit()
     return True
 
@@ -70,11 +93,14 @@ def list_matches(
     pending_only: bool = False,
     limit: int = 100,
     offset: int = 0,
-    user_id=None,
+    *,
+    user_id,
 ) -> List[MatchResult]:
-    query = db.query(MatchResult).join(JobPosting, MatchResult.job_id == JobPosting.id)
-    if user_id is not None:
-        query = query.filter(MatchResult.user_id == user_id)
+    query = (
+        db.query(MatchResult)
+        .join(JobPosting, MatchResult.job_id == JobPosting.id)
+        .filter(MatchResult.user_id == user_id)
+    )
     if tier:
         query = query.filter(MatchResult.tier == tier)
     if recommendation:
@@ -111,11 +137,9 @@ def set_match_decision(db: Session, match: MatchResult, decision: str) -> MatchR
 # ---------------- Applications ----------------
 
 def list_applications(
-    db: Session, limit: int = 100, offset: int = 0, user_id=None
+    db: Session, limit: int = 100, offset: int = 0, *, user_id
 ) -> List[Application]:
-    query = db.query(Application)
-    if user_id is not None:
-        query = query.filter(Application.user_id == user_id)
+    query = db.query(Application).filter(Application.user_id == user_id)
     return (
         query
         .order_by(Application.created_at.desc())
@@ -142,18 +166,16 @@ def list_scrape_runs(db: Session, limit: int = 20) -> List[ScrapeRun]:
 
 # ---------------- Stats ----------------
 
-def get_stats(db: Session, user_id=None) -> dict:
-    """Dashboard stats, scoped to one user when user_id is given.
+def get_stats(db: Session, *, user_id) -> dict:
+    """Dashboard stats for ONE user.
 
     Per-user derivations: decision/approval state comes from match_results,
     applied state from applications — job.status carries no user state.
+    (job_* counts describe the shared scraped pool, which is not per-user.)
     """
-    match_q = db.query(MatchResult)
+    match_q = db.query(MatchResult).filter(MatchResult.user_id == user_id)
     job_q = db.query(JobPosting)
-    app_q = db.query(Application)
-    if user_id is not None:
-        match_q = match_q.filter(MatchResult.user_id == user_id)
-        app_q = app_q.filter(Application.user_id == user_id)
+    app_q = db.query(Application).filter(Application.user_id == user_id)
 
     matches = match_q.all()
 

@@ -42,7 +42,7 @@ jobs:
         run: pip install -r requirements.lock ruff pytest
 
       - name: Lint (imports + errors)
-        run: ruff check --select I,F app/
+        run: ruff check --select I,F app/ tests/ scripts/
 
       - name: Alembic migrations apply on real Postgres
         env:

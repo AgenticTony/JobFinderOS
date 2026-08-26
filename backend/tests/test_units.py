@@ -8,7 +8,7 @@ Run: .venv/bin/python -m pytest tests/test_units.py -q
 
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_units.db")
 os.environ.setdefault("GLM_API_KEY", "")
@@ -16,13 +16,15 @@ os.environ.setdefault("DEBUG", "true")  # test env — production guards relaxed
 
 import pytest  # noqa: E402
 
-from app.core.dedupe import dedupe_key_for  # noqa: E402
 from app.core.database import Base, SessionLocal, engine  # noqa: E402
-from app.models import Application, JobPosting, MatchResult, Profile  # noqa: E402
-from app.services.language_filter import detect_language, passes_language_filter  # noqa: E402
+from app.core.dedupe import dedupe_key_for  # noqa: E402
+from app.models import JobPosting, Profile  # noqa: E402
+from app.services.language_filter import (  # noqa: E402
+    detect_language,
+    passes_language_filter,
+)
 from app.services.pipeline import passes_location_filter  # noqa: E402
 from app.services.scrapers.base import NormalizedJob  # noqa: E402
-
 
 # ---------- pure gates ----------
 
@@ -90,8 +92,10 @@ def db():
     engine.dispose()
 
 
-def _profile(db):
-    p = Profile(is_active=1, full_name="Test", cv_file_name="cv.pdf",
+def _profile(db, user_id=None):
+    """A profile always belongs to a user now — tests must say which."""
+    p = Profile(is_active=1, user_id=user_id or uuid.uuid4(),
+                full_name="Test", cv_file_name="cv.pdf",
                 cv_text="developer python")
     db.add(p)
     db.commit()
@@ -122,13 +126,16 @@ class TestSubmitStateMachine:
         job.application_email = "jobs@acme.example"
         db.commit()
         from app.models import ApplicationDraft
-        draft = ApplicationDraft(job_id=job.id, cover_letter="x", tailored_cv="y",
+        draft = ApplicationDraft(job_id=job.id, user_id=profile.user_id,
+                                 cover_letter="x", tailored_cv="y",
                                  changes_summary="[]", status="ready")
         db.add(draft)
         db.commit()
 
         with pytest.raises(RuntimeError):
-            draft_service.submit_draft(db, draft, "email", profile=profile)
+            draft_service.submit_draft(
+                db, draft, "email", profile=profile, user_id=profile.user_id
+            )
 
         db.rollback()
         db.refresh(draft)
@@ -137,21 +144,23 @@ class TestSubmitStateMachine:
         assert job.status == "approved", "failed send must not mark the job applied"
 
     def test_manual_pending_marks_submitted(self, db, monkeypatch):
-        from app.services import draft_service
 
         profile = _profile(db)
         job = _job_row(db)
         job.application_url = "https://apply.example"
         db.commit()
         from app.models import ApplicationDraft
-        draft = ApplicationDraft(job_id=job.id, cover_letter="x", tailored_cv="y",
+        draft = ApplicationDraft(job_id=job.id, user_id=profile.user_id,
+                                 cover_letter="x", tailored_cv="y",
                                  changes_summary="[]", status="ready")
         db.add(draft)
         db.commit()
 
         from app.services.draft_service import submit_draft
 
-        app_row = submit_draft(db, draft, "browser", profile=profile)
+        app_row = submit_draft(
+            db, draft, "browser", profile=profile, user_id=profile.user_id
+        )
         assert app_row.status == "manual_pending"
         db.refresh(draft)
         assert draft.status == "submitted"
@@ -183,11 +192,12 @@ class TestDuplicateMatchContainment:
         """Per-user lock: same user blocked, different user proceeds."""
         from app.services import matcher_service
 
-        lock = matcher_service._get_user_lock(None)
+        uid = uuid.uuid4()
+        lock = matcher_service._get_user_lock(uid)
         acquired = lock.acquire(blocking=False)
         assert acquired
         try:
-            result = matcher_service.run_matching(db)
+            result = matcher_service.run_matching(db, user_id=uid)
             assert result["status"] == "skipped"
             assert "already in progress" in result["error"]
         finally:

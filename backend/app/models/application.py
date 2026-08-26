@@ -18,7 +18,7 @@ class Application(Base):
     __tablename__ = "applications"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Uuid, ForeignKey("users.id"), nullable=True, index=True)
+    user_id = Column(Uuid, ForeignKey("users.id"), nullable=False, index=True)
     job_id = Column(Integer, ForeignKey("job_postings.id"), nullable=False, index=True)
     match_id = Column(Integer, ForeignKey("match_results.id"), nullable=True)
     draft_id = Column(Integer, ForeignKey("application_drafts.id"), nullable=True)

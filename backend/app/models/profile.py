@@ -58,7 +58,7 @@ class Profile(Base):
     search_queries = Column(Text, nullable=True)  # JSON array — AI-suggested, user-approved
     languages = Column(Text, nullable=True)  # JSON array — languages the user works in
 
-    user_id = Column(Uuid, ForeignKey("users.id"), unique=True, nullable=True, index=True)
+    user_id = Column(Uuid, ForeignKey("users.id"), unique=True, nullable=False, index=True)
     # is_active kept for the migration backfill only; per-user semantics
     # replace the singleton (one profile per user via the unique FK)
     is_active = Column(Integer, default=1, nullable=False)

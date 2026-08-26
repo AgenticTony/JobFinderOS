@@ -13,9 +13,15 @@ os.environ.setdefault("DEBUG", "true")
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.core.database import Base, SessionLocal, engine  # noqa: E402
+from app.core.database import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Application, ApplicationDraft, JobPosting, MatchResult, Profile  # noqa: E402
+from app.models import (  # noqa: E402
+    Application,
+    ApplicationDraft,
+    JobPosting,
+    MatchResult,
+    Profile,
+)
 
 PASSWORD = "TestPass-2026!"
 
@@ -27,7 +33,6 @@ def client():
     # dependency with the per-user FKs.
     if os.path.exists("test_mu.db"):
         os.remove("test_mu.db")
-    from app.core.database import init_db
 
     with TestClient(app) as c:  # lifespan runs init_db -> alembic head
         yield c
@@ -103,7 +108,6 @@ class TestTwoUserIsolation:
             files={"file": ("a.pdf", b"%PDF-1.4 fake cv for user A", "application/pdf")},
         )
         # (upload will 400 on non-PDF-parseable content — the scoping is what we test)
-        a_profile = db.query(Profile).filter(Profile.user_id != None).all()  # noqa: E711
 
         # User B uploads — the OLD code would have deactivated A's profile
         _auth_client(client, b_email)
@@ -128,7 +132,7 @@ class TestTwoUserIsolation:
     def test_matches_are_scoped(self, client, db):
         """A cannot list or decide B's matches."""
         a_email, b_email = f"ma-{uuid.uuid4().hex[:6]}@test.example", f"mb-{uuid.uuid4().hex[:6]}@test.example"
-        a_id_uuid = _register(client, a_email)
+        _register(client, a_email)
         b_id = _register(client, b_email)
 
         job = JobPosting(
@@ -292,7 +296,7 @@ class TestOutboundIdentity:
         b_id = _register(client, b_email)
 
         # A's profile — Alice
-        a_token = _auth_client(client, a_email)
+        _auth_client(client, a_email)
         a_uid = None
         from app.models import User as UserModel
         a_user = db.query(UserModel).filter(UserModel.email == a_email).first()
@@ -330,8 +334,9 @@ class TestOutboundIdentity:
         db.commit()
 
         # A drafts — the profile context must be ALICE's, never Bob's
-        from app.services import draft_service
         from unittest.mock import patch as mock_patch
+
+        from app.services import draft_service
 
         captured = {}
         def fake_tailor(self, profile_context, cv_text, job_description):
@@ -367,4 +372,83 @@ class TestOutboundIdentity:
         )
         assert "Bob" not in (application.subject or ""), (
             f"CROSS-TENANT LEAK: Bob's name in A's application subject: {application.subject}"
+        )
+
+
+class TestOutboundEmailBoundary:
+    """The strongest tenancy assertion: nothing belonging to another user
+    may appear in the payload that actually leaves the system.
+
+    The three Phase 1b P0 leaks were invisible to row-ownership tests —
+    every row was correctly owned; it was the CONTENT of the outbound
+    email that belonged to a stranger. This test reads the real Resend
+    payload and asserts on it byte for byte.
+    """
+
+    def test_email_payload_carries_only_the_sender(self, client, db, monkeypatch):
+        import base64
+        import uuid as _uuid
+
+        from app.core.config import settings
+        from app.services.draft_service import submit_draft
+
+        a_uid, b_uid = _uuid.uuid4(), _uuid.uuid4()
+        # Alice registers first; Bob second (the old fallback resolved to
+        # whoever was newest, so Bob is the trap).
+        db.add(Profile(user_id=a_uid, is_active=1, full_name="Alice Anderson",
+                       email="alice@example.com", cv_text="ALICE CV TEXT",
+                       cv_file_name="alice-cv.pdf", cv_file_path=None))
+        db.add(Profile(user_id=b_uid, is_active=1, full_name="Bob Brown",
+                       email="bob@example.com", cv_text="BOB CV TEXT",
+                       cv_file_name="bob-cv.pdf", cv_file_path=None))
+        job = JobPosting(source="manual", source_id=str(_uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{_uuid.uuid4().hex[:6]}", status="new",
+                         application_email="jobs@acme.example")
+        db.add(job)
+        db.commit()
+
+        draft = ApplicationDraft(user_id=a_uid, job_id=job.id, status="ready",
+                                 cover_letter="Dear Acme, I am Alice.",
+                                 tailored_cv="ALICE TAILORED CV",
+                                 changes_summary="[]")
+        db.add(draft)
+        db.commit()
+
+        # Make the email path live and capture the real payload
+        monkeypatch.setattr(settings, "RESEND_API_KEY", "test-key")
+        monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "apply@jobfinderos.test")
+        # Bob has a stored CV file; Alice does not. If the wrong profile is
+        # resolved, Bob's bytes get attached — exactly the original P0.
+        monkeypatch.setattr(
+            "app.services.storage.read_original_cv",
+            lambda profile: b"%PDF-BOB-ORIGINAL-CV" if profile and profile.full_name == "Bob Brown" else None,
+        )
+        sent = {}
+
+        class _Emails:
+            @staticmethod
+            def send(params):
+                sent.update(params)
+                return {"id": "msg_test"}
+
+        fake_resend = type("R", (), {"Emails": _Emails, "api_key": None})
+        monkeypatch.setitem(__import__("sys").modules, "resend", fake_resend)
+
+        application = submit_draft(db, draft, "email", user_id=a_uid)
+        assert application.status == "sent", application.error
+        assert sent, "no email payload captured"
+
+        blob = repr(sent).encode() + b"".join(
+            base64.b64decode(a["content"]) for a in sent.get("attachments", [])
+        )
+        for forbidden in (b"Bob Brown", b"bob@example.com", b"bob-cv.pdf",
+                          b"BOB CV TEXT", b"%PDF-BOB-ORIGINAL-CV"):
+            assert forbidden not in blob, (
+                f"CROSS-TENANT LEAK: {forbidden!r} reached the employer payload "
+                f"of Alice's application. from={sent.get('from')!r} "
+                f"attachments={[a['filename'] for a in sent.get('attachments', [])]}"
+            )
+        assert "Alice Anderson" in str(sent.get("from")), (
+            f"sender identity is not Alice: {sent.get('from')!r}"
         )

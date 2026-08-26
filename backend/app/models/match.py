@@ -28,7 +28,7 @@ class MatchResult(Base):
     __tablename__ = "match_results"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Uuid, ForeignKey("users.id"), nullable=True, index=True)
+    user_id = Column(Uuid, ForeignKey("users.id"), nullable=False, index=True)
     job_id = Column(Integer, ForeignKey("job_postings.id"), nullable=False, index=True)
     __table_args__ = (
         UniqueConstraint("user_id", "job_id", name="uq_match_results_user_job"),

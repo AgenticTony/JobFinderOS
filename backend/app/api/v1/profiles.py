@@ -1,6 +1,7 @@
 """Profile API — CV upload and the single active job-seeker profile."""
 
 import logging
+from functools import partial
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -51,7 +52,13 @@ async def upload_cv(
         # IO (pdfplumber, sync httpx) — running it inline would block the
         # event loop and freeze every other request during the GLM call.
         profile = await run_in_threadpool(
-            create_or_replace_profile_from_pdf, db, content, file.filename
+            partial(
+                create_or_replace_profile_from_pdf,
+                db,
+                content,
+                file.filename,
+                user_id=user.id,
+            )
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

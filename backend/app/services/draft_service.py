@@ -39,15 +39,18 @@ def get_draft(db: Session, draft_id: int) -> Optional[ApplicationDraft]:
     return db.query(ApplicationDraft).filter(ApplicationDraft.id == draft_id).first()
 
 
-def list_drafts(db: Session, limit: int = 100, user_id=None) -> List[ApplicationDraft]:
-    query = db.query(ApplicationDraft)
-    if user_id is not None:
-        query = query.filter(ApplicationDraft.user_id == user_id)
-    return query.order_by(ApplicationDraft.updated_at.desc()).limit(limit).all()
+def list_drafts(db: Session, limit: int = 100, *, user_id) -> List[ApplicationDraft]:
+    return (
+        db.query(ApplicationDraft)
+        .filter(ApplicationDraft.user_id == user_id)
+        .order_by(ApplicationDraft.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 def create_draft_for_job(
-    db: Session, job: JobPosting, force: bool = False, user_id=None
+    db: Session, job: JobPosting, force: bool = False, *, user_id
 ) -> ApplicationDraft:
     """
     Generate (or regenerate) the tailored application package for an approved job.
@@ -141,7 +144,8 @@ def submit_draft(
     draft: ApplicationDraft,
     method: str,
     profile: Optional[Profile] = None,
-    user_id=None,
+    *,
+    user_id,
 ) -> Application:
     """
     Submit the reviewed package.
