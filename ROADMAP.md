@@ -131,8 +131,8 @@ independently. Sequencing law from review pass 4: Phase 1b gets more
 expensive with each account-touching surface built before it — so NOTHING
 that creates or reads an account ships ahead of the schema.
 
-**Phase 1b — Multi-user core (review-hardened scope; comes BEFORE the
-account flows below):** user_id FKs +
+**Phase 1b — Multi-user core (DONE Aug 2026, CI green; see CLAUDE.md
+Phase 1b section for the full record):** user_id FKs +
 Alembic migration + backfill; every crud query and all 12
 get_active_profile() sites scoped to the caller; Depends(current_active_user)
 on every route + frontend token layer (findings #2/#4 — the two NOT fixed);

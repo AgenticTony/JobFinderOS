@@ -224,6 +224,36 @@ Remaining upgrade levers: batch-5-per-call, Z.ai tier.
   Postgres + flow test (now runs with EMPTY GLM key — draft_service mocked
   too); frontend job = tsc + next build. Green on main.
 
+## Phase 1b — per-user data model (DONE Aug 2026, CI green)
+
+THE multi-user schema migration, landed end to end:
+- user_id FKs: profiles (UNIQUE per user), match_results + composite unique
+  (user_id, job_id) — two users can score the same job, application_drafts,
+  applications. Alembic migration via batch_alter_table (SQLite-portable);
+  upgrade AND downgrade verified on real Postgres 16.
+- Boot migrations own BOTH backends: Postgres = upgrade head; legacy SQLite
+  create_all DBs = stamp at initial rev then migrate (the real local data
+  migrated live: 1 profile, 243 matches, 4 drafts, 2 apps claimed by the
+  bootstrapped account via scripts/bootstrap_user.py).
+- Auth on EVERY route (401 verified live; /health public). Frontend token
+  layer: /login page, axios Bearer interceptors, 401 redirect, sidebar
+  Sign out. on_after_register creates the Profile row.
+- Singleton dead: get_active_profile(db, user_id) everywhere; upload is a
+  per-user upsert (second upload cannot steal the app — unit tested).
+- job.status never mutated by user actions; decision/applied state derives
+  from match_results/applications per user. Sub-threshold matches become
+  auto-passed match rows (per-user memory) instead of global dismissals.
+- IDOR closed: owns_or_404 on every by-id route incl. PDF downloads (tested
+  user A gets 404 on user B's draft/match/application).
+- Rate limits: sliding-window per user on AI-spending endpoints (cv_upload 5/hr,
+  ai_suggest 10/hr, hunt 12/hr, match_run 12/hr, draft_prepare 20/hr).
+- GDPR: DELETE /api/v1/account/delete (cascade + CV file + token death,
+  tested); GET /api/v1/account/export.
+- Production: requirements.lock (71 pinned); Dockerfile (slim, non-root,
+  lock-only, alembic ships); CI = locked installs + multiuser suite + Docker
+  build job. 22 unit + 7 multiuser + flow tests green. 3 jobs green on
+  run 32941907253.
+
 ## Review-fix status (Aug 2026, verification pass 3)
 
 ACCURATE STATUS: 20 of 22 review findings fixed and execution-verified
