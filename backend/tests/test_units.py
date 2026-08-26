@@ -412,29 +412,87 @@ class TestDeadBand:
             "sampling failure writes nothing and retries next run."
         )
 
-    def test_keep_min_invariant_no_subthreshold_rows_without_dismissal(self, db):
+    def test_keep_min_invariant_bidirectional_dismissal(self, db):
         """INVARIANT: score < MATCH_KEEP_MIN_SCORE must have dismissed_reason.
-        This is the matcher's guarantee; any bulk operation (re-score script,
-        manual SQL, migration) must leave it intact. The re-score script's
-        one-directional dismissal derivation left 176 violations — this test
-        catches that class of bug."""
+        Tests the BIDIRECTIONAL dismissal derivation — the re-score script's
+        one-directional version left 176 sub-threshold rows live. Seeds both
+        violation types (sub-threshold without dismissal, strong with stale
+        dismissal), applies the derivation, then asserts all four invariants.
+
+        This test MUST be seen to fail — the db fixture truncates tables,
+        so a test that only queries an empty table is decoration (the third
+        check-that-can't-fail this session). This one seeds violations first.
+        """
         from app.core.config import settings
         from app.models import MatchResult
 
-        violations = (
-            db.query(MatchResult)
-            .filter(
-                MatchResult.score < settings.MATCH_KEEP_MIN_SCORE,
-                MatchResult.dismissed_reason.is_(None),
-            )
-            .count()
-        )
-        assert violations == 0, (
-            f"{violations} rows have score < {settings.MATCH_KEEP_MIN_SCORE} "
-            "but dismissed_reason IS NULL — sub-threshold rows must never "
-            "be live in the queue. If this fires after a bulk operation, "
-            "the operation's dismissal derivation is one-directional."
-        )
+        keep = settings.MATCH_KEEP_MIN_SCORE
+
+        # Seed: a user with a profile
+        profile = _profile(db)
+        job_high = _job_row(db, status="matched")
+        job_low = _job_row(db, status="matched")
+
+        # VIOLATION TYPE 1: sub-threshold row WITHOUT dismissal (the 176-row bug)
+        db.add(MatchResult(
+            user_id=profile.user_id, job_id=job_low.id, score=18,
+            tier="poor_match", recommendation="maybe", decision=None,
+            dismissed_reason=None, prompt_version="m2-62c2452b",
+        ))
+        # VIOLATION TYPE 2: strong row with stale dismissal (score rose after re-score)
+        db.add(MatchResult(
+            user_id=profile.user_id, job_id=job_high.id, score=72,
+            tier="good_match", recommendation="maybe", decision="rejected",
+            dismissed_reason="below_threshold", prompt_version="m2-62c2452b",
+        ))
+        db.commit()
+
+        # Verify violations EXIST before the fix (proves the test can fail)
+        sub_violations = db.query(MatchResult).filter(
+            MatchResult.score < keep, MatchResult.dismissed_reason.is_(None)
+        ).count()
+        stale_dismissals = db.query(MatchResult).filter(
+            MatchResult.score >= keep,
+            MatchResult.dismissed_reason == "below_threshold",
+        ).count()
+        assert sub_violations == 1, f"expected 1 sub-threshold violation, got {sub_violations}"
+        assert stale_dismissals == 1, f"expected 1 stale dismissal, got {stale_dismissals}"
+
+        # Apply the BIDIRECTIONAL derivation (same rules as the re-score script)
+
+        for m in db.query(MatchResult).all():
+            if m.score >= keep:
+                # Score is above keep-min: clear auto-pass dismissals
+                if m.dismissed_reason in ("below_threshold", "dead_band_confirmed"):
+                    m.decision = None
+                    m.decided_at = None
+                    m.dismissed_reason = None
+            else:
+                # Score is below keep-min: ensure dismissed
+                m.decision = "rejected"
+                m.dismissed_reason = "below_threshold"
+                m.recommendation = "skip"
+        db.commit()
+
+        # Assert ALL FOUR invariants at zero
+        v1 = db.query(MatchResult).filter(
+            MatchResult.score < keep, MatchResult.dismissed_reason.is_(None)
+        ).count()
+        v2 = db.query(MatchResult).filter(
+            MatchResult.score < keep, MatchResult.decision.is_(None)
+        ).count()
+        v3 = db.query(MatchResult).filter(
+            MatchResult.score >= keep,
+            MatchResult.dismissed_reason == "below_threshold",
+        ).count()
+        v4 = db.query(MatchResult).filter(
+            MatchResult.score >= 50, MatchResult.recommendation == "skip"
+        ).count()
+
+        assert v1 == 0, f"{v1} sub-threshold rows without dismissal — invariant violated"
+        assert v2 == 0, f"{v2} sub-threshold rows with decision=NULL — invariant violated"
+        assert v3 == 0, f"{v3} strong rows wrongly dismissed — invariant violated"
+        assert v4 == 0, f"{v4} strong rows with skip recommendation — invariant violated"
 
 
 class TestDismissalIsPerUser:
