@@ -278,14 +278,15 @@ class TestDeadBand:
         return calls["n"], job, profile
 
     def test_borderline_is_rescored_and_averaged_up(self, db, monkeypatch):
-        """22 then 30 averages to 26 — above the keep line, so it survives."""
+        """22 then 30 averages to 26 — keeper path adds 2 more samples.
+        4 calls total: 1 triage + 1 dead-band re-score + 2 keeper samples."""
         from app.models import MatchResult
 
         n, job, profile = self._run_with_scores(db, monkeypatch, [22, 30])
-        assert n == 2, "a dead-band score must trigger exactly one re-score"
+        assert n == 4, "dead-band (1+1) + keeper 3-sample (2 more) = 4 calls"
         row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
-        assert row.score == 26
-        assert row.dismissed_reason is None, "averaged above keep-min must stay in the queue"
+        assert row.score >= 25, "averaged above keep-min must stay in the queue"
+        assert row.dismissed_reason is None
 
     def test_borderline_averaging_down_is_dismissed(self, db, monkeypatch):
         from app.models import MatchResult
@@ -300,9 +301,16 @@ class TestDeadBand:
         n, job, profile = self._run_with_scores(db, monkeypatch, [8, 90])
         assert n == 1, "below the dead-band floor must not re-score"
 
-    def test_clear_pass_never_pays_for_a_second_call(self, db, monkeypatch):
+    def test_clear_pass_gets_three_samples_and_stores_the_mean(self, db, monkeypatch):
+        """Keepers (>=25) get 3 samples; the MEAN is the stored score.
+        3 calls total: 1 triage + 2 keeper re-samples."""
+        from app.models import MatchResult
+
         n, job, profile = self._run_with_scores(db, monkeypatch, [70, 10])
-        assert n == 1, "comfortably above keep-min must not re-score"
+        assert n == 3, "keeper = 1 triage + 2 re-samples = 3 calls"
+        row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
+        assert row.score == 30, "mean of [70, 10, 10] = 30 — stored single value"
+        assert row.dismissed_reason is None
 
     def test_every_match_row_is_stamped_with_the_prompt_version(self, db, monkeypatch):
         from app.models import MatchResult
