@@ -254,6 +254,23 @@ THE multi-user schema migration, landed end to end:
   build job. 22 unit + 7 multiuser + flow tests green. 3 jobs green on
   run 32941907253.
 
+## Phase 1b review pass (10 findings, all fixed, CI 32943889135)
+
+P0 cross-tenant leaks (proven by reviewer execution — wrong user's CV emailed):
+- draft_service.py:70/:163 + apply_service.py:44: all three profile lookups
+  now scope by user_id. The unscoped get_active_profile fallback previously
+  resolved to ORDER BY id DESC = most recently registered user.
+- The fallback itself de-weaponized: now returns the FIRST account (founder),
+  never the newest stranger. Making it fully required = Phase 1c.
+- NEW TestOutboundIdentity: asserts on the OUTBOUND artifact (AI prompt receives
+  the right CV text; Bob's name never in Alice's subject). This is the test
+  shape for every future content-crossing-tenant path.
+
+P1: delete_job scopes cascade to caller; PDF downloads = axios blob fetch
+(not window.open 401); GDPR erasure routes through storage.delete() (both
+backends). P2: owns_or_404 fails CLOSED on NULL; per-user matching locks;
+rate-limit eviction + GDPR clear_user; dead _entity_id() removed.
+
 ## Review-fix status (Aug 2026, verification pass 3)
 
 ACCURATE STATUS: 20 of 22 review findings fixed and execution-verified
