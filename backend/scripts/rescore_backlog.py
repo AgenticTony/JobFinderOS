@@ -137,17 +137,28 @@ def main() -> int:
             match.tier = tier
             match.prompt_version = AIService.matching_prompt_version()
             match.model_used = svc.model
-            # Clear any auto-pass/rejection decision from the old scoring if
-            # the new score clears the keep line — the old decision was made
-            # on an obsolete prompt
-            if (
-                match.decision == "rejected"
-                and match.dismissed_reason in ("below_threshold", "dead_band_confirmed")
-                and averaged >= settings.MATCH_KEEP_MIN_SCORE
-            ):
-                match.decision = None
+
+            # BIDIRECTIONAL dismissal derivation (the one-directional version
+            # left 176 sub-threshold rows live in the queue). Apply the same
+            # rules the matcher uses, in both directions:
+            if averaged >= settings.MATCH_KEEP_MIN_SCORE:
+                # Score ROSE above keep-min: clear any auto-pass from the old
+                # scoring (the old rejection was on an obsolete prompt)
+                if (
+                    match.decision == "rejected"
+                    and match.dismissed_reason in ("below_threshold", "dead_band_confirmed")
+                ):
+                    match.decision = None
+                    match.decided_at = None
+                    match.dismissed_reason = None
+            else:
+                # Score FELL below keep-min: the old decision may have been
+                # 'approved' or pending — sub-threshold rows never stay live
+                match.decision = "rejected"
                 match.decided_at = None
-                match.dismissed_reason = None
+                match.dismissed_reason = "below_threshold"
+                match.recommendation = "skip"
+                match.reasoning = "Auto-passed: below the score threshold for your CV."
 
             db.add(match)
             db.commit()
@@ -167,6 +178,32 @@ def main() -> int:
 
     print(f"\nDone: {updated} re-scored, {errors} errors, {len(backlog) - updated - errors} skipped")
     print(f"New prompt_version on all: {AIService.matching_prompt_version()}")
+
+    # POST-RUN INVARIANT CHECK — the lesson from the 176-row leak: query the
+    # invariant, not the symptom. These are the guarantees the matcher makes;
+    # the re-score script must leave them intact.
+    violations = {
+        "sub-threshold without dismissal": db.query(MatchResult)
+            .filter(MatchResult.score < settings.MATCH_KEEP_MIN_SCORE,
+                    MatchResult.dismissed_reason.is_(None)).count(),
+        "sub-threshold with wrong decision": db.query(MatchResult)
+            .filter(MatchResult.score < settings.MATCH_KEEP_MIN_SCORE,
+                    MatchResult.decision.is_(None)).count(),
+        "strong row wrongly dismissed": db.query(MatchResult)
+            .filter(MatchResult.score >= settings.MATCH_KEEP_MIN_SCORE,
+                    MatchResult.dismissed_reason == "below_threshold").count(),
+        "skip recommended on strong row": db.query(MatchResult)
+            .filter(MatchResult.score >= 50,
+                    MatchResult.recommendation == "skip").count(),
+    }
+    all_zero = all(v == 0 for v in violations.values())
+    for name, count in violations.items():
+        status = "OK" if count == 0 else f"VIOLATIONS: {count}"
+        print(f"  {name}: {status}")
+    if not all_zero:
+        print("\nERROR: invariant violations detected — do NOT trust the queue until fixed.")
+        return 1
+    print("All invariants hold.\n")
     return 0
 
 

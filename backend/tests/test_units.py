@@ -412,6 +412,30 @@ class TestDeadBand:
             "sampling failure writes nothing and retries next run."
         )
 
+    def test_keep_min_invariant_no_subthreshold_rows_without_dismissal(self, db):
+        """INVARIANT: score < MATCH_KEEP_MIN_SCORE must have dismissed_reason.
+        This is the matcher's guarantee; any bulk operation (re-score script,
+        manual SQL, migration) must leave it intact. The re-score script's
+        one-directional dismissal derivation left 176 violations — this test
+        catches that class of bug."""
+        from app.core.config import settings
+        from app.models import MatchResult
+
+        violations = (
+            db.query(MatchResult)
+            .filter(
+                MatchResult.score < settings.MATCH_KEEP_MIN_SCORE,
+                MatchResult.dismissed_reason.is_(None),
+            )
+            .count()
+        )
+        assert violations == 0, (
+            f"{violations} rows have score < {settings.MATCH_KEEP_MIN_SCORE} "
+            "but dismissed_reason IS NULL — sub-threshold rows must never "
+            "be live in the queue. If this fires after a bulk operation, "
+            "the operation's dismissal derivation is one-directional."
+        )
+
 
 class TestDismissalIsPerUser:
     """One user's exclude keyword must not hide a shared job from others."""
