@@ -237,7 +237,8 @@ singleton; second CV upload takes over the app), draft PDF downloads are
 IDOR-open. That IS Phase 1b per ROADMAP. Phase 1b additions from the review:
 IDOR checks on integer-ID downloads, on_after_register creates Profile,
 per-user rate limiting, dependency pinning/lockfile, Dockerfile, account
-deletion (GDPR). Residuals from verification pass 3 (fixed 2026-08-26):
+deletion (GDPR). Verification pass 4 signed the ledger (single-user: production grade; multi-user: correctly scoped, not started). Sequencing law in ROADMAP: no account-creating surface ships before Phase 1b's schema - landing page split static-first (1a-static), account UI moved to 1c.
+Residuals from verification pass 3 (fixed 2026-08-26):
 utc_now() helper replaces all datetime.utcnow() (28 deprecation warnings → 0,
 naive-UTC storage semantics preserved); storage.py stale docstring corrected;
 NextHunt/HuntPulse raw new Date() → parseUtcDate.
