@@ -919,16 +919,7 @@ function SentApplicationCard({
           </a>
         )}
         {a.status === 'failed' && a.method === 'email' && (
-          <button
-            onClick={async (e) => {
-              e.stopPropagation();
-              await retryApplication(a.id);
-              onChanged();
-            }}
-            className="rounded-lg bg-signal px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-signal/90"
-          >
-            Retry
-          </button>
+          <RetryButton applicationId={a.id} onChanged={onChanged} />
         )}
         {hasDocuments && (
           <ChevronDown
