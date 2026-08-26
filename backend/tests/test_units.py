@@ -1,3 +1,5 @@
+import os
+
 """
 Unit tests for the pure gate/parse/dedupe logic and the fixed state
 machines — the cheap-to-test, expensive-to-get-wrong core.
@@ -11,7 +13,7 @@ from datetime import timedelta
 
 import pytest  # noqa: E402
 
-from app.core.database import Base, SessionLocal, engine  # noqa: E402
+from app.core.database import SessionLocal, engine  # noqa: E402
 from app.core.dedupe import dedupe_key_for  # noqa: E402
 from app.models import JobPosting, Profile  # noqa: E402
 from app.services.language_filter import (  # noqa: E402
@@ -77,14 +79,39 @@ class TestLanguageFilter:
 
 # ---------- state machines (fixed bugs) ----------
 
-@pytest.fixture()
-def db():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    session = SessionLocal()
-    yield session
-    session.close()
+# Module-scoped: schema created once via the production boot path
+# (TestClient lifespan -> init_db -> alembic). Tests clean DATA not schema.
+@pytest.fixture(scope="module")
+def _client():
+    from fastapi.testclient import TestClient
+
+    from app.main import app as _app
+
+    db_file = "test_suite.db"
+    if os.path.exists(db_file):
+        os.remove(db_file)
+    with TestClient(_app) as c:
+        yield c
     engine.dispose()
+
+
+@pytest.fixture()
+def db(_client):
+    session = SessionLocal()
+    # Clean per-user data between tests (schema stays — Alembic owns it)
+    from app.models import (
+        Application,
+        ApplicationDraft,
+        JobPosting,
+        MatchResult,
+        Profile,
+    )
+    for model in (Application, ApplicationDraft, MatchResult, Profile, JobPosting):
+        session.query(model).delete()
+    session.commit()
+    yield session
+    session.rollback()
+    session.close()
 
 
 def _profile(db, user_id=None):
