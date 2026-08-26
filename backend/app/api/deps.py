@@ -2,16 +2,43 @@
 
 import logging
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.ratelimit import enforce
 from app.models import Profile, User
 from app.models import User as UserModel
 from app.services.cv_service import get_active_profile
 from app.users import current_active_user
 
 logger = logging.getLogger(__name__)
+
+
+async def register_rate_limit(request: Request) -> None:
+    """Per-address signup throttle. Keyed by the SUBMITTED email, not IP:
+    per-address is the meaningful unit for registration hammering, and
+    every client behind one proxy would otherwise share a bucket.
+    Pre-reading the body is safe — Starlette caches json()/form()."""
+    email = ""
+    try:
+        body = await request.json()
+        email = str(body.get("email", ""))
+    except Exception:  # noqa: BLE001 — malformed body falls through to the route's own 422
+        pass
+    enforce(f"reg:{email.lower()}", "auth_register")
+
+
+async def login_rate_limit(request: Request) -> None:
+    """Per-account login throttle — the core brute-force guard. The login
+    form's `username` field carries the email."""
+    username = ""
+    try:
+        form = await request.form()
+        username = str(form.get("username", ""))
+    except Exception:  # noqa: BLE001 — malformed form falls through to the route's own 422
+        pass
+    enforce(f"login:{username.lower()}", "auth_login")
 
 
 def get_authenticated_user(user: UserModel = Depends(current_active_user)) -> User:

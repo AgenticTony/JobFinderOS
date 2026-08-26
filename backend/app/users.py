@@ -47,6 +47,30 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = settings.AUTH_SECRET
     verification_token_secret = settings.AUTH_SECRET
 
+    async def validate_password(self, password: str, user) -> None:
+        """Password policy (signup hardening). fastapi-users' default
+        accepts ANY string — 'a' registered fine. Runs on register AND on
+        every future password set/reset. Raises InvalidPasswordException,
+        which the routers map to a 400 carrying the reason."""
+        from fastapi_users.exceptions import InvalidPasswordException
+
+        n = len(password.encode("utf-8"))
+        if n < 8:
+            raise InvalidPasswordException(
+                reason="Password must be at least 8 characters"
+            )
+        if n > 72:
+            # bcrypt silently truncates beyond 72 bytes — a longer password
+            # lends false strength to its prefix
+            raise InvalidPasswordException(
+                reason="Password must be at most 72 characters"
+            )
+        local = (user.email or "").split("@")[0].lower()
+        if local and len(local) >= 4 and local in password.lower():
+            raise InvalidPasswordException(
+                reason="Password must not contain your email address"
+            )
+
     async def on_after_register(
         self, user: User, request: Optional[Request] = None
     ) -> None:

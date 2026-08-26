@@ -48,6 +48,13 @@ BUCKETS = {
     "hunt": (12, 3600),              # manual pipeline runs
     "match_run": (12, 3600),         # matching kicks
     "draft_prepare": (20, 3600),     # tailored packages
+    # Auth endpoints — the only routes an attacker can hit without an
+    # account. Keyed by the TARGET EMAIL (see app/api/deps.py), not IP:
+    # per-account is the meaningful unit for brute force, and every client
+    # behind one proxy would otherwise share a bucket. A per-IP layer
+    # belongs to the reverse proxy at deployment.
+    "auth_register": (5, 3600),      # signup attempts per address
+    "auth_login": (10, 900),         # logins per account per 15 min
 }
 
 

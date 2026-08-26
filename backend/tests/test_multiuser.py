@@ -632,3 +632,76 @@ class TestLayer1Routes:
             "resolve and inject it (Layer 1 regression)"
         )
         assert captured["profile"].full_name == "Match Runner"
+
+
+class TestSignupHardening:
+    """Signup items 3 and 4: rate limits on the auth endpoints and a real
+    password policy. fastapi-users' defaults accept ANY password string
+    ('a' registered fine) and neither /auth/register nor /auth/jwt/login
+    had enforce() applied — the two endpoints an attacker can hit without
+    an account. Tests written before the fix: weak passwords and unlimited
+    hammering currently pass."""
+
+    def test_weak_passwords_are_rejected(self, client):
+        _clear_auth(client)
+        cases = [
+            ("a", "too short"),
+            ("short7", "7 chars — under the minimum"),
+            ("x" * 73, "over the bcrypt 72-byte boundary"),
+            ("tony-contains-email", "contains the account's email local part"),
+        ]
+        for pw, why in cases:
+            # unique per run: the suite's DB file can persist across
+            # pytest invocations, and a fixed address becomes a phantom
+            # REGISTER_USER_ALREADY_EXISTS
+            local = f"tony{uuid.uuid4().hex[:6]}"
+            email = f"{local}@test.example"
+            if "email" in why:
+                pw = f"{local}-hunter2"
+            r = client.post("/api/v1/auth/register",
+                            json={"email": email, "password": pw})
+            assert r.status_code == 400, (
+                f"password accepted that should be rejected ({why}): "
+                f"{r.status_code} {r.text[:150]}"
+            )
+            assert "assword" in r.text or "password" in r.text.lower(), (
+                f"rejection for ({why}) doesn't mention the password: {r.text[:150]}"
+            )
+
+    def test_valid_password_registers(self, client):
+        _clear_auth(client)
+        email = f"pw-ok-{uuid.uuid4().hex[:6]}@test.example"
+        r = client.post("/api/v1/auth/register",
+                        json={"email": email, "password": "A-Sensible-Passw0rd!"})
+        assert r.status_code == 201, r.text[:200]
+
+    def test_login_brute_force_is_rate_limited(self, client):
+        _clear_auth(client)
+        email = f"bf-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        codes = []
+        for _ in range(14):
+            r = client.post("/api/v1/auth/jwt/login",
+                            data={"username": email, "password": "wrong"})
+            codes.append(r.status_code)
+        assert codes[0] == 400, f"first wrong login should be 400, got {codes[0]}"
+        assert 429 in codes, (
+            f"14 wrong-password logins on one account and no 429 ever fired: {codes}"
+        )
+        assert codes.index(429) >= 8, (
+            f"429 fired too early ({codes}) — legitimate re-logins must not trip"
+        )
+
+    def test_register_hammering_is_rate_limited(self, client):
+        _clear_auth(client)
+        email = f"rh-{uuid.uuid4().hex[:6]}@test.example"
+        codes = []
+        for _ in range(8):
+            r = client.post("/api/v1/auth/register",
+                            json={"email": email, "password": PASSWORD})
+            codes.append(r.status_code)
+        assert codes[0] == 201, codes
+        assert all(c == 400 for c in codes[1:codes.index(429)]) if 429 in codes else True
+        assert 429 in codes, (
+            f"8 registration attempts on one address and no 429 ever fired: {codes}"
+        )
