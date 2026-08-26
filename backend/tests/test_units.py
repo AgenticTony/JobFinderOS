@@ -706,3 +706,74 @@ class TestDismissalIsPerUser:
         assert job.id in [j.id for j in candidates], (
             "user B lost a job because user A excluded it"
         )
+
+
+class TestSharedSamplingPolicy:
+    """The sampling policy must live in ONE place. It has now diverged
+    three times between the matcher and the re-score script — one-directional
+    dismissal (176 rows), score-without-payload (241 rows), and a triage
+    break on KEEP_MIN instead of the dead-band floor (62 rows permanently
+    dismissed on a single +/-11 sample)."""
+
+    def test_script_uses_the_shared_policy_not_its_own_thresholds(self):
+        """The script must call needs_another_sample, not re-implement it.
+
+        A copy in the script only guards itself: the last three regressions
+        all shipped because the script had its own version of a rule the
+        matcher had already fixed.
+        """
+        import inspect
+
+        from app.services import matcher_service
+
+        src = _rescore_module_source()
+        assert "needs_another_sample" in src, (
+            "rescore_backlog.py must import and call needs_another_sample. "
+            "If it re-implements the sampling thresholds, a matcher fix will "
+            "silently not reach it — that has happened three times."
+        )
+        assert "MATCH_KEEP_MIN_SCORE:" not in src.replace(" ", ""), "sanity"
+        # The policy itself is defined exactly once, in the matcher
+        assert "def needs_another_sample" in inspect.getsource(matcher_service)
+        assert "def needs_another_sample" not in src, (
+            "needs_another_sample is defined twice — the shadow copy is back"
+        )
+
+    def test_deadband_score_earns_a_second_sample(self):
+        """A 22 must never be decided on one sample: dismissal is permanent
+        and single-sample noise is +/-11. This is the exact rule the script
+        skipped when it broke on KEEP_MIN, dismissing 62 rows."""
+        from app.services.matcher_service import needs_another_sample
+
+        for score in (13, 18, 22, 24):
+            assert needs_another_sample([{"score": score}]), (
+                f"score {score} is inside the dead-band [13,25) and must earn "
+                "a second sample before a permanent dismissal"
+            )
+
+    def test_confidently_bad_stops_at_one_sample(self):
+        from app.services.matcher_service import needs_another_sample
+
+        for score in (0, 5, 12):
+            assert not needs_another_sample([{"score": score}]), (
+                f"score {score} is below the dead-band — a second opinion "
+                "cannot rescue it and must not be paid for"
+            )
+
+    def test_keeper_path_commits_to_three_samples(self):
+        """Once triage clears keep-min the row is heading for the queue;
+        stopping at 2 would decide a dismissal on a +/-8 mean."""
+        from app.services.matcher_service import needs_another_sample
+
+        assert needs_another_sample([{"score": 26}, {"score": 20}])
+        assert not needs_another_sample(
+            [{"score": 26}, {"score": 20}, {"score": 18}]
+        )
+
+
+def _rescore_module_source() -> str:
+    from pathlib import Path
+
+    return (
+        Path(__file__).resolve().parent.parent / "scripts" / "rescore_backlog.py"
+    ).read_text()

@@ -27,7 +27,11 @@ from app.models import JobPosting, MatchResult, Profile  # noqa: E402
 from app.schemas.common import dump_json_list  # noqa: E402
 from app.services.ai_service import AIService  # noqa: E402
 from app.services.cv_service import build_profile_context  # noqa: E402
-from app.services.matcher_service import _job_text, resolve_samples  # noqa: E402
+from app.services.matcher_service import (  # noqa: E402
+    _job_text,
+    needs_another_sample,
+    resolve_samples,
+)
 
 # The auto-pass stamp the matcher writes on sub-threshold rows. A constant,
 # not a literal in two places: the fall-branch writes it and the rise-branch
@@ -121,7 +125,27 @@ def main() -> int:
     # no longer matches them.
     target_version = "legacy-unversioned"
     if "--prompt-version" in sys.argv:
-        target_version = sys.argv[sys.argv.index("--prompt-version") + 1]
+        idx = sys.argv.index("--prompt-version") + 1
+        if idx >= len(sys.argv):
+            print("ERROR: --prompt-version needs a value, e.g. --prompt-version m2-62c2452b")
+            return 2
+        target_version = sys.argv[idx]
+
+    # --score-between LO HI: narrow to a score range. Needed to repair rows
+    # a previous run decided with too few samples — e.g. the 62 rows the
+    # old break-on-KEEP_MIN loop dismissed on a single sample inside the
+    # dead-band. Combine with --prompt-version to target one cohort.
+    score_range = None
+    if "--score-between" in sys.argv:
+        idx = sys.argv.index("--score-between")
+        if idx + 2 >= len(sys.argv):
+            print("ERROR: --score-between needs two values, e.g. --score-between 13 24")
+            return 2
+        try:
+            score_range = (int(sys.argv[idx + 1]), int(sys.argv[idx + 2]))
+        except ValueError:
+            print("ERROR: --score-between values must be integers")
+            return 2
 
     if not settings.GLM_API_KEY:
         print("ERROR: GLM_API_KEY not set — cannot re-score.")
@@ -171,12 +195,15 @@ def main() -> int:
     print(f"Snapshot: {snapshot_dst} ({row_count} match rows)")
     print(f"Restore:  cp {snapshot_dst} {db_path}")
 
-    backlog = (
-        db.query(MatchResult)
-        .filter(MatchResult.prompt_version == target_version)
-        .all()
-    )
-    print(f"Backlog: {len(backlog)} rows on prompt_version '{target_version}'")
+    q = db.query(MatchResult).filter(MatchResult.prompt_version == target_version)
+    if score_range:
+        lo, hi = score_range
+        q = q.filter(MatchResult.score >= lo, MatchResult.score <= hi)
+    backlog = q.all()
+    scope = f"prompt_version '{target_version}'"
+    if score_range:
+        scope += f", score {score_range[0]}-{score_range[1]}"
+    print(f"Backlog: {len(backlog)} rows on {scope}")
     if dry_run:
         for m in backlog[:5]:
             job = db.get(JobPosting, m.job_id)
@@ -208,21 +235,21 @@ def main() -> int:
 
         try:
             text = _job_text(job)
+            # Sampling policy comes from needs_another_sample — the SHARED
+            # matcher protocol. The old loop broke on KEEP_MIN instead of
+            # the dead-band floor, so scores in [13,25) were dismissed on a
+            # single +/-11 sample; 62 rows were decided that way, which is
+            # precisely what the dead-band exists to prevent.
+            # FULL result dicts: the payload must be refreshed with the score.
             samples = []
-            for sample in range(3):
-                result = svc.match_job(
-                    profile_context=ctx,
-                    cv_text=profile.cv_text,
-                    job_description=text,
+            while needs_another_sample(samples):
+                samples.append(
+                    svc.match_job(
+                        profile_context=ctx,
+                        cv_text=profile.cv_text,
+                        job_description=text,
+                    )
                 )
-                # FULL result dicts — the payload must be refreshed with the
-                # score. The previous run kept only result["score"]: 241 rows
-                # ended up with a current-prompt score next to legacy-prompt
-                # prose (0 cover_note changes vs the pre-run snapshot).
-                samples.append(result)
-                if sample == 0 and result["score"] < settings.MATCH_KEEP_MIN_SCORE:
-                    # Confident rejection from triage — single sample suffices
-                    break
 
             old_score = match.score
             averaged = apply_rescore(match, samples, svc.model)

@@ -58,6 +58,51 @@ def resolve_samples(samples):
     return final_score, best_payload
 
 
+def needs_another_sample(samples: list) -> bool:
+    """The scoring protocol's SAMPLING POLICY — single source of truth.
+
+    How many AI calls a job earns, given what we have so far:
+
+    - nothing yet                -> take the triage sample
+    - triage below the dead-band -> stop. Confidently bad; a second
+      opinion cannot rescue a 5, and dismissal is the right answer.
+    - triage inside [DEADBAND, KEEP_MIN) -> take one more. The outcome is
+      uncertain (+/-11 noise on a single sample) and dismissal is
+      PERMANENT, so the keep/dismiss call is never made on one sample.
+    - running mean >= KEEP_MIN and fewer than 3 -> top up to 3, so a row
+      the user will actually see is a 3-sample mean (+/-6, not +/-11).
+    - otherwise -> stop.
+
+    This lives here, not in each caller, because it has now diverged three
+    times: the re-score script has separately shipped a one-directional
+    dismissal derivation (176 rows), a score-without-payload write (241
+    rows), and a triage break on KEEP_MIN instead of DEADBAND (62 rows
+    dismissed on a single sample — the exact outcome the dead-band exists
+    to prevent). Callers own their error handling; the policy is here.
+    """
+    if not samples:
+        return True
+    if len(samples) >= 3:
+        return False
+
+    triage = samples[0]["score"]
+    if len(samples) == 1:
+        # Confidently bad never pays for a second call; everything else
+        # earns one — the dead-band because the outcome is uncertain, the
+        # keeper because a row the user sees must be a 3-sample mean.
+        return triage >= settings.MATCH_DEADBAND_MIN_SCORE
+
+    # Two samples so far. If triage already cleared keep-min we are on the
+    # keeper path and COMMIT to the full 3 — stopping early here would
+    # decide a permanent dismissal on a 2-sample (+/-8) mean, which is the
+    # thin evidence the dead-band exists to refuse. If triage was inside
+    # the dead-band, a third sample is only worth buying when the pair
+    # actually clears the line.
+    if triage >= settings.MATCH_KEEP_MIN_SCORE:
+        return True
+    return statistics.mean(s["score"] for s in samples) >= settings.MATCH_KEEP_MIN_SCORE
+
+
 def is_matching_running() -> bool:
     return _matching_in_progress
 
@@ -244,45 +289,34 @@ def _run_matching_inner(
             # sample cost. The embeddings prefilter (ROADMAP) is the lever.
             samples = [result]  # full result dicts, not just scores
 
-            # Dead-band: one extra sample when the triage score is in
-            # [DEADBAND, KEEP_MIN) — the outcome is uncertain and dismissal
-            # is permanent. Confidently-bad (below the band) never pays.
-            if (
-                settings.MATCH_DEADBAND_MIN_SCORE
-                <= result["score"]
-                < settings.MATCH_KEEP_MIN_SCORE
-            ):
+            # How many samples this job earns comes from the SHARED policy
+            # (needs_another_sample) — dead-band second opinion, then top-up
+            # to 3 for anything heading into the queue. The re-score script
+            # calls the same function; duplicating the thresholds is what
+            # dismissed 62 rows on a single sample.
+            sampling_failed = False
+            while needs_another_sample(samples):
                 try:
-                    second = service.match_job(
-                        profile_context=profile_context,
-                        cv_text=profile.cv_text,
-                        job_description=_job_text(job),
-                    )
-                    samples.append(second)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Dead-band re-score failed for job %s: %s", job.id, e)
-                    # F3 FIX: a sampling failure inside the dead-band leaves us
-                    # with one ±11 sample in the uncertain zone — NOT enough
-                    # for a permanent dismissal. Leave as 'new' for retry,
-                    # matching the convention for unparseable responses.
-                    continue
-
-            # Keeper path: if samples so far suggest this clears keep-min,
-            # collect enough for a 3-sample mean (±6 instead of ±11)
-            preliminary = statistics.mean(s["score"] for s in samples)
-            if preliminary >= settings.MATCH_KEEP_MIN_SCORE and len(samples) < 3:
-                needed = 3 - len(samples)
-                for _ in range(needed):
-                    try:
-                        extra = service.match_job(
+                    samples.append(
+                        service.match_job(
                             profile_context=profile_context,
                             cv_text=profile.cv_text,
                             job_description=_job_text(job),
                         )
-                        samples.append(extra)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("Keeper re-sample failed for job %s: %s", job.id, e)
-                        break
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Re-sample failed for job %s: %s", job.id, e)
+                    # A failure while still inside the dead-band leaves one
+                    # ±11 sample in the uncertain zone — NOT enough for a
+                    # permanent dismissal. Leave the job 'new' for retry,
+                    # matching the convention for unparseable responses.
+                    # Above the band we already have enough to store.
+                    sampling_failed = len(samples) < 2 and (
+                        samples[0]["score"] < settings.MATCH_KEEP_MIN_SCORE
+                    )
+                    break
+            if sampling_failed:
+                continue
 
             # Average once; F1: the payload comes from the sample closest to
             # the mean — via resolve_samples, the shared protocol the
