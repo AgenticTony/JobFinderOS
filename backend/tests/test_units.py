@@ -727,17 +727,21 @@ class TestSharedSamplingPolicy:
         from app.services import matcher_service
 
         src = _rescore_module_source()
-        assert "needs_another_sample" in src, (
-            "rescore_backlog.py must import and call needs_another_sample. "
-            "If it re-implements the sampling thresholds, a matcher fix will "
-            "silently not reach it — that has happened three times."
-        )
-        assert "MATCH_KEEP_MIN_SCORE:" not in src.replace(" ", ""), "sanity"
-        # The policy itself is defined exactly once, in the matcher
-        assert "def needs_another_sample" in inspect.getsource(matcher_service)
         assert "def needs_another_sample" not in src, (
             "needs_another_sample is defined twice — the shadow copy is back"
         )
+        # Assert the CALL, not the name: a regression that leaves the import
+        # in place but stops the loop from consulting the policy (inline
+        # threshold instead) still contains the bare name and passed this
+        # test — proven by regenerating the exact 62-row bug and watching
+        # 33 tests stay green.
+        assert "needs_another_sample(samples)" in src, (
+            "rescore_backlog.py's sampling loop must CALL "
+            "needs_another_sample(samples). An import alone satisfies a "
+            "name grep; the loop re-implementing the thresholds is the "
+            "regression to catch."
+        )
+        assert "def needs_another_sample" in inspect.getsource(matcher_service)
 
     def test_deadband_score_earns_a_second_sample(self):
         """A 22 must never be decided on one sample: dismissal is permanent

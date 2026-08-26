@@ -151,6 +151,31 @@ def main() -> int:
         print("ERROR: GLM_API_KEY not set — cannot re-score.")
         return 2
 
+    # Confirmation guard: selecting the CURRENT prompt version re-scores
+    # every live row at full cost (~$3, ~an hour) — easy to do by pasting
+    # the version string from the queue page. --dry-run is always safe;
+    # anything else needs --yes.
+    current_version = AIService.matching_prompt_version()
+    if (
+        not dry_run
+        and target_version == current_version
+        and "--yes" not in sys.argv
+    ):
+        check_db = SessionLocal()
+        at_risk = (
+            check_db.query(MatchResult)
+            .filter(MatchResult.prompt_version == target_version)
+            .count()
+        )
+        check_db.close()
+        print(
+            f"REFUSING: --prompt-version {target_version} is the CURRENT "
+            f"prompt version — this would re-score all {at_risk} live rows "
+            "at full cost (~3 samples each)."
+        )
+        print("If that is really what you want, re-run with --yes.")
+        return 2
+
     db = SessionLocal()
     svc = AIService()
 
