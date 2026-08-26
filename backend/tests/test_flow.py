@@ -10,6 +10,7 @@ import os
 import sys
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_flow.db"
+os.environ.setdefault("DEBUG", "true")  # test env — production guards relaxed
 
 from app.core.database import Base, SessionLocal, engine  # noqa: E402
 from app.models import JobPosting, MatchResult, Profile  # noqa: E402
