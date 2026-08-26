@@ -40,20 +40,45 @@ def main() -> int:
     svc = AIService()
 
     # MANDATORY pre-write snapshot — a destructive script must never rely on
-    # the operator having taken a manual backup (that's a habit, not a control)
+    # the operator having taken a manual backup (that's a habit, not a control).
+    # The path is resolved from __file__ (NOT relative — sqlite3 on a missing
+    # DB exits 0 and writes a valid EMPTY database, so a relative path run
+    # from the repo root would create an empty snapshot and print a restore
+    # command that destroys the real database). The snapshot is then verified
+    # to contain rows before the first write.
     import subprocess
     import time as _time
+
+    db_path = Path(__file__).resolve().parent.parent / "jobfinderos.db"
+    if not db_path.exists():
+        print(f"ERROR: database not found at {db_path}")
+        return 2
 
     snapshot_name = f"jfos-rescore-{_time.strftime('%Y%m%d-%H%M%S')}.db"
     snapshot_dst = Path.home() / "backups" / "jobfinderos" / snapshot_name
     snapshot_dst.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["sqlite3", "jobfinderos.db", f".backup '{snapshot_dst}'"],
+        ["sqlite3", str(db_path), f".backup '{snapshot_dst}'"],
         check=True,
         capture_output=True,
     )
-    print(f"Snapshot: {snapshot_dst}")
-    print(f"Restore:  cp {snapshot_dst} backend/jobfinderos.db")
+
+    # Verify the snapshot actually contains data (sqlite3's .backup on a
+    # missing/corrupted source writes a valid empty DB with exit 0)
+    verify = subprocess.run(
+        ["sqlite3", str(snapshot_dst), "SELECT COUNT(*) FROM match_results;"],
+        capture_output=True,
+        text=True,
+    )
+    row_count = int(verify.stdout.strip() or "0")
+    if row_count == 0:
+        snapshot_dst.unlink(missing_ok=True)
+        print("ERROR: snapshot verification failed — 0 match_results rows.")
+        print(f"The database at {db_path} may be empty or corrupted. Aborting.")
+        return 2
+
+    print(f"Snapshot: {snapshot_dst} ({row_count} match rows)")
+    print(f"Restore:  cp {snapshot_dst} {db_path}")
 
     backlog = (
         db.query(MatchResult)
