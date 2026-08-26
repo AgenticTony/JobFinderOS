@@ -211,26 +211,19 @@ def _run_matching_inner(
 
             elapsed_ms = int((time.time() - started) * 1000)
 
-            # SCORING PROTOCOL: collect raw samples, average ONCE, then check
-            # keep-min on the final value. This fixes two defects:
+            # SCORING PROTOCOL (review-hardened):
+            # - Collect full result dicts (not just scores) from each sample
+            # - Average scores once
+            # - Select the PAYLOAD (reasoning, recommendation, confidence,
+            #   skills, cover_note) from the sample CLOSEST to the final
+            #   mean — prose must agree with the number the user sees
+            # - Check keep-min on the final averaged value
+            # - A dead-band sampling failure leaves the job 'new' for retry
+            #   (one ±11 sample is never enough for permanent dismissal)
             #
-            # Defect 2 (weighted average): the old path seeded the keeper
-            # average with the dead-band's mean(s1,s2), then appended s3,s4 —
-            # producing mean(mean(s1,s2), s3, s4) where s1,s2 carried 1/6
-            # weight each and s3,s4 carried 1/3. Four calls producing something
-            # that wasn't a clean mean of anything.
-            #
-            # Defect 3 (sub-threshold inclusion): the keep check ran before the
-            # 3-sample average, so samples [26,20,18] averaged to 21 and was
-            # stored as a live queue row with tier=poor_match — violating
-            # "below MATCH_KEEP_MIN_SCORE a match never enters the queue."
-            # Now the check runs on the final averaged value.
-            #
-            # Cost note: 41% of real backlog rows clear the keep line, making
-            # this ~2.06x the single-sample cost (not ~1.2x as previously
-            # claimed). The embeddings prefilter (ROADMAP) is the lever that
-            # brings this back down.
-            raw_scores = [result["score"]]
+            # Cost: 41% of backlog rows clear keep-min → ~2.06× the single-
+            # sample cost. The embeddings prefilter (ROADMAP) is the lever.
+            samples = [result]  # full result dicts, not just scores
 
             # Dead-band: one extra sample when the triage score is in
             # [DEADBAND, KEEP_MIN) — the outcome is uncertain and dismissal
@@ -246,15 +239,20 @@ def _run_matching_inner(
                         cv_text=profile.cv_text,
                         job_description=_job_text(job),
                     )
-                    raw_scores.append(second["score"])
+                    samples.append(second)
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Dead-band re-score failed for job %s: %s", job.id, e)
+                    # F3 FIX: a sampling failure inside the dead-band leaves us
+                    # with one ±11 sample in the uncertain zone — NOT enough
+                    # for a permanent dismissal. Leave as 'new' for retry,
+                    # matching the convention for unparseable responses.
+                    continue
 
-            # Keeper path: if the samples so far suggest this clears the keep
-            # line, collect enough for a 3-sample mean (±6 instead of ±11)
-            preliminary = statistics.mean(raw_scores)
-            if preliminary >= settings.MATCH_KEEP_MIN_SCORE and len(raw_scores) < 3:
-                needed = 3 - len(raw_scores)
+            # Keeper path: if samples so far suggest this clears keep-min,
+            # collect enough for a 3-sample mean (±6 instead of ±11)
+            preliminary = statistics.mean(s["score"] for s in samples)
+            if preliminary >= settings.MATCH_KEEP_MIN_SCORE and len(samples) < 3:
+                needed = 3 - len(samples)
                 for _ in range(needed):
                     try:
                         extra = service.match_job(
@@ -262,21 +260,31 @@ def _run_matching_inner(
                             cv_text=profile.cv_text,
                             job_description=_job_text(job),
                         )
-                        raw_scores.append(extra["score"])
+                        samples.append(extra)
                     except Exception as e:  # noqa: BLE001
                         logger.warning("Keeper re-sample failed for job %s: %s", job.id, e)
                         break
 
-            # Average once, from the flat sample list
-            final_score = round(statistics.mean(raw_scores))
+            # Average once
+            final_score = round(statistics.mean(s["score"] for s in samples))
             final_tier = AIService._tier_for_score(final_score)
-            if len(raw_scores) > 1:
+
+            # F1 FIX: select the payload from the sample closest to the mean.
+            # The prose, recommendation, confidence, skills and cover_note
+            # must agree with the displayed number — a score of 40 paired
+            # with recommendation='skip' and reasoning='barely match'
+            # (from a sample that scored 26) is incoherent and breaks
+            # MatchCard's 'AI says: apply' chip and the recommendation filter.
+            best_payload = min(samples, key=lambda s: abs(s["score"] - final_score))
+            if len(samples) > 1:
                 logger.info(
-                    "Scored job %s: samples=%s -> %d (%s)",
-                    job.id, sorted(raw_scores), final_score, final_tier,
+                    "Scored job %s: scores=%s -> %d (%s), payload from sample scoring %d",
+                    job.id,
+                    sorted(s["score"] for s in samples),
+                    final_score, final_tier, best_payload["score"],
                 )
 
-            # Keep-min check on the FINAL averaged value (defect 3 fix)
+            # Keep-min check on the FINAL averaged value
             if final_score < settings.MATCH_KEEP_MIN_SCORE:
                 auto_pass = MatchResult(
                     user_id=user_id,
@@ -284,11 +292,11 @@ def _run_matching_inner(
                     score=final_score,
                     tier=final_tier,
                     reasoning="Auto-passed: below the score threshold for your CV.",
-                    matched_skills=dump_json_list(result.get("matched_skills", [])),
-                    missing_skills=dump_json_list(result.get("missing_skills", [])),
-                    transferable_skills=dump_json_list(result.get("transferable_skills", [])),
+                    matched_skills=dump_json_list(best_payload.get("matched_skills", [])),
+                    missing_skills=dump_json_list(best_payload.get("missing_skills", [])),
+                    transferable_skills=dump_json_list(best_payload.get("transferable_skills", [])),
                     recommendation="skip",
-                    confidence=result.get("confidence"),
+                    confidence=best_payload.get("confidence"),
                     model_used=service.model,
                     processing_time_ms=elapsed_ms,
                     decision="rejected",
@@ -307,13 +315,13 @@ def _run_matching_inner(
                 job_id=job.id,
                 score=final_score,
                 tier=final_tier,
-                reasoning=result.get("reasoning"),
-                matched_skills=dump_json_list(result.get("matched_skills", [])),
-                missing_skills=dump_json_list(result.get("missing_skills", [])),
-                transferable_skills=dump_json_list(result.get("transferable_skills", [])),
-                recommendation=result.get("recommendation"),
-                cover_note=result.get("cover_note"),
-                confidence=result.get("confidence"),
+                reasoning=best_payload.get("reasoning"),
+                matched_skills=dump_json_list(best_payload.get("matched_skills", [])),
+                missing_skills=dump_json_list(best_payload.get("missing_skills", [])),
+                transferable_skills=dump_json_list(best_payload.get("transferable_skills", [])),
+                recommendation=best_payload.get("recommendation"),
+                cover_note=best_payload.get("cover_note"),
+                confidence=best_payload.get("confidence"),
                 model_used=service.model,
                 processing_time_ms=elapsed_ms,
                 prompt_version=AIService.matching_prompt_version(),

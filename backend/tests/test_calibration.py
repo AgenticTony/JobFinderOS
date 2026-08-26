@@ -242,21 +242,21 @@ class TestLiveVariance:
             all_scores.extend(scores)
             pair_summaries.append((pair["name"], sorted(scores), pair_sd))
 
-        # Average WITHIN-JOB SD — the variance of scoring the SAME input
-        # repeatedly. Pooled SD across different jobs would include between-
-        # job variance (real score differences), which is not noise.
-        within_job_sds = [sd for _, _, sd in pair_summaries]
-        avg_within_sd = statistics.mean(within_job_sds)
+        # MAX within-job SD — the reviewer's call: the mean would let one
+        # pair drift to 15 while two sit at 2 and still pass at 6.3. Max
+        # gives a real signal with the current 7.4 already present.
+        max_within_sd = max(sd for _, _, sd in pair_summaries)
 
         for name, scores, sd in pair_summaries:
             print(f"  {name}: scores={scores} SD={sd:.1f} mean={statistics.mean(scores):.1f}")
         print(
             f"\n  model={svc.model} version={AIService.matching_prompt_version()} "
-            f"avg within-job SD={avg_within_sd:.1f} (per-pair: {[f'{s:.1f}' for s in within_job_sds]}) "
+            f"max within-job SD={max_within_sd:.1f} "
+            f"(per-pair sorted desc: {sorted([f'{sd:.1f}' for _, _, sd in pair_summaries], reverse=True)}) "
             f"n={len(all_scores)} total samples"
         )
-        assert avg_within_sd <= MAX_ACCEPTABLE_SD, (
-            f"Average within-job SD {avg_within_sd:.1f} exceeds {MAX_ACCEPTABLE_SD}. "
+        assert max_within_sd <= MAX_ACCEPTABLE_SD, (
+            f"Max within-job SD {max_within_sd:.1f} exceeds {MAX_ACCEPTABLE_SD}. "
             f"Per-pair SDs: {[f'{name}: {sd:.1f}' for name, _, sd in pair_summaries]}. "
             "At SD > 8, 2×SD exceeds the dead-band width and borderline jobs "
             "are again dismissed on noise. Check that match_job still passes "
