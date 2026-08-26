@@ -1,7 +1,76 @@
 # JobFinderOS — Project Memory
 
 > Auto-loaded context for AI coding sessions. Keep this current as the project evolves.
-> Last updated: 2026-08-24
+> Last updated: 2026-08-26
+
+## MANDATORY DEVELOPMENT STANDARDS — read before every task
+
+These are binding rules learned from review passes where bugs shipped that
+should have been caught at build time. They are NOT optional.
+
+### 1. Adversarial self-review before every commit
+After writing code, re-read the diff looking for what you got wrong:
+- **Grep for the old pattern surviving** — if you refactored X to Y,
+  `grep -rn "old_pattern"` must return zero relevant hits. Verify, don't trust intent.
+- **Verify function boundaries by inspection** — when moving code between
+  functions, read the actual function spans (line numbers) to confirm the
+  change landed where intended. The temperature=0.0 bug was a change placed
+  in `tailor_application` while the comment said `match_job`.
+- **Check that every claim in the commit message is true in the code** —
+  if the commit says "all call sites scoped", grep to prove it.
+
+### 2. Write the test that would catch the bug BEFORE writing the fix
+If you can't describe how the bug would manifest, you don't understand it.
+- Assert on the **outbound artifact** (what reaches the outside world),
+  not just the row state. The TestOutboundIdentity pattern: two users,
+  assert the AI prompt receives the right CV text, the email payload carries
+  only the sender's name, Bob's name never appears in Alice's subject.
+- **Prove the test catches the bug**: temporarily revert the fix, confirm
+  the test fails with a message naming the blast radius, then restore.
+  A green test that has never been seen red is not evidence.
+
+### 3. When you say "every X is Y", grep to prove it
+A claim about the codebase is a fact claim. Verify by execution:
+```
+grep -rn "get_active_profile(db)" app/ | grep -v "user_id="
+grep -rn "temperature=" app/services/ai_service.py
+grep -rn "time.sleep" app/services/scrapers/
+```
+Do this BEFORE the commit, not after the reviewer finds it.
+
+### 4. Testing is part of building, not an afterthought
+Every feature ships WITH its tests in the same commit. The test suite
+grows with the codebase. No "I'll add tests later" — that's how the
+temperature bug survived three review passes.
+
+### 5. Green CI does not mean correct
+CI proves the code runs, not that it's right. The reviewer's method:
+prove it's broken → fix it → prove the fix works → prove the test
+would catch a regression. That's the standard.
+
+### 6. Function-span verification for any code-moving change
+When moving, copying, or parameterizing code between functions:
+```python
+src = open(file).read()
+fn_a = src.index("def function_a")
+fn_b = src.index("def function_b")
+calls_in_a = re.findall(r"self\._method\([^)]*\)", src[fn_a:fn_b])
+# VERIFY the change is in the right function
+```
+Never trust line numbers from a previous grep — the file may have changed.
+
+### 7. Concurrent sessions on this repo will collide
+If another session is working on this repo, changes will be swept up or
+reverted accidentally. Serialize sessions or use separate branches. The
+`git checkout -- .` command is particularly dangerous — it reverts ALL
+uncommitted work, not just yours.
+
+### 8. The test database must NEVER be the live database
+`tests/conftest.py` owns `DATABASE_URL` before any app import. Never
+override it from a test module. Never remove the conftest guard. The
+drop_all() in test fixtures will destroy production data if the binding
+drifts. This happened once (recovered from backup); the conftest makes
+it structurally impossible now.
 
 ## What this is
 
@@ -18,318 +87,152 @@ foundation, including how the GLM screening engine works).
 
 ## Stack & run commands
 
-- **Backend:** FastAPI + SQLAlchemy 2 + SQLite (`backend/jobfinderos.db`), Python 3.13, pydantic v2
-  - Run: `cd backend && .venv/bin/uvicorn app.main:app --port 8000` (venv exists, deps installed)
+- **Backend:** FastAPI + SQLAlchemy 2 + SQLite→Postgres (`backend/jobfinderos.db`), Python 3.12, pydantic v2
+  - Run: `cd backend && .venv/bin/uvicorn app.main:app --port 8000` (under launchd agent)
   - API docs: http://localhost:8000/docs
+  - Docker: `docker build -t jobfinderos-backend backend/`
 - **Frontend:** Next.js 16 + React 19 + Tailwind 4 + Zustand, Node 24
   - Run: `cd frontend && npm run dev` → http://localhost:3000
-  - Type-check: `npx tsc --noEmit`
-- Tests: `cd backend && .venv/bin/python -m tests.test_flow` (mocked-AI e2e: match→approve→apply)
+  - Type-check: `npx tsc --noEmit --noUnusedLocals --noUnusedParameters`
+- **Tests:** `cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`
+  - All 42+ tests must be green before any commit
+  - Flow test: `PYTHONPATH=. .venv/bin/python tests/test_flow.py`
+  - Calibration (opt-in, costs API calls): `RUN_CALIBRATION=1 pytest tests/test_calibration.py`
 
 ## Pipeline (implemented & verified)
 
 ```
-scrape (9 sources) → dedupe → per-user location filter → store
-  → AI match vs CV (score/tier/skills/apply-recommendation, "you" voice)
+scrape (9 sources) → dedupe → per-user gates (location/language/freshness) → store
+  → AI match vs CV (score/tier/skills, glm-5.1, anchored rubric, temp=0)
   → user approves match in UI
   → AI tailors CV + cover letter for THAT job (ApplicationDraft, user edits)
   → user approves draft → send: email w/ 3 PDFs (Resend) or browser/manual
 ```
 
-Status values: jobs `new→matched→approved|rejected|dismissed→applied`;
-drafts `drafting→ready→submitted|failed`.
-
 ## KEY INVARIANTS — never break these
 
-1. **The original CV is immutable.** `Profile.cv_text` + stored PDF are written exactly once
-   (at upload), read-only forever. Every job-specific version lives in its own
-   `ApplicationDraft` row. Documented in cv_service/draft_service docstrings.
+1. **The original CV is immutable.** Written once at upload, read-only forever.
+   Every job-specific version lives in its own `ApplicationDraft` row.
 2. **All AI output talks TO the job seeker** ("Your tech stack…"), never "the candidate".
-   Exception: cover letters are first-person (sent TO employers). Enforced in prompts.
 3. **Nothing is sent without explicit user approval** — approve match → review draft → send.
-   LinkedIn/Indeed ToS prohibit bot applies; browser path = open posting + copy cover note.
-4. **Zero fabrication in tailoring** — every fact must trace to the original CV (prompt-enforced).
-5. **Profession-agnostic platform** — queries/titles derive from each user's CV via onboarding,
-   never hardcoded to tech. Global defaults for targeted boards are EMPTY until onboarding.
+4. **Zero fabrication in tailoring** — every fact must trace to the original CV.
+5. **Profession-agnostic platform** — queries/titles derive from each user's CV via onboarding.
+6. **Per-user data isolation** — every profile/match/draft/application lookup is scoped
+   by user_id. The unsafe unscoped call is inexpressible (required keyword-only params).
+7. **Job postings are a shared pool** — user.status mutations NEVER write to job_postings.
+   Per-user state lives in match_results (decision, dismissed_reason) and applications.
+8. **Outbound content must carry the sender's identity** — test on the artifact
+   (AI prompt input, email payload, PDF attachments), not just the row ownership.
 
 ## AI setup (GLM via Z.ai)
 
-- Endpoint: `https://api.z.ai/api/coding/paas/v4` (OpenAI-compatible), key in `backend/.env`
-- **Model: `glm-4.6` with `thinking: disabled`** — ~5s/match. (glm-4.5 was 75–107s/match —
-  these are reasoning models; thinking eats token budget + latency. `GLM_THINKING=enabled`
-  switches back, max_tokens auto-raises to 6000 so responses aren't empty.)
-- httpx timeout: connect 10s / read 180s; max_retries=1
-- Three AI ops: `extract_profile` (CV→structured profile), `match_job` (job↔CV, inverted
-  TalentHive scoring: +12/+6/0/−8, tiers excellent/good/stretch/poor 80/50/30),
-  `tailor_application` (CV+cover letter per job + changes summary), `suggest_search_queries`
-  (onboarding, country-aware, ~45s latency is normal)
-- Robustness: markdown-fence JSON extraction, reasoning_content fallback, broad exception
-  catches so AI failures never 500 endpoints (errors surface on rows/UI instead)
+- **Model: `glm-5.1`** (switched from glm-4.6 which had 24-point run-to-run variance)
+- Matching: temperature=0.0, anchored rubric in prompt, ~6s/call, 10 concurrent
+- Tailoring: default temperature 0.3 (variety in cover letters is desirable)
+- Prompt version: `AIService.matching_prompt_version()` — SHA-256 of the prompt
+  text; any accidental edit changes the version and calibration tests fail
+- Dead-band: scores in [18, 25) are re-scored once and averaged before keep/dismiss
+- All 243 existing match rows are `legacy-unversioned` — re-score needed (~$1)
 
-## Job sources (all live-tested with real data)
+## Job sources
 
-| Source | Countries | Auth | Quirks & limits |
+| Source | Countries | Auth | Notes |
 |---|---|---|---|
-| jobtech (Platsbanken) | SE | none (key optional) | Official AF API. Keyless OK for light use. Top 100/query. |
-| teamtailor | SE | none | Needs `TEAMTAILOR_SITES=slug1,slug2` (career-site JSON feeds). UNCONFIGURED currently. |
-| careerjet | SE+GB | basic-auth key + **declared IP** + **Referer header** | Aggregator. IP-bound to home IP 31.211.228.218 (portal allows ≤8 IPs; CIDR counts per-IP). Referer must be `https://www.aifullbokad.se/find-jobs/` (declared site). If 403 returns later = home IP rotated → update portal. sv_SE + en_GB both work despite "country-limited" note. |
-| reed | GB | basic-auth key (username=key, empty password) | 2,000 req/hr. Response: `{"results":[…]}`, field is `jobDescription` (docs said `description`), dates dd/mm/yyyy, no jobUrl in search (details endpoint fallback works). Max 10/employer/run (bulk posters spam location variants). |
-| adzuna | GB | app_id + app_key | Free tier 25/min·250/day·1000/wk. 503 = rate bucket → retry w/ 6s backoff, 4s pacing between requests. One search PER QUERY (OR-combining trips limits). Usage: 6 hits/run — hourly scheduler would just exceed weekly cap; 2-3 runs/day is plenty. |
-| arbeitnow, remotive, jobicy, workingnomads | shared | none | Plain public APIs/feeds. workingnomads has no id field — derive from URL slug. |
+| jobtech (Platsbanken) | SE | none (key optional) | Government open data, effectively uncapped |
+| reed | GB | basic-auth key | 2,000 req/hr — effectively unlimited |
+| careerjet | SE+GB | key + declared IP + Referer | 1,000 req/hr |
+| adzuna | GB | app_id + key | BEST-EFFORT: non-blocking token-bucket pacer; supplementary to Reed |
+| arbeitnow, remotive, jobicy, workingnomads | shared | none | Public feeds |
+| teamtailor | SE | none (needs slugs) | UNCONFIGURED |
 
-**Source packs** (`app/services/source_packs.py`): SE = jobtech, teamtailor, careerjet + 4 shared;
-GB = reed, adzuna, careerjet + 4 shared. Explicit `sources` in pipeline API overrides pack.
+## Multi-user architecture (Phase 1b, COMPLETE)
 
-## Secrets map (post-cleanup 2026-08-25)
+- **Auth on every route**: `Depends(current_active_user)` — 401 for anonymous callers.
+  Frontend: /login page, axios Bearer interceptors, 401 → redirect, sidebar Sign out.
+- **Per-user data model**: user_id FKs on profiles (UNIQUE), match_results
+  (composite unique user_id+job_id), application_drafts, applications. All NOT NULL.
+- **user_id is required and keyword-only** across 12+ functions — the unsafe
+  unscoped call is a TypeError at import time.
+- **IDOR**: `owns_or_404` fails CLOSED on NULL (a NULL-owner row is nobody's).
+- **Rate limits**: sliding-window per user on AI-spending endpoints.
+- **GDPR**: DELETE /api/v1/account/delete (cascade + CV file + token death +
+  rate-limit memory purge); GET /api/v1/account/export (portability).
+- **Cross-tenant dismissal fixed**: dismissals live on match_results.dismissed_reason
+  (per-user, per-job), never on shared job_postings.status.
 
-- **Active secrets live ONLY in `backend/.env`** (gitignored — verified). That file is the
-  single source of truth: GLM (Z.ai), REED_API_KEY, ADZUNA_APP_ID/APP_KEY, CAREERJET_API_KEY,
-  CAREERJET_REFERER. Not yet configured: JOBTECH_API_KEY (optional), TEAMTAILOR_SITES,
-  RESEND_API_KEY + APPLY_FROM_EMAIL (email auto-apply disabled until set).
-- `backend/.env.example` = safe placeholder template (committed).
-- `talenthive/` = local-only reference clone, **gitignored** from this repo; its
-  `.env.example` was placeholder-cleaned locally on 2026-08-25.
-- ⚠️ The TalentHiv GitHub repo's *history* still contains the old real keys (private repo —
-  acceptable risk). Rotation advice if ever going public: Azure storage key first (unused by
-  JobFinderOS), then GLM/Reed/Adzuna/Careerjet (update backend/.env same day each rotates).
+## Production infrastructure
 
-## Onboarding system (built & verified)
+- **CI** (.github/workflows/ci.yml): 3 jobs — Backend (ruff + Alembic on Postgres 16 +
+  multi-user tests + flow test), Frontend (tsc + next build), Docker (build + smoke test).
+  Installs from `requirements.lock` (71 pinned deps).
+- **Dockerfile**: python:3.12-slim, non-root user, lockfile-only install,
+  ships Alembic for boot migrations.
+- **launchd agent**: `com.jobfinderos.backend` — RunAtLoad + KeepAlive.
+- **Boot migrations**: Postgres = upgrade head; legacy SQLite = stamp + upgrade.
+  Both backends verified (up/down on real Postgres 16, live SQLite migration).
 
-Wizard (`OnboardingWizard.tsx`) shows after first CV upload: country cards (SE/GB with flags)
-→ region→municipality cascading dropdowns (geo data: `app/data/geo.py`, 21 SE län/33 Skåne
-kommuner, 12 GB regions; served via `/api/v1/profile/geo`) → remote-only toggle → **search
-strategy question** → AI-suggested queries in two labeled groups ("From your experience"
-chips + "Worth a look" rows with per-query why) → confirm → saves to profile (`onboarded=1`)
-and auto-fires first targeted pipeline. Re-openable from Profile tab ("Edit setup").
-Profile fields: country/region/municipality/remote_only/search_queries (+ migration in init_db).
+## Score calibration system
 
-**DESIGN DECISION — search strategy, never age:** queries derive from CV titles by default
-(`field` mode). `adjacent` adds near-neighbour variants; `widen` mode decomposes the CV into
-underlying capabilities and maps to job families the CV never names — each pivot carries a
-second-person "why" citing CV evidence (verified live: casino/regulated background →
-Supporttekniker, IT-säkerhet, Teknisk projektledare etc., in Swedish, ~8s). The mode is
-ALWAYS the user's explicit choice in the wizard — never inferred from age or any protected
-characteristic. (Age-conditional steering was considered and rejected: it would automate the
-very discrimination AF's Kortrapport 2026:1 documents — callback rates drop from the 40s
-despite no age-performance link. Strategy ≠ demographics. Titles-from-CV remains the default
-because it's the strongest signal for most users.)
+- **prompt_version column** on match_results: `AIService.matching_prompt_version()`
+  = SHA-256 of the scoring prompt text (format: `m2-<8-char-hash>`). Stored on
+  every match row. Cross-version scores are NOT comparable.
+- **Dead-band**: `MATCH_DEADBAND_MIN_SCORE=18` vs `MATCH_KEEP_MIN_SCORE=25`.
+  Scores in the band get one re-score, averaged. Below 18 = permanent dismiss.
+  `dismissed_reason` column tracks why (below_threshold, dead_band_confirmed, etc.).
+- **Calibration tests** (tests/test_calibration.py): 4 always-on tests that pin
+  the prompt hash (accidental prompt edits break CI), verify dead-band ordering.
+  Opt-in live variance check behind `RUN_CALIBRATION=1`.
+- **Score variance**: glm-5.1 @ temp 0 has mean spread ~7-10 (measured). Not
+  deterministic (MoE routing, batching, GPU order), but tight enough that the
+  dead-band catches the borderline cases. Tier bands hold: 80/50/30/25.
 
-**Per-user scrape context** flows: profile → `build_scrape_context()` → scrapers (jobtech
-queries, reed keywords+location, adzuna what/where, careerjet locale sv_SE/en_GB) +
-`passes_location_filter()` universal gate (remote jobs & location-less jobs pass; out-of-area
-never stored → never matched).
+## Frontend design system — "The Hunting Console"
 
-**Anthony's active setup:** SE · Skåne län · Malmö · 8 junior fullstack/.NET/backend/AI
-queries (bilingual, AI-suggested from his CV).
+- **Token system** (globals.css @theme): ink #0C0E12, surface #12151C, line #1E2330,
+  text tiers (hi/mid/low), ONE accent: signal amber #F5A524. Geist Sans + Geist Mono.
+- **Sidebar**: expandable groups (Matches→Awaiting/Approved, Applications→Review/Sent),
+  collapsible to icon rail (persists), user chip + hunt cycle countdown + Sign out.
+- **Hunt Pulse** (signature element): funnel strip (Hunted→Matched→Awaiting→Drafts→Sent)
+  with live counts, breathing attention dots, +N delta, next-hunt countdown in header.
+- **Match cards**: company tile left, score ring right, salary chip, NEW badge (rolling 24h),
+  posted-date chip (red at 21+ days), language badge, tier badge.
+- **Applications**: accordion drafts (one open at a time, unsaved chip), Sent page
+  with expandable document retrieval (cover letter + CV PDFs forever).
+- **Login page**: /login route, form-based, stores JWT in localStorage.
 
-## Frontend map
+## Frontend patterns (learned the hard way)
 
-Single-page dashboard (`src/app/page.tsx`, ~1000 lines, all views inline):
-tabs Dashboard / Matches / Applications (draft review + sent history) / Profile.
-- `MatchCard`: ScoreRing + TierBadge + skill chips (You have / They want / transferable) +
-  Approve/Reject → "Prepare application"
-- `DraftCard`: AI changes summary, editable cover letter + tailored CV textareas, Save,
-  PDF download buttons (`/download/cover-letter`, `/download/cv` — auto-save-before-download),
-  "Approve & send by email" / "Approve & apply in browser"
-- Run Pipeline = fast scrape (~10s) + background matching + 8s polling (streams matches in;
-  `matching_running` flag from `/api/v1/pipeline/status`)
-- `AdzunaAttribution` renders "Jobs by Adzuna" on adzuna-sourced cards (ToS requirement)
-- PDFs: `app/services/pdf_service.py` (fpdf2, unicode font fallback for å/ä/ö; multi_cell
-  needs `new_x="LMARGIN"` or cursor sticks at right margin)
+- `parseUtcDate(iso)` in utils.ts — API serves naive UTC; `new Date()` treats
+  offsetless as local per ECMA-262. All timestamps go through this helper.
+- PDF downloads: axios blob fetch (not window.open — carries no Bearer header).
+- Error display: `apiErrorMessage(err)` interceptor unwraps backend `detail`.
+- Background refresh protection: dirty-ref guard on Profile inputs.
+- localStorage keys: `jfos-token` (JWT), `jfos-rail-collapsed` (sidebar state).
 
 ## Hard-won lessons (don't re-learn these)
 
-1. **Async endpoints + blocking IO = frozen server.** All heavy work (AI calls, PDFs,
-   pipeline) goes through `run_in_threadpool`.
-2. **Unhandled exceptions → Starlette 500 → NO CORS headers** → browser shows misleading
-   "CORS error". Catch everything in pipeline/matcher; errors belong in response summaries.
-3. **GLM latency is prompt-size × reasoning.** Small test prompts lie (3s); real match
-   prompts were 75-107s. Fix = glm-4.6 + thinking disabled (~5s) + capped prompt sizes
-   (5k chars CV/job). `max_tokens=2000` with thinking ON returns EMPTY (reasoning eats budget).
-4. **Live-test every blind-built scraper** — docs always differ from reality (Reed's results
-   wrapper + jobDescription; Adzuna's rate buckets).
-5. **Python `hash()` is per-process randomized** — never use for persistent IDs (MD5 instead).
-6. **Adzuna 503 = rate limit** (not content); same query flips 200/503 under load.
-7. **SQLite + autoflush=False**: flush each insert so same-run dedup queries see prior rows.
-8. **Per-job commits in matcher** so live polling UI streams results instead of one dump.
-9. **Match time budget** (`MATCH_TIME_BUDGET_SECONDS=420`) < frontend's 600s axios timeout.
-
-## Current state (2026-08-24)
-
-- DB: ~600 jobs (≈580 are OLD broad-scraped `new` backlog — **candidate for purge** so queue
-  only holds targeted Malmö jobs), 97+ matched, 1 draft submitted (Koppla test), 1 excellent
-  match at 92 (remote fullstack internship)
-- All 9 sources verified live; onboarding complete for SE user
-- Servers were running on :8000/:3000 during the session
-
-## Decided architecture (parked until multi-user build)
-
-- **Connected email via Composio** (decided 2026-08-25): the multi-user email-apply path uses
-  each user's OWN email account, connected through Composio (managed OAuth: Gmail + Microsoft,
-  covers most SE/UK users incl. hotmail). Rationale: platform ESPs cannot send from consumer
-  addresses (@gmail/@hotmail = spoofing); user-owned sending = authentic applications, replies
-  land natively in their inbox, zero platform email cost. Build behind a pluggable
-  `MailSender` interface (resend | composio | direct-oauth | smtp). Rules: minimal scopes
-  (send-only, never read), tokens encrypted at rest, deleted on disconnect, UI states exactly
-  what access means. STRATEGIC reason: Composio is the platform's integration LAYER, not just
-  email — its tool catalog (calendar, docs, etc.) is the expansion surface for future features
-  (interview scheduling, follow-up nudges, CV cloud storage).
-- **Pricing economics** (if commercialized): ~$3–4.50/user/month all-in cost at 100 users,
-  one run/day; £10–15/month price point ≈ 70% margin; free tier (weekly runs + blurred
-  matches) for conversion; LTV ~£20–45 → organic acquisition channels only (AF-adjacent).
-  Shared job data + per-query scrape caching keeps DB and free API tiers viable at scale.
-
-## Model bake-off (measured 2026-08-25, real CV + 3 jobs, thinking disabled)
-
-glm-4.6: 7-11s/call, 3 concurrent, ~29k calls/day capacity. Scores: 88/20/8.
-glm-5.1: ~6.2s/call, 10 concurrent, ~139k/day. Scores 72/22/8 — ordering preserved,
-systematically lower (thresholds are calibrated to 4.6; recalibrate before switching).
-glm-5.2: ~6s, 10 concurrent. 62/18/8 — lower still.
-glm-4-plus: 429 insufficient quota on current plan — unavailable.
-Follow-up evaluation (same day, user-approved vs junk jobs, 2 runs each):
-4.6 is NOISY — same job scored 92/68 run-to-run (24-pt swing); 5.1 stable
-within 1-6 pts. Both rank approved > junk correctly every run. Conclusion:
-4.6's weakness is variance, not direction; the free fixes are temperature 0.3→0
-and rubric anchors in the prompt. Re-run the harness after anchoring; 5.1's
-case is consistency + speed + concurrency. Caveat: user approvals partly echo
-4.6's on-screen scores (circular labels) — clean signal = approved→sent→reply.
-DECISION (same day): switched the whole service to glm-5.1 (GLM_MODEL in
-.env/config). After rubric anchors + temperature 0 were added to the matching
-prompt, 4.6 STILL swung 84/42 on a borderline job; 5.1's worst spread was 13
-and its anchored scores land correctly in the existing tier bands (top approved
-82-85, mid 65-72, borderline 42-55, junk 8-15) — existing thresholds hold
-(keep-min 25, excellent >=80). 5.1 also ~30% faster + 10x concurrent; user's
-max yearly plan makes cost moot. Tailor/profile/suggest calls also run on 5.1
-(better writing, single calls) at their own temperature (0.3 via default).
-Remaining upgrade levers: batch-5-per-call, Z.ai tier.
-
-## Phase 0 — enterprise foundations (DONE, Aug 2026, CI green)
-
-- Dual engines off one DATABASE_URL: sync app engine (psycopg) + async auth
-  engine (asyncpg/aiosqlite) — fastapi-users v15 SQLAlchemy adapter is
-  async-only (official docs). Neon pooled URL works as-is.
-- Alembic owns the Postgres schema (backend/alembic; env.py reads DATABASE_URL,
-  renders fastapi-users GUID as portable sa.Uuid). Postgres envs migrate on
-  boot via init_db; SQLite dev keeps create_all + light column migrations.
-- Auth skeleton (app/users.py): users table (UUID), POST /api/v1/auth/register,
-  /api/v1/auth/jwt/login (Bearer JWT, 7-day), /api/v1/users/me. AUTH_SECRET in
-  backend/.env (generated). Verify/reset routers await the mailer (Phase 2).
-  Frontend auth UI = Phase 1.
-- /health: {status, database, version} — uptime-ready.
-- CV storage abstraction (app/services/storage.py): STORAGE_BACKEND=local
-  (default, verified) | supabase (official REST docs). Vercel Blob REJECTED:
-  undocumented REST, SDK-only. CV upload path routed through get_storage().
-- CI (.github/workflows/ci.yml): backend job = ruff (I,F) + alembic upgrade on
-  a Postgres 16 service + schema assertions + TestClient auth roundtrip on
-  Postgres + flow test (now runs with EMPTY GLM key — draft_service mocked
-  too); frontend job = tsc + next build. Green on main.
-
-## Phase 1b — per-user data model (DONE Aug 2026, CI green)
-
-THE multi-user schema migration, landed end to end:
-- user_id FKs: profiles (UNIQUE per user), match_results + composite unique
-  (user_id, job_id) — two users can score the same job, application_drafts,
-  applications. Alembic migration via batch_alter_table (SQLite-portable);
-  upgrade AND downgrade verified on real Postgres 16.
-- Boot migrations own BOTH backends: Postgres = upgrade head; legacy SQLite
-  create_all DBs = stamp at initial rev then migrate (the real local data
-  migrated live: 1 profile, 243 matches, 4 drafts, 2 apps claimed by the
-  bootstrapped account via scripts/bootstrap_user.py).
-- Auth on EVERY route (401 verified live; /health public). Frontend token
-  layer: /login page, axios Bearer interceptors, 401 redirect, sidebar
-  Sign out. on_after_register creates the Profile row.
-- Singleton dead: get_active_profile(db, user_id) everywhere; upload is a
-  per-user upsert (second upload cannot steal the app — unit tested).
-- job.status never mutated by user actions; decision/applied state derives
-  from match_results/applications per user. Sub-threshold matches become
-  auto-passed match rows (per-user memory) instead of global dismissals.
-- IDOR closed: owns_or_404 on every by-id route incl. PDF downloads (tested
-  user A gets 404 on user B's draft/match/application).
-- Rate limits: sliding-window per user on AI-spending endpoints (cv_upload 5/hr,
-  ai_suggest 10/hr, hunt 12/hr, match_run 12/hr, draft_prepare 20/hr).
-- GDPR: DELETE /api/v1/account/delete (cascade + CV file + token death,
-  tested); GET /api/v1/account/export.
-- Production: requirements.lock (71 pinned); Dockerfile (slim, non-root,
-  lock-only, alembic ships); CI = locked installs + multiuser suite + Docker
-  build job. 22 unit + 7 multiuser + flow tests green. 3 jobs green on
-  run 32941907253.
-
-## Phase 1b review pass (10 findings, all fixed, CI 32943889135)
-
-P0 cross-tenant leaks (proven by reviewer execution — wrong user's CV emailed):
-- draft_service.py:70/:163 + apply_service.py:44: all three profile lookups
-  now scope by user_id. The unscoped get_active_profile fallback previously
-  resolved to ORDER BY id DESC = most recently registered user.
-- The fallback itself de-weaponized: now returns the FIRST account (founder),
-  never the newest stranger. Making it fully required = Phase 1c.
-- NEW TestOutboundIdentity: asserts on the OUTBOUND artifact (AI prompt receives
-  the right CV text; Bob's name never in Alice's subject). This is the test
-  shape for every future content-crossing-tenant path.
-
-P1: delete_job scopes cascade to caller; PDF downloads = axios blob fetch
-(not window.open 401); GDPR erasure routes through storage.delete() (both
-backends). P2: owns_or_404 fails CLOSED on NULL; per-user matching locks;
-rate-limit eviction + GDPR clear_user; dead _entity_id() removed.
-
-## Review-fix status (Aug 2026, verification pass 3)
-
-ACCURATE STATUS: 20 of 22 review findings fixed and execution-verified
-(CI run 32936771722 + live CORS check + 15-test pytest suite). Route auth
-(findings #2/#4: Depends(current_active_user) on business routes + frontend
-token layer) is DELIBERATELY DEFERRED TO PHASE 1b — it is NOT done, and the
-single-user CORS lockdown is the interim mitigation, not auth. Multi-user
-verdict from review: "single-user production grade: yes; multi-user schema:
-no" — user_id columns = 0, get_active_profile call sites = 12 (global
-singleton; second CV upload takes over the app), draft PDF downloads are
-IDOR-open. That IS Phase 1b per ROADMAP. Phase 1b additions from the review:
-IDOR checks on integer-ID downloads, on_after_register creates Profile,
-per-user rate limiting, dependency pinning/lockfile, Dockerfile, account
-deletion (GDPR). Verification pass 4 signed the ledger (single-user: production grade; multi-user: correctly scoped, not started). Sequencing law in ROADMAP: no account-creating surface ships before Phase 1b's schema - landing page split static-first (1a-static), account UI moved to 1c.
-Residuals from verification pass 3 (fixed 2026-08-26):
-utc_now() helper replaces all datetime.utcnow() (28 deprecation warnings → 0,
-naive-UTC storage semantics preserved); storage.py stale docstring corrected;
-NextHunt/HuntPulse raw new Date() → parseUtcDate.
-
-## Pipeline gates & hygiene (all enforced every run)
-
-Scrape-time gates (in order): location (area pass; remote/locationless only when
-include_remote) → language (non-spoken languages dropped; English always passes) →
-freshness (published_at older than MAX_POSTING_AGE_DAYS=30 dropped) → dedupe
-(same-board IDs/URLs, plus cross-board normalized title+company via
-jobs.dedupe_key — app/core/dedupe.py, backfilled at startup).
-
-Matcher gates: exclude keywords → language backlog gate → cross-board dupe guard
-(same dedupe_key already matched = dismissed) → AI score < MATCH_KEEP_MIN_SCORE=25
-= job dismissed, NO match row (never enters the queue).
-
-Sweeps (run_pipeline `_maintenance_sweeps`): stale unmatched postings >30d →
-dismissed; pending matches older than MATCH_STALE_DAYS=30 → auto-passed.
-
-Onboarding: country → region/city → languages (step 3) → remote switches
-("Include remote jobs" opt-in + "Remote jobs only") → job titles (strategy
-field/adjacent/widen). Profile.languages / include_remote drive the gates.
-
-Tailor language rule: documents in the posting's language; mixed → dominant;
-unclear → first profile working language.
-
-Ops: backend runs under launchd agent `com.jobfinderos.backend`
-(ops/com.jobfinderos.backend.plist in-repo; installed at
-~/Library/LaunchAgents) — RunAtLoad + KeepAlive, logs /tmp/jobfinderos-backend.log.
-Frontend is `npm run dev` on demand. Real fix later: deploy backend so hunts run 24/7.
+1. **Async endpoints + blocking IO = frozen server.** All heavy work via `run_in_threadpool`.
+2. **Unhandled exceptions → Starlette 500 → NO CORS headers** → misleading browser errors.
+3. **GLM latency is prompt-size × reasoning.** Thinking disabled = ~5s. Small prompts lie.
+4. **Live-test every blind-built scraper** — docs always differ from reality.
+5. **Python `hash()` is per-process randomized** — never for persistent IDs (MD5 instead).
+6. **`datetime.utcnow()` is deprecated** — use `utc_now()` from `app/core/timeutil.py`
+   (returns naive-UTC, same storage semantics, no aware/naive mixing).
+7. **SQLite create_all hits CircularDependency** with per-user FKs — use Alembic (TestClient).
+8. **conftest.py owns DATABASE_URL** — never override from a test module.
+9. **Concurrent sessions on this repo will collide** — serialize or branch.
+10. **Green CI ≠ correct** — verify by adversarial execution, not proxy signals.
 
 ## Open items / next steps
 
-- [ ] Purge old broad-scraped `new` jobs (~580) from pre-onboarding era
-- [ ] UK test user walkthrough (Profile → Edit setup → GB) — everything ready
-- [ ] Optional: Teamtailor slugs (e.g. staffing agencies), JobTech free key for production
-- [ ] Optional: scheduler (`ENABLE_SCHEDULER=true`, keep ≥2h interval for Adzuna weekly cap)
-- [ ] Multi-user refactor: auth + per-user rows (reuse TalentHive User model lineage),
-      SQLite→Postgres, per-user scheduler, Composio connected email (see decided architecture)
-- [ ] Later phase: native per-source location params, digest email, saved searches,
-      Playwright ATS drivers for structured portal applies (design agreed: staged,
-      human-confirmed screenshot before submit), skills-first CV presentation toggle
-      (de-emphasize chronology; presentation not fabrication — for the 55+ market)
-- [ ] Placeholder-clean `talenthive/backend/.env.example` if TalentHiv ever goes public
-- [x] Git: initialized + pushed 2026-08-25 (commit c768aa4, main → private repo
-      github.com/AgenticTony/JobFinderOS). Pre-push audit: zero secrets staged;
-      backend/.env, talenthive/, *.db, uploads/, node_modules excluded.
+- [ ] **Re-score the 236 legacy-unversioned matches** (~$1, one script) — puts the
+      whole queue on one scoring function
+- [ ] Phase 1a-static: landing page (marketing, pricing, FAQ — no data model deps)
+- [ ] Phase 1c: signup UI, wizard entry from signup, console auth guard polish
+- [ ] Composio: connect Gmail (Settings page ready; needs platform API key)
+- [ ] Query-subscription model: designed in ROADMAP, build at >3 concurrent UK users
+- [ ] Adzuna commercial terms: ask about volume tiers + shared-pool ToS compatibility
+- [ ] UK test user walkthrough (Profile → Edit setup → GB)
+- [ ] Teamtailor slugs, JobTech free key for production
+- [ ] Deploy: Neon (Postgres) + Render (worker) + Cloudflare Pages (frontend)
+- [ ] Playwright ATS drivers for structured portal applies (staged, human-confirmed)
