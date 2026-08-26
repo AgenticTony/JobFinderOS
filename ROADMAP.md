@@ -175,6 +175,39 @@ interview/offer markers on Sent applications -> publish real response-rate
 stats, the one proof point no competitor has. Small build, Phase 2.
 Also: explicit refund-friendly policy page (attacks the #1 complaint).
 
+## Query-subscription model (designed; build at >3 concurrent UK users)
+
+The architecture the fetch layer converges on when built right (not
+limit-shaped — it's correct caching):
+
+    search_queries    (normalized_text, country, region, municipality, sources)
+                      last_fetched_at, next_fetch_at, subscriber_count
+                      UNIQUE(normalized_text, country, region, municipality)
+    user_query_subs   (user_id, query_id)
+    job_query_hits    (job_id, query_id, first_seen_at)
+
+The scheduler fetches each DISTINCT query once per interval. A user's
+candidate set is jobs reachable through their subscriptions, minus what
+they've already matched. Consequences:
+- API cost scales with distinct (query x location) — saturates; ten users
+  chasing the same roles cost one fetch
+- AI cost scales with users x new jobs — never saturates (the real driver)
+- New user signing up against an existing query gets INSTANT results
+- Popular queries refresh most often = freshest data where demand is
+
+Build triggers: >3 concurrent UK users, or onboarding latency complaints.
+Design the entities now; migration is purely additive.
+
+Adzuna commercial ToS question to resolve BEFORE building shared-fetch:
+does their ToS permit caching/redistribution of results across end users?
+(Careerjet worth confirming too; Reed and JobTech are open.)
+
+AI cost levers (the real budget): retrieve-then-rerank (embeddings filter,
+GLM top-slice only, 3-5x reduction); batch 5 jobs/call (amortizes the
+~1,900-token rubric); prompt caching if Z.ai supports it (rubric is
+byte-identical, ~40% of input tokens). Together: $3.00 -> $0.50-1.00
+per user/month = 93-97% gross margin at £10-15.
+
 ## US expansion (researched Aug 2026) — official-APIs-only, like SE/UK
 
 Why competitors scrape: the big US boards (LinkedIn, Indeed, Glassdoor,

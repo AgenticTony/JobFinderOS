@@ -25,7 +25,29 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
 RESULTS_PER_PAGE = 50
 PAGES = 2  # 2 x 50 = up to 100 per run — free tier is 25 hits/min, 250/day
-PAGE_DELAY_SECONDS = 4  # pace requests; the free tier also has short-window buckets
+# Best-effort pacing: a shared token bucket that REFUSES to wait (the old
+# time.sleep(4) blocked a threadpool worker for ~1 min per 8-query hunt —
+# pure rate-limit contortion leaking into request handling). If the bucket
+# is empty we skip that page; Adzuna is supplementary data, not critical.
+from threading import Lock
+
+_pacer_lock = Lock()
+_pacer_tokens = 25.0  # free tier: 25/min
+_pacer_last = time.monotonic()
+PACE_INTERVAL = 60.0  # seconds per full bucket refill
+
+
+def _pace_or_skip() -> bool:
+    """Non-blocking rate pacer: True = go, False = skip this request."""
+    global _pacer_tokens, _pacer_last
+    with _pacer_lock:
+        now = time.monotonic()
+        _pacer_tokens = min(25.0, _pacer_tokens + (now - _pacer_last) * (25.0 / PACE_INTERVAL))
+        _pacer_last = now
+        if _pacer_tokens >= 1.0:
+            _pacer_tokens -= 1.0
+            return True
+        return False
 RETRIES = 2
 RETRY_DELAY_SECONDS = 6  # 503s from Adzuna are rate-limit responses — back off
 
@@ -61,12 +83,11 @@ class AdzunaScraper(BaseScraper):
 
         jobs: List[NormalizedJob] = []
         seen: set = set()
-        first_request = True
         for what in searches:
             for page in range(1, PAGES + 1):
-                if not first_request:
-                    time.sleep(PAGE_DELAY_SECONDS)  # stay under the rate buckets
-                first_request = False
+                if not _pace_or_skip():
+                    logger.debug("[adzuna] pacing: skipping page %d for '%s'", page, what)
+                    continue
 
                 params = {
                     "app_id": settings.ADZUNA_APP_ID,
@@ -107,7 +128,7 @@ class AdzunaScraper(BaseScraper):
                     "[adzuna] rate limited (HTTP %s), backing off %ss (attempt %d/%d)",
                     response.status_code, RETRY_DELAY_SECONDS, attempt, RETRIES,
                 )
-                time.sleep(RETRY_DELAY_SECONDS)
+                time.sleep(0.5)  # brief backoff on retry — was 6s blocking a worker
                 last_error = Exception(f"rate limited: HTTP {response.status_code}")
                 continue
             response.raise_for_status()
