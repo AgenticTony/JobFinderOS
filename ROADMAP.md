@@ -175,7 +175,7 @@ interview/offer markers on Sent applications -> publish real response-rate
 stats, the one proof point no competitor has. Small build, Phase 2.
 Also: explicit refund-friendly policy page (attacks the #1 complaint).
 
-## Query-subscription model (designed; build at >3 concurrent UK users)
+## Query-subscription model (designed; NOT architecturally urgent)
 
 The architecture the fetch layer converges on when built right (not
 limit-shaped — it's correct caching):
@@ -195,12 +195,26 @@ they've already matched. Consequences:
 - New user signing up against an existing query gets INSTANT results
 - Popular queries refresh most often = freshest data where demand is
 
-Build triggers: >3 concurrent UK users, or onboarding latency complaints.
-Design the entities now; migration is purely additive.
+Build trigger — CORRECTED 2026-08-26. The old trigger (">3 concurrent UK
+users") was Adzuna-shaped: it assumed one source's 250/day free tier was
+an architectural constraint. It is not. Eight of nine sources have no
+meaningful ceiling, and the live DB confirms Adzuna has contributed ZERO
+rows. Reed alone (2,000 req/hr) supports ~250 eight-query user-runs per
+hour — hundreds of daily-hunting UK users before the first real limit.
 
-Adzuna commercial ToS question to resolve BEFORE building shared-fetch:
-does their ToS permit caching/redistribution of results across end users?
-(Careerjet worth confirming too; Reed and JobTech are open.)
+So this is an EFFICIENCY AND UX optimization, not a scaling necessity:
+- dedupes identical fetches across users chasing the same roles
+- instant onboarding results from an already-warm query
+
+Real trigger: MEASURED pressure — Reed or JobTech limits actually being
+approached, or onboarding latency demonstrably costing conversions.
+Plausibly hundreds of users away. Design the entities now (migration is
+purely additive); do not build it out of momentum.
+
+Corollary, from the same correction: when ONE dependency of nine is the
+constraint, replace or demote the dependency — do not reshape the system
+around it. Adzuna was demoted to best-effort in c120a20; the blocking
+`time.sleep(4)` pacer it forced into the request path is gone.
 
 AI cost levers (the real budget): retrieve-then-rerank (embeddings filter,
 GLM top-slice only, 3-5x reduction); batch 5 jobs/call (amortizes the
@@ -208,7 +222,44 @@ GLM top-slice only, 3-5x reduction); batch 5 jobs/call (amortizes the
 byte-identical, ~40% of input tokens). Together: $3.00 -> $0.50-1.00
 per user/month = 93-97% gross margin at £10-15.
 
-## US expansion (researched Aug 2026) — official-APIs-only, like SE/UK
+## International expansion — official-APIs-only, per-market redundancy
+
+The market sequence is SE (live) -> GB (built, awaiting a walkthrough) ->
+US -> AU. Adding a market is a `SOURCE_PACKS` entry, geo data, a
+`COUNTRIES` query-language entry, and live-testing every scraper
+(lesson #4 — docs always differ from reality). Days per market, not
+weeks, BECAUSE the two-country + profession-agnostic discipline forced
+every generalization early.
+
+### The principle: source redundancy is PER-MARKET
+
+Sweden is the easy case — Platsbanken (JobTech) is one official API
+covering essentially the whole market, so aggregators are garnish. The
+UK is similar: Reed carries it, which is why Adzuna is redundant there.
+
+The US and AU invert this. Their dominant boards are CLOSED:
+- Indeed's Publisher API was shut down in 2023 — no self-serve keys,
+  enterprise partnership only
+- Seek (AU #1) has no public API; Jora is Seek-owned, same answer
+- LinkedIn, Glassdoor, ZipRecruiter, Dice — no public APIs
+
+So in the US and AU the AGGREGATORS ARE THE BACKBONE, not the garnish.
+There is no Reed-equivalent to fall back on.
+
+CONSEQUENCE FOR ADZUNA: demoted for the UK (correctly), but it is
+market access for US/AU — its multi-country support is already in the
+scraper (COUNTRY_CODES has US/DE/FR/NL; AU available). Careerjet is
+locale-driven, so en_US / en_AU are one dict entry each.
+
+=> The free-tier ceiling stops being "a limit on one redundant source"
+   and becomes a limit on the international backbone. THIS is when the
+   commercial-terms conversation with Adzuna becomes real — at US/AU
+   expansion, not before. Ask then: volume tiers, per-request cost, AND
+   whether their ToS permits caching/redistribution across end users
+   (Careerjet worth confirming too; Reed and JobTech are open).
+   That ToS answer also gates the shared-fetch layer above.
+
+### US pack (researched Aug 2026)
 
 Why competitors scrape: the big US boards (LinkedIn, Indeed, Glassdoor,
 ZipRecruiter, Dice) have NO public APIs — coverage-first forces the
@@ -225,11 +276,55 @@ expensive stack. Our US pack instead:
 - ATS-direct jobs apply via portal URLs → natural fit for the browser-apply
   path and the future ATS autofill tier.
 
+COVERAGE CAVEAT: USAJOBS is FEDERAL ONLY — no state, municipal or private
+sector. So US private-sector reach rests on Adzuna + Careerjet + ATS-direct.
+This is the market where paid Adzuna quota most plausibly pays for itself,
+and the reason not to promise US users the parity Swedes get from
+Platsbanken. Verify actual coverage on a real US CV before pricing the market.
+
+### AU pack (outline — needs the same research pass as US)
+
+- Tier 1: Adzuna AU + Careerjet (en_AU) + existing remote feeds
+- Seek / Jora: no public API (Seek owns Jora) — same stated tradeoff as
+  LinkedIn/Indeed
+- TO VERIFY: Workforce Australia (federal) — does it expose an API the way
+  USAJOBS does? If yes it is the AU equivalent of the JobTech anchor.
+  Unresearched; do not assume.
+- Tier 2: ATS-direct works globally — Greenhouse/Lever/Ashby slugs for
+  AU employers are the same mechanism as the US tier
+- Compliance: AU Privacy Act (lighter than GDPR); Stripe Tax covers GST
+
+### Per-market checklist (any new market)
+
+1. SOURCE_PACKS entry + geo.py regions/cities + COUNTRIES query_language
+2. Live-test EVERY scraper against real data (never trust the docs)
+3. Verify coverage on a real CV from that market before promising parity
+4. Compliance: data-protection regime + AI provider residency for those
+   users (see the Z.ai/EU transfer question — it recurs per market)
+5. Tax: Stripe Tax config for the jurisdiction
+
 ## Known gaps today
 
+(verified 2026-08-26 23:20 — check before trusting)
+
 - Composio unconnected (needs platform key); email applies via Resend/browser
-- teamtailor scraper without API key
-- Old queue matches carry glm-4.6-era scores (mixed calibration) — fresh hunts
-  are all 5.1
-- Frontend runs as dev server; no production build yet
-- Tests are mocked-flow only; no CI
+- teamtailor scraper without TEAMTAILOR_SITES configured
+- 2 rows still on `legacy-unversioned` (transient API errors during the
+  re-score; both junk, scores 8 and 18) — the rest of the queue is uniform
+  on m2-62c2452b with score AND prose from the same sampling run
+- Frontend runs as dev server; no production build deployed
+- NOT deployed anywhere: backend is a launchd agent on one Mac. Dockerfile
+  builds in CI but has never been deployed.
+- Backups are on the SAME DISK as the database — off-site copy needed
+  before any real user
+- Signup incomplete: email verification + password reset routers unmounted
+  (password policy + auth rate limits DID ship in 96b4cd7)
+- Z.ai (GLM) processes CV text in China — a third-country transfer under
+  GDPR for EU users. Mistral Large 3 (EU-resident) benchmarked cheaper;
+  decision open, see the compliance note
+- No observability: no Sentry, no error tracking, no metrics
+
+RESOLVED since this list was written: CI exists (.github/workflows/ci.yml,
+3 jobs); tests are no longer mocked-flow-only — 67 passing across 4 files
+(units, multi-user, calibration, flow), each fix revert-checked against
+production code.
