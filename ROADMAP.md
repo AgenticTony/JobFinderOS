@@ -124,10 +124,15 @@ flow test, tsc, build). Remaining for Phase 0 completion at deploy time:
 create the Neon project (paste pooled URL into DATABASE_URL) and the
 Supabase project (URL + service key) — config-ready, no code changes.
 
-**Phase 1a — Public site & auth UI:** route split (/ vs /console),
-signup/login on Phase-0 endpoints, landing + pricing, wizard entry.
+**Phase 1a-static — Public marketing site (safe before the schema work;
+touches no data model):** route split (/ vs /console), landing + pricing +
+FAQ + how-it-works (static content only). Deployable to Cloudflare Pages
+independently. Sequencing law from review pass 4: Phase 1b gets more
+expensive with each account-touching surface built before it — so NOTHING
+that creates or reads an account ships ahead of the schema.
 
-**Phase 1b — Multi-user core (review-hardened scope):** user_id FKs +
+**Phase 1b — Multi-user core (review-hardened scope; comes BEFORE the
+account flows below):** user_id FKs +
 Alembic migration + backfill; every crud query and all 12
 get_active_profile() sites scoped to the caller; Depends(current_active_user)
 on every route + frontend token layer (findings #2/#4 — the two NOT fixed);
@@ -142,6 +147,11 @@ account flows.
 **Phase 2 — SaaS operations:** Dockerfile + Render + Vercel deploy, domain/TLS,
 CORS lockdown; Composio MailSender (send from user's Gmail); Stripe
 (closed beta behind invite codes first, payments on public launch).
+
+**Phase 1c — Account surfaces (only after 1b lands):** signup/login UI on
+the Phase-0 endpoints, wizard entry from signup, console auth guard +
+token layer. The landing page's CTAs link to these; until 1c exists the
+public site collects interest (waitlist) instead of creating accounts.
 
 **Phase 3 — Launch:** GDPR pack (full-delete cascade incl. Composio teardown,
 data export, retention; review Z.ai as CV-data processor), outcome-stats
