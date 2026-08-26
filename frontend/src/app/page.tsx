@@ -63,6 +63,7 @@ import {
   connectComposio,
   downloadDraftCoverLetterPdf,
   downloadDraftCvPdf,
+  getAuthToken,
   getIntegrations,
 } from '@/lib/api';
 import type { IntegrationsStatus } from '@/types';
@@ -86,6 +87,12 @@ export default function Home() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   useEffect(() => {
     setRailCollapsed(localStorage.getItem('jfos-rail-collapsed') === '1');
+  }, []);
+  // No token -> no session: land on /login instead of firing a wall of
+  // 401s. The api.ts interceptor only handles EXPIRY of a token that
+  // exists — it can't help a visitor who never logged in.
+  useEffect(() => {
+    if (!getAuthToken()) window.location.href = '/login';
   }, []);
   const toggleRail = () =>
     setRailCollapsed((c) => {

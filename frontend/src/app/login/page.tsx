@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Radar, Loader2 } from 'lucide-react';
-import { api, apiErrorMessage } from '@/lib/api';
+import { api, apiErrorMessage, setAuthToken } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,7 +25,7 @@ export default function LoginPage() {
       const res = await api.post('/api/v1/auth/jwt/login', body, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
-      localStorage.setItem('jfos-token', res.data.access_token);
+      setAuthToken(res.data.access_token);
       router.push('/');
     } catch (err) {
       const status = (err as { response?: { status?: number } })?.response?.status;

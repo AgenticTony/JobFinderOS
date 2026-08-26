@@ -63,6 +63,33 @@ const slowApi = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Attach the JWT to every request from BOTH instances, and handle expiry:
+// a 401 while a token is in storage means the session expired (or was
+// revoked) — clear it and go to /login. The pathname guard keeps a failed
+// login POST (its own 400/401) from reloading /login and swallowing the
+// inline error message. Without these interceptors the token layer was
+// dead code: login stored a JWT that no request ever attached.
+for (const instance of [api, slowApi]) {
+  instance.interceptors.request.use((config) => {
+    const token = getAuthToken();
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  });
+  instance.interceptors.response.use(
+    (r) => r,
+    (error) => {
+      if (
+        error?.response?.status === 401 &&
+        getAuthToken() &&
+        window.location.pathname !== '/login'
+      ) {
+        logout();
+      }
+      return Promise.reject(error);
+    },
+  );
+}
+
 // ---------- Profile ----------
 
 export const uploadCv = async (file: File): Promise<Profile> => {
