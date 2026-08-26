@@ -307,6 +307,11 @@ Platsbanken. Verify actual coverage on a real US CV before pricing the market.
 
 (verified 2026-08-26 23:20 — check before trusting)
 
+> **Auth/vendor decision pending:** `MIGRATION.md` proposes the Supabase
+> consolidation (Postgres + auth + RLS + API/worker split) with a decision
+> gate, 4 work orders, and an honest 3–4 day estimate. Nothing started —
+> resolve the gate before deployment.
+
 - Composio unconnected (needs platform key); email applies via Resend/browser
 - teamtailor scraper without TEAMTAILOR_SITES configured
 - 2 rows still on `legacy-unversioned` (transient API errors during the
