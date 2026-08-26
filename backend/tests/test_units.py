@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_units.db")
 os.environ.setdefault("GLM_API_KEY", "")
+os.environ.setdefault("DEBUG", "true")  # test env — production guards relaxed
 
 import pytest  # noqa: E402
 
