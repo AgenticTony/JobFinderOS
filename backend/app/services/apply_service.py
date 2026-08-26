@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.timeutil import utc_now
 from app.models import Application, JobPosting
-from app.services.cv_service import get_active_profile
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +27,13 @@ class ApplyError(Exception):
     """Raised when an application cannot be retried."""
 
 
-def retry_application(db: Session, application: Application) -> Application:
+def retry_application(db: Session, application: Application, profile) -> Application:
     """Retry a failed email application — with the SAME reviewed package.
+
+    TENANCY LAYER 1: the profile arrives as a required parameter — this
+    function never resolves identity itself. It previously looked the
+    profile up from application.user_id; the outbound CV identity now
+    comes from exactly what the route resolved for the caller.
 
     If the application came from a draft, the retry rebuilds and reattaches
     the tailored cover letter + CV PDFs the user approved (never a weaker
@@ -38,12 +42,11 @@ def retry_application(db: Session, application: Application) -> Application:
     """
     if application.method != "email":
         raise ApplyError("Only email applications can be retried")
+    if profile is None:
+        raise ApplyError("No CV on file for this account")
     from app.models import ApplicationDraft
 
     job = db.query(JobPosting).filter(JobPosting.id == application.job_id).first()
-    profile = get_active_profile(db, user_id=application.user_id)
-    if profile is None:
-        raise ApplyError("No CV on file for this account")
     application.error = None
 
     draft = (

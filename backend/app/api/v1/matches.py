@@ -92,9 +92,17 @@ async def run_matching(
     def _task():
         task_db = SessionLocal()
         try:
+            # TENANCY LAYER 1: resolve the caller's profile HERE (on this
+            # task's own session) and inject it — run_matching never
+            # resolves identity itself.
+            task_profile = get_active_profile(task_db, user_id=user.id)
+            if not task_profile:
+                logger.info("Background matching skipped: no profile for user %s", user.id)
+                return
             summary = svc.run_matching(
                 task_db,
                 limit=limit or settings.MAX_JOBS_PER_MATCH_RUN,
+                profile=task_profile,
                 max_seconds=settings.MATCH_TIME_BUDGET_SECONDS,
                 user_id=user.id,
             )

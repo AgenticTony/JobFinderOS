@@ -346,7 +346,7 @@ class TestOutboundIdentity:
         fake_service = AIService.__new__(AIService)
         fake_service.model = "glm-test"
         with mock_patch.object(draft_service, "get_ai_service", lambda: fake_service),              mock_patch.object(draft_service, "ai_service_available", lambda: True),              mock_patch.object(AIService, "tailor_application", fake_tailor):
-            draft = create_draft_for_job(db, job, user_id=a_uid)
+            draft = create_draft_for_job(db, job, profile=a_profile, user_id=a_uid)
 
         assert "Alice" in captured.get("cv_text", ""), (
             f"TAILORING USED THE WRONG CV: expected Alice, got: {captured.get('cv_text', '')[:50]}"
@@ -358,7 +358,7 @@ class TestOutboundIdentity:
         assert "Bob" not in captured.get("cv_text", ""), "CROSS-TENANT: Bob's CV fed to Alice's draft"
 
         # A submits (browser method = no email config needed)
-        application = submit_draft(db, draft, "browser", user_id=a_uid)
+        application = submit_draft(db, draft, "browser", a_profile, user_id=a_uid)
         assert application.status == "manual_pending"
 
         # The SUBJECT is what reaches the employer (email method) or the
@@ -391,9 +391,10 @@ class TestOutboundEmailBoundary:
         a_uid, b_uid = _uuid.uuid4(), _uuid.uuid4()
         # Alice registers first; Bob second (the old fallback resolved to
         # whoever was newest, so Bob is the trap).
-        db.add(Profile(user_id=a_uid, is_active=1, full_name="Alice Anderson",
-                       email="alice@example.com", cv_text="ALICE CV TEXT",
-                       cv_file_name="alice-cv.pdf", cv_file_path=None))
+        a_profile = Profile(user_id=a_uid, is_active=1, full_name="Alice Anderson",
+                             email="alice@example.com", cv_text="ALICE CV TEXT",
+                             cv_file_name="alice-cv.pdf", cv_file_path=None)
+        db.add(a_profile)
         db.add(Profile(user_id=b_uid, is_active=1, full_name="Bob Brown",
                        email="bob@example.com", cv_text="BOB CV TEXT",
                        cv_file_name="bob-cv.pdf", cv_file_path=None))
@@ -431,7 +432,7 @@ class TestOutboundEmailBoundary:
         fake_resend = type("R", (), {"Emails": _Emails, "api_key": None})
         monkeypatch.setitem(__import__("sys").modules, "resend", fake_resend)
 
-        application = submit_draft(db, draft, "email", user_id=a_uid)
+        application = submit_draft(db, draft, "email", a_profile, user_id=a_uid)
         assert application.status == "sent", application.error
         assert sent, "no email payload captured"
 

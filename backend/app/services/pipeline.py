@@ -243,12 +243,26 @@ def run_pipeline(
         match_summary = None
         if match:
             try:
-                match_summary = matcher_service.run_matching(
-                    db,
-                    limit=max_matches,
-                    max_seconds=settings.MATCH_TIME_BUDGET_SECONDS,
-                    user_id=user_id,
-                )
+                # TENANCY LAYER 1: resolve the caller's profile here and
+                # inject it — run_matching never resolves identity itself.
+                from app.services.cv_service import get_active_profile
+
+                run_profile = get_active_profile(db, user_id=user_id)
+                if not run_profile:
+                    match_summary = {
+                        "status": "skipped",
+                        "jobs_considered": 0,
+                        "matches_created": 0,
+                        "error": "No active profile — upload a CV first",
+                    }
+                else:
+                    match_summary = matcher_service.run_matching(
+                        db,
+                        limit=max_matches,
+                        profile=run_profile,
+                        max_seconds=settings.MATCH_TIME_BUDGET_SECONDS,
+                        user_id=user_id,
+                    )
             except Exception as e:  # noqa: BLE001 — report in summary, never 500 the endpoint
                 db.rollback()
                 match_summary = {

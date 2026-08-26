@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.models import JobPosting, MatchResult, Profile
 from app.schemas.common import dump_json_list, parse_json_list
 from app.services.ai_service import AIService, ai_service_available, get_ai_service
-from app.services.cv_service import build_profile_context, get_active_profile
+from app.services.cv_service import build_profile_context
 from app.services.language_filter import passes_language_filter
 
 logger = logging.getLogger(__name__)
@@ -116,12 +116,18 @@ def run_matching(
     user_id,
 ) -> Dict:
     """
-    Match all unmatched jobs against the active profile.
+    Match all unmatched jobs against the given profile.
+
+    TENANCY LAYER 1: `profile` is the caller-resolved profile for `user_id`.
+    Deliberately NOT resolved here — every service that fetched "the"
+    profile internally eventually fetched the wrong one (three P0 leaks).
+    A missing profile returns the no-profile skip; the caller (route,
+    scheduler, pipeline) resolves and passes it.
 
     Args:
         db: database session
         limit: max jobs to process this run (default settings.MAX_JOBS_PER_MATCH_RUN)
-        profile: preloaded active profile (optional)
+        profile: the caller's profile (None -> skipped, never re-resolved)
         max_seconds: hard time budget — matching stops and returns partial
             results when exceeded, so pipeline HTTP calls always respond
             within a bounded wait (the frontend times out at 10 minutes).
@@ -161,15 +167,13 @@ def _run_matching_inner(
             "error": "GLM_API_KEY not set — AI matching disabled",
         }
 
-    if profile is None:
-        profile = get_active_profile(db, user_id=user_id)
     if profile is None or not profile.cv_text:
         return {
             "status": "skipped",
             "jobs_considered": 0,
             "matches_created": 0,
             "skipped_no_profile": True,
-            "error": "No active profile — upload a CV first",
+            "error": "No profile passed — the caller must resolve and provide it",
         }
 
     limit = limit or settings.MAX_JOBS_PER_MATCH_RUN

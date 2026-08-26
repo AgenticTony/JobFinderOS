@@ -23,7 +23,7 @@ from app.core.timeutil import utc_now
 from app.models import Application, ApplicationDraft, JobPosting, MatchResult, Profile
 from app.services import pdf_service
 from app.services.ai_service import ai_service_available, get_ai_service
-from app.services.cv_service import build_profile_context, get_active_profile
+from app.services.cv_service import build_profile_context
 from app.services.matcher_service import _job_text
 
 logger = logging.getLogger(__name__)
@@ -50,10 +50,20 @@ def list_drafts(db: Session, limit: int = 100, *, user_id) -> List[ApplicationDr
 
 
 def create_draft_for_job(
-    db: Session, job: JobPosting, force: bool = False, *, user_id
+    db: Session,
+    job: JobPosting,
+    *,
+    profile: Profile,
+    force: bool = False,
+    user_id,
 ) -> ApplicationDraft:
     """
     Generate (or regenerate) the tailored application package for an approved job.
+
+    TENANCY LAYER 1: the profile arrives as a required parameter — this
+    function never resolves identity itself. The three cross-tenant P0
+    leaks all came from services fetching "the" profile internally; the
+    route resolves the caller's profile and hands it in.
 
     The AI tailoring call is synchronous here — the API endpoint wraps this in
     a threadpool. Typical latency ~5-20s on glm-4.6 with thinking disabled.
@@ -70,7 +80,6 @@ def create_draft_for_job(
     if existing and existing.status == "ready" and not force:
         return existing  # already prepared — user should review, not regenerate
 
-    profile = get_active_profile(db, user_id=user_id)
     if not profile or not profile.cv_text:
         raise DraftError("Upload your CV before preparing applications")
 
@@ -143,7 +152,7 @@ def submit_draft(
     db: Session,
     draft: ApplicationDraft,
     method: str,
-    profile: Optional[Profile] = None,
+    profile: Profile,
     *,
     user_id,
 ) -> Application:
@@ -163,10 +172,11 @@ def submit_draft(
     job: JobPosting = draft.job
     if job is None:
         job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()
-    if profile is None:
-        profile = get_active_profile(db, user_id=user_id)
-        if profile is None:
-            raise DraftError("No CV on file for this account — upload one first")
+    # TENANCY LAYER 1: profile is a required parameter — the outbound
+    # identity (sender name, attached CVs) comes from exactly the profile
+    # the route resolved for the caller. This function never looks one up;
+    # the optional-lookup version here is where a wrong user's CV got
+    # emailed to an employer.
 
     target_email = job.application_email
     apply_url = job.application_url or job.url

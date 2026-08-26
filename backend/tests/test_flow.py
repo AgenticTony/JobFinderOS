@@ -104,7 +104,7 @@ def main():
         db.commit()
 
         # 1. matching
-        summary = matcher_service.run_matching(db, user_id=user_id)
+        summary = matcher_service.run_matching(db, profile=profile, user_id=user_id)
         assert summary["matches_created"] == 1, summary
         match = db.query(MatchResult).first()
         assert match.score == 85 and match.tier == "excellent_match"
@@ -117,14 +117,14 @@ def main():
         print("PASS decision: approved")
 
         # 3. draft tailoring (mocked AI)
-        draft = create_draft_for_job(db, job, user_id=user_id)
+        draft = create_draft_for_job(db, job, profile=profile, user_id=user_id)
         assert draft.status == "ready", draft.error
         assert draft.cover_letter.startswith("Dear Acme")
         assert draft.tailored_cv.startswith("PROFESSIONAL SUMMARY")
         print("PASS draft: tailored CV + cover letter ready")
 
         # 4. submit (browser method — no email config needed)
-        application = submit_draft(db, draft, "browser", user_id=user_id)
+        application = submit_draft(db, draft, "browser", profile, user_id=user_id)
         assert application.status == "manual_pending"
         assert draft.status == "submitted"
         # applied-ness derives from the applications row per user

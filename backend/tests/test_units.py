@@ -238,7 +238,7 @@ class TestDuplicateMatchContainment:
         acquired = lock.acquire(blocking=False)
         assert acquired
         try:
-            result = matcher_service.run_matching(db, user_id=uid)
+            result = matcher_service.run_matching(db, profile=None, user_id=uid)
             assert result["status"] == "skipped"
             assert "already in progress" in result["error"]
         finally:
@@ -300,7 +300,7 @@ class TestDeadBand:
         monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
         monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
 
-        matcher_service.run_matching(db, user_id=profile.user_id)
+        matcher_service.run_matching(db, profile=profile, user_id=profile.user_id)
         return calls["n"], job, profile
 
     def test_borderline_is_rescored_and_averaged_up(self, db, monkeypatch):
@@ -685,7 +685,7 @@ class TestDismissalIsPerUser:
         monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
         monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
 
-        matcher_service.run_matching(db, user_id=a.user_id)
+        matcher_service.run_matching(db, profile=a, user_id=a.user_id)
 
         db.refresh(job)
         assert job.status != "dismissed", (
@@ -781,3 +781,164 @@ def _rescore_module_source() -> str:
     return (
         Path(__file__).resolve().parent.parent / "scripts" / "rescore_backlog.py"
     ).read_text()
+
+
+class TestTenancyLayer1:
+    """TENANCY LAYER 1: services receive the profile; they never resolve it.
+
+    The three cross-tenant P0 leaks all came from a service fetching "the"
+    profile internally. Each test here uses the two-profile trap: the user
+    has an ACTIVE profile (what any internal lookup returns) and the test
+    explicitly passes a DIFFERENT one. If a service regresses to resolving
+    identity itself — ignoring its parameter — it gets the active profile
+    and the assertion fails. Revert-checked per service."""
+
+    def _two_profiles(self, db):
+        """The DB trap + the profile the test passes explicitly.
+
+        profiles.user_id is UNIQUE (one profile per user), so the 'passed'
+        profile is an UNSAVED in-memory object with distinctive content.
+        The service contract only reads its attributes — if a regressed
+        service re-resolves identity from the DB instead, it gets the
+        active trap row and every assertion below fails."""
+        active = _profile(db)  # is_active=1 — what a re-resolve would find
+        active.full_name = "Active Trap"
+        active.cv_text = "ACTIVE-TRAP-CV react legacy stack"
+        db.commit()
+        from app.models import Profile as P
+
+        passed = P(user_id=active.user_id, is_active=0,
+                   full_name="Passed Persona", cv_file_name="passed.pdf",
+                   cv_text="PASSED-PROFILE-CV python fastapi specialist")
+        return active, passed
+
+    def test_create_draft_uses_the_passed_profile(self, db, monkeypatch):
+        from app.services import draft_service
+        from app.services.ai_service import AIService
+
+        active, passed = self._two_profiles(db)
+        job = _job_row(db, status="approved")
+        job.description = "A Python role worth tailoring for."
+        db.commit()
+
+        captured = {}
+
+        def fake_tailor(self, profile_context, cv_text, job_description):
+            captured["cv_text"] = cv_text
+            return {"cover_letter": "Dear Acme", "tailored_cv": "CV",
+                    "changes_summary": ["n/a"]}
+
+        fake = AIService.__new__(AIService)
+        fake.model = "glm-test"
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "tailor_application", fake_tailor)
+
+        from app.services.draft_service import create_draft_for_job
+
+        draft = create_draft_for_job(
+            db, job, profile=passed, force=True, user_id=active.user_id
+        )
+        assert draft.status == "ready", draft.error
+        assert "PASSED-PROFILE-CV" in captured.get("cv_text", ""), (
+            f"tailoring used '{captured.get('cv_text', '')[:40]}' — the "
+            "service resolved identity itself instead of using the passed "
+            "profile (Layer 1 regression)"
+        )
+
+    def test_submit_draft_sends_as_the_passed_profile(self, db):
+        from app.models import ApplicationDraft
+
+        active, passed = self._two_profiles(db)
+        job = _job_row(db, status="approved")
+        job.application_url = "https://apply.example"
+        db.commit()
+        draft = ApplicationDraft(
+            user_id=active.user_id, job_id=job.id, cover_letter="x",
+            tailored_cv="y", changes_summary="[]", status="ready",
+        )
+        db.add(draft)
+        db.commit()
+
+        from app.services.draft_service import submit_draft
+
+        application = submit_draft(
+            db, draft, "browser", passed, user_id=active.user_id
+        )
+        assert "Passed Persona" in application.subject, (
+            f"subject '{application.subject}' was built from the wrong "
+            "profile — the service resolved identity itself (Layer 1 regression)"
+        )
+        assert "Active Trap" not in application.subject
+
+    def test_retry_application_uses_the_passed_profile(self, db, monkeypatch):
+        from app.models import Application, ApplicationDraft
+
+        active, passed = self._two_profiles(db)
+        job = _job_row(db, status="approved")
+        job.application_email = "jobs@acme.example"
+        db.commit()
+        draft = ApplicationDraft(
+            user_id=active.user_id, job_id=job.id, cover_letter="letter",
+            tailored_cv="cv", changes_summary="[]", status="submitted",
+        )
+        db.add(draft)
+        db.commit()
+        application = Application(
+            user_id=active.user_id, job_id=job.id, draft_id=draft.id,
+            method="email", status="failed", error="boom",
+        )
+        db.add(application)
+        db.commit()
+
+        captured = {}
+        from app.services import draft_service
+        from app.services.apply_service import retry_application
+
+        monkeypatch.setattr(
+            draft_service, "_send_with_pdfs",
+            lambda db_, app_, draft_, job_, profile_: captured.update(
+                name=profile_.full_name, cv=profile_.cv_text
+            ),
+        )
+        retry_application(db, application, passed)
+        assert captured.get("name") == "Passed Persona", (
+            f"retry emailed as '{captured.get('name')}' — the service "
+            "resolved identity itself instead of using the passed profile "
+            "(Layer 1 regression: this is the exact path that once emailed "
+            "another user's CV)"
+        )
+
+    def test_run_matching_uses_the_passed_profile(self, db, monkeypatch):
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        active, passed = self._two_profiles(db)
+        job = _job_row(db, status="new")
+        job.description = "A Python role worth matching."
+        db.commit()
+
+        captured = {}
+
+        def fake_match(profile_context, cv_text, job_description):
+            captured["cv_text"] = cv_text
+            return {"score": 80, "reasoning": "ok", "recommendation": "apply",
+                    "confidence": "high", "matched_skills": ["Python"],
+                    "missing_skills": [], "transferable_skills": [],
+                    "cover_note": None}
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        svc.match_job = fake_match
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+
+        summary = matcher_service.run_matching(
+            db, profile=passed, user_id=active.user_id
+        )
+        assert summary["matches_created"] == 1, summary
+        assert "PASSED-PROFILE-CV" in captured.get("cv_text", ""), (
+            f"matching scored '{captured.get('cv_text', '')[:40]}' — the "
+            "service resolved identity itself instead of using the passed "
+            "profile (Layer 1 regression)"
+        )

@@ -71,7 +71,16 @@ async def prepare_draft(
 
     try:
         enforce(user.id, 'draft_prepare')
-        draft = await run_in_threadpool(create_draft_for_job, db, job, force, user.id)
+        # TENANCY LAYER 1: identity resolves HERE, at the route, and is
+        # injected into the service — the service never looks it up.
+        from app.services.cv_service import get_active_profile
+
+        profile = get_active_profile(db, user_id=user.id)
+        if not profile or not profile.cv_text:
+            raise HTTPException(status_code=400, detail="Upload your CV before preparing applications")
+        draft = await run_in_threadpool(
+            create_draft_for_job, db, job, profile=profile, force=force, user_id=user.id
+        )
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -200,9 +209,18 @@ async def submit(
         raise HTTPException(status_code=404, detail="Draft not found")
     owns_or_404(draft.user_id, user, "Draft")
 
+    # TENANCY LAYER 1: resolve the caller's profile here and inject it —
+    # submit never resolves identity (the optional-lookup version is where
+    # a wrong user's CV got emailed).
+    from app.services.cv_service import get_active_profile
+
+    profile = get_active_profile(db, user_id=user.id)
+    if not profile:
+        raise HTTPException(status_code=400, detail="No CV on file for this account — upload one first")
+
     try:
         application = await run_in_threadpool(
-            submit_draft, db, draft, payload.method, None, user.id
+            submit_draft, db, draft, payload.method, profile, user.id
         )
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -249,7 +267,13 @@ async def retry(
     owns_or_404(application.user_id, user, "Application")
     if application.status != "failed":
         raise HTTPException(status_code=400, detail="Only failed applications can be retried")
+    # TENANCY LAYER 1: resolve here, inject — retry never looks it up
+    from app.services.cv_service import get_active_profile
+
+    profile = get_active_profile(db, user_id=user.id)
+    if not profile:
+        raise HTTPException(status_code=400, detail="No CV on file for this account")
     try:
-        return await run_in_threadpool(retry_application, db, application)
+        return await run_in_threadpool(retry_application, db, application, profile)
     except ApplyError as e:
         raise HTTPException(status_code=400, detail=str(e))
