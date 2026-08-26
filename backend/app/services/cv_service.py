@@ -28,14 +28,15 @@ UPLOAD_DIR = os.getenv("CV_UPLOAD_DIR", "uploads/cvs")
 
 
 def _store_cv_file(content: bytes, filename: str) -> Tuple[str, str]:
-    """Persist the CV PDF locally so it can be attached to applications."""
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    safe_name = filename.rsplit("/", 1)[-1].replace(" ", "_") or "cv.pdf"
-    stored_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
-    path = os.path.join(UPLOAD_DIR, stored_name)
-    with open(path, "wb") as fh:
-        fh.write(content)
-    return path, safe_name
+    """Persist the CV PDF via the storage backend (local disk by default,
+    Supabase Storage when STORAGE_BACKEND=supabase) so it can be attached
+    to applications. Returns (storage key, original safe filename)."""
+    from app.services.storage import get_storage
+
+    safe = filename.rsplit("/", 1)[-1].replace(" ", "_") or "cv.pdf"
+    stored_name = f"{uuid.uuid4().hex[:8]}_{safe}"
+    key = get_storage().save(stored_name, content, "application/pdf")
+    return key, safe
 
 
 def build_profile_context(profile: Profile) -> str:

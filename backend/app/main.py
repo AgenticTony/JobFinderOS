@@ -13,7 +13,9 @@ import sys
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text as sa_text
 
+from app import users
 from app.api.v1 import applications, jobs, matches, pipeline, profiles
 from app.api.v1 import settings as settings_api
 from app.core.config import settings
@@ -57,6 +59,43 @@ app.include_router(matches.router, prefix="/api/v1/matches", tags=["Matches"])
 app.include_router(applications.router, prefix="/api/v1/applications", tags=["Applications"])
 app.include_router(settings_api.router, prefix="/api/v1/settings", tags=["Settings"])
 
+# Auth (fastapi-users v15 — see app/users.py). Register + JWT login + /users/me.
+app.include_router(
+    users.fastapi_users.get_auth_router(users.auth_backend),
+    prefix="/api/v1/auth/jwt",
+    tags=["Auth"],
+)
+app.include_router(
+    users.fastapi_users.get_register_router(users.UserRead, users.UserCreate),
+    prefix="/api/v1/auth",
+    tags=["Auth"],
+)
+app.include_router(
+    users.fastapi_users.get_users_router(users.UserRead, users.UserUpdate),
+    prefix="/api/v1/users",
+    tags=["Auth"],
+)
+
+
+@app.get("/health", tags=["Ops"])
+async def health():
+    """Liveness + database readiness for uptime monitors and deploy checks."""
+    from app.core.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.execute(sa_text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    finally:
+        db.close()
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "database": "up" if db_ok else "down",
+        "version": settings.APP_VERSION,
+    }
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -86,12 +125,6 @@ async def root():
         "status": "healthy",
         "docs": "/docs",
     }
-
-
-@app.get("/health")
-async def health():
-    """Health check for load balancers."""
-    return {"status": "ok"}
 
 
 @app.exception_handler(Exception)

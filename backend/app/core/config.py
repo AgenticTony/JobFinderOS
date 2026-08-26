@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     MATCH_TIME_BUDGET_SECONDS: int = 420  # hard stop; frontend pipeline timeout is 600s
     COMPOSIO_API_KEY: str = ""  # integrations layer (Settings page)
 
+    # Auth (fastapi-users) — generate with: python -c "import secrets; print(secrets.token_urlsafe(48))"
+    AUTH_SECRET: str = "dev-insecure-secret-change-me"
+    AUTH_TOKEN_LIFETIME_SECONDS: int = 3600 * 24 * 7  # 7 days
+
+    # CV storage backend: "local" (disk) or "supabase" (official REST, docs:
+    # supabase.com/docs/guides/storage/uploads). Vercel Blob was rejected:
+    # no officially documented REST API.
+    STORAGE_BACKEND: str = "local"
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_KEY: str = ""
+    SUPABASE_STORAGE_BUCKET: str = "cvs"
+
     # Scraping
     SCRAPE_SOURCES: str = "arbeitnow,remotive,jobicy,workingnomads,jobtech,teamtailor"
     SCRAPE_TIMEOUT_SECONDS: int = 20

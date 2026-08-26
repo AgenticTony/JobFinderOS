@@ -6,5 +6,14 @@ from app.models.match import MatchResult
 from app.models.draft import ApplicationDraft
 from app.models.application import Application
 from app.models.scrape_run import ScrapeRun
+from app.models.user import User
 
-__all__ = ["Profile", "JobPosting", "MatchResult", "ApplicationDraft", "Application", "ScrapeRun"]
+__all__ = [
+    "Profile",
+    "JobPosting",
+    "MatchResult",
+    "ApplicationDraft",
+    "Application",
+    "ScrapeRun",
+    "User",
+]

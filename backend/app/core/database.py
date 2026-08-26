@@ -8,6 +8,7 @@ Set DATABASE_URL to PostgreSQL for production.
 
 import logging
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -15,6 +16,22 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./jobfinderos.db")
+
+
+def async_database_url(url: str) -> str:
+    """Translate the sync DATABASE_URL to its async driver counterpart.
+
+    fastapi-users' SQLAlchemy adapter is async-only (official docs), so the
+    auth layer runs on a second engine over the same database:
+    postgresql+psycopg:// -> postgresql+asyncpg://, sqlite -> sqlite+aiosqlite.
+    """
+    if url.startswith("postgresql+psycopg://"):
+        return url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if url.startswith("sqlite:///"):
+        return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+    return url
 
 # Render/Heroku-style URLs use postgres:// — SQLAlchemy needs postgresql://
 if DATABASE_URL.startswith("postgres://"):
@@ -35,6 +52,9 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Async engine for the auth layer (fastapi-users) — same database, async driver
+ASYNC_DATABASE_URL = async_database_url(DATABASE_URL)
+
 Base = declarative_base()
 
 
@@ -48,7 +68,28 @@ def get_db():
 
 
 def init_db():
-    """Create all tables on startup (TalentHive pattern) + light migrations."""
+    """Initialize the schema.
+
+    Postgres environments (Neon/CI/production): Alembic owns the schema —
+    `upgrade head` runs on boot; create_all is never used there. SQLite dev
+    keeps the original create_all + light column migrations so existing
+    local databases keep working unchanged.
+    """
+    if DATABASE_URL.startswith("postgres"):
+        from alembic.config import Config
+
+        from alembic import command
+
+        ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
+        cfg = Config(str(ini))
+        cfg.set_main_option(
+            "sqlalchemy.url",
+            DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1),
+        )
+        command.upgrade(cfg, "head")
+        logger.info("Alembic migrations applied (postgres)")
+        return
+
     from app.models import (  # noqa: F401
         application,
         draft,

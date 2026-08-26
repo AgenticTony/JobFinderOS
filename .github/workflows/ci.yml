@@ -1,0 +1,110 @@
+# CI — official patterns per GitHub Actions docs:
+# docs.github.com/en/actions/using-containerized-services/creating-postgresql-service-containers
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (lint, migrations, tests on Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: jobfinderos_ci
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt ruff
+
+      - name: Lint (imports + errors)
+        run: ruff check --select I,F app/
+
+      - name: Alembic migrations apply on real Postgres
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci
+        run: |
+          python -m alembic upgrade head
+          python - <<'EOF'
+          import os
+          from sqlalchemy import create_engine, inspect
+          eng = create_engine(os.environ["DATABASE_URL"])
+          tables = set(inspect(eng).get_table_names())
+          expected = {"profiles", "job_postings", "match_results", "application_drafts",
+                      "applications", "scrape_runs", "users", "alembic_version"}
+          missing = expected - tables
+          assert not missing, f"missing tables: {missing}"
+          print("schema OK:", sorted(tables))
+          EOF
+
+      - name: App boots against Postgres (schema idempotent, auth mounts)
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci
+          GLM_API_KEY: ""
+        run: |
+          python -c "
+          from fastapi.testclient import TestClient
+          from app.main import app
+          with TestClient(app) as c:
+              r = c.get('/health'); assert r.json()['database'] == 'up', r.text
+              r = c.post('/api/v1/auth/register', json={'email':'ci@test.com','password':'C1Pass!xxxx'})
+              assert r.status_code == 201, r.text
+              r = c.post('/api/v1/auth/jwt/login', data={'username':'ci@test.com','password':'C1Pass!xxxx'})
+              assert r.status_code == 200, r.text
+              token = r.json()['access_token']
+              r = c.get('/api/v1/users/me', headers={'Authorization': f'Bearer {token}'})
+              assert r.json()['email'] == 'ci@test.com', r.text
+              print('auth roundtrip on Postgres: OK')
+          "
+
+      - name: Flow test (mocked AI, SQLite)
+        run: PYTHONPATH=. python tests/test_flow.py
+
+  frontend:
+    name: Frontend (type-check + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+
+      - name: Build
+        run: npm run build
