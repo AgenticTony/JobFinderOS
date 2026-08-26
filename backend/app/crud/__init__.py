@@ -1,11 +1,12 @@
 """CRUD query helpers for JobFinderOS."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Optional
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import utc_now
 from app.models import Application, JobPosting, MatchResult, ScrapeRun
 
 # ---------------- Jobs ----------------
@@ -87,10 +88,9 @@ def get_match(db: Session, match_id: int) -> Optional[MatchResult]:
 
 
 def set_match_decision(db: Session, match: MatchResult, decision: str) -> MatchResult:
-    from datetime import datetime
 
     match.decision = decision
-    match.decided_at = datetime.utcnow()
+    match.decided_at = utc_now()
     job = get_job(db, match.job_id)
     if job:
         job.status = "approved" if decision == "approved" else "rejected"
@@ -137,7 +137,7 @@ def get_stats(db: Session) -> dict:
             query = query.filter(getattr(model, col) == val)
         return query.count()
 
-    day_ago = datetime.utcnow() - timedelta(hours=24)
+    day_ago = utc_now() - timedelta(hours=24)
     matches = db.query(MatchResult).all()
     return {
         "jobs_total": count(JobPosting),

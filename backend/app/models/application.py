@@ -5,12 +5,11 @@ Tracks the apply stage: after the user approves a match, an application
 is created and executed via email (Resend/SMTP) or queued for browser/manual apply.
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
+from app.core.timeutil import utc_now
 
 
 class Application(Base):
@@ -36,8 +35,8 @@ class Application(Base):
     sent_at = Column(DateTime, nullable=True)
     error = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     # Relationships
     job = relationship("JobPosting", backref="applications")

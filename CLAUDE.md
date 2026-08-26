@@ -224,6 +224,24 @@ Remaining upgrade levers: batch-5-per-call, Z.ai tier.
   Postgres + flow test (now runs with EMPTY GLM key — draft_service mocked
   too); frontend job = tsc + next build. Green on main.
 
+## Review-fix status (Aug 2026, verification pass 3)
+
+ACCURATE STATUS: 20 of 22 review findings fixed and execution-verified
+(CI run 32936771722 + live CORS check + 15-test pytest suite). Route auth
+(findings #2/#4: Depends(current_active_user) on business routes + frontend
+token layer) is DELIBERATELY DEFERRED TO PHASE 1b — it is NOT done, and the
+single-user CORS lockdown is the interim mitigation, not auth. Multi-user
+verdict from review: "single-user production grade: yes; multi-user schema:
+no" — user_id columns = 0, get_active_profile call sites = 12 (global
+singleton; second CV upload takes over the app), draft PDF downloads are
+IDOR-open. That IS Phase 1b per ROADMAP. Phase 1b additions from the review:
+IDOR checks on integer-ID downloads, on_after_register creates Profile,
+per-user rate limiting, dependency pinning/lockfile, Dockerfile, account
+deletion (GDPR). Residuals from verification pass 3 (fixed 2026-08-26):
+utc_now() helper replaces all datetime.utcnow() (28 deprecation warnings → 0,
+naive-UTC storage semantics preserved); storage.py stale docstring corrected;
+NextHunt/HuntPulse raw new Date() → parseUtcDate.
+
 ## Pipeline gates & hygiene (all enforced every run)
 
 Scrape-time gates (in order): location (area pass; remote/locationless only when

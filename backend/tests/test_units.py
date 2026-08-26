@@ -192,11 +192,12 @@ class TestStaleSweep:
     """B12: date-less postings expire by scraped_at."""
 
     def test_datless_old_swept(self, db):
+        from app.core.timeutil import utc_now
         from app.services.pipeline import _maintenance_sweeps
 
         old = JobPosting(source="t", source_id="o1", title="Old", url="https://o",
                          status="new", published_at=None,
-                         scraped_at=datetime.utcnow() - timedelta(days=45))
+                         scraped_at=utc_now() - timedelta(days=45))
         db.add(old)
         db.commit()
         _maintenance_sweeps(db)

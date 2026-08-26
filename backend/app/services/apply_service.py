@@ -13,11 +13,11 @@ application email is published with the posting.
 
 import base64
 import logging
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.timeutil import utc_now
 from app.models import Application, JobPosting
 from app.services.cv_service import get_active_profile
 
@@ -112,7 +112,7 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
 
         email = resend.Emails.send(params)
         application.status = "sent"
-        application.sent_at = datetime.utcnow()
+        application.sent_at = utc_now()
         logger.info("Application email sent to %s (id=%s)", application.target_email, email.get("id"))
     except Exception as e:  # noqa: BLE001
         application.status = "failed"

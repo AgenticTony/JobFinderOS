@@ -9,8 +9,9 @@ CV storage abstraction — backends chosen by STORAGE_BACKEND env.
             its REST API is undocumented/internal, SDK-only
             (community.vercel.com/t/1136) — not acceptable for production.
 
-Backends return a storage key (relative path). Local reads use it directly;
-remote backends return the public object URL as the key.
+Backends return a storage KEY (local path, or "<bucket>/<object path>" for
+remote) — never a public URL. Reads go through backend.read(); CVs are PII
+and remote buckets stay private (authenticated GETs, not public links).
 """
 
 import logging

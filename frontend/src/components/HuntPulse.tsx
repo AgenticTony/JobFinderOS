@@ -78,7 +78,7 @@ function PulseSchedule({
   lastHuntAt: string | null;
 }) {
   const countdown = useCountdown(schedulerEnabled ? nextRunAt : null);
-  const at = nextRunAt ? new Date(nextRunAt) : null;
+  const at = nextRunAt ? parseUtcDate(nextRunAt) : null;
   const overdue =
     lastHuntAt !== null &&
     Date.now() - parseUtcDate(lastHuntAt).getTime() > intervalMinutes * 60_000 * 1.5;

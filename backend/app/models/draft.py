@@ -6,12 +6,11 @@ and cover letter to the approved job, the user reviews and edits both, and
 only then is the application submitted.
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
+from app.core.timeutil import utc_now
 
 
 class ApplicationDraft(Base):
@@ -32,8 +31,8 @@ class ApplicationDraft(Base):
     status = Column(String(20), default="drafting", nullable=False)
     error = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     # Relationships
     job = relationship("JobPosting", backref="drafts")

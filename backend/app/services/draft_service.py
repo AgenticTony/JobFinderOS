@@ -15,11 +15,11 @@ tailored documents when sending.
 """
 
 import logging
-from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import utc_now
 from app.models import Application, ApplicationDraft, JobPosting, MatchResult, Profile
 from app.services import pdf_service
 from app.services.ai_service import ai_service_available, get_ai_service
@@ -258,7 +258,7 @@ def _send_with_pdfs(
             }
         )
         application.status = "sent"
-        application.sent_at = datetime.utcnow()
+        application.sent_at = utc_now()
         logger.info("Tailored application sent to %s (id=%s)", application.target_email, email.get("id"))
     except Exception as e:  # noqa: BLE001
         application.status = "failed"

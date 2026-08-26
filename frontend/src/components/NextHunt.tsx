@@ -70,7 +70,7 @@ export default function NextHunt({
   intervalMinutes: number;
 }) {
   const countdown = useCountdown(schedulerEnabled ? nextRunAt : null);
-  const at = nextRunAt ? new Date(nextRunAt) : null;
+  const at = nextRunAt ? parseUtcDate(nextRunAt) : null;
 
   if (!schedulerEnabled) {
     return (

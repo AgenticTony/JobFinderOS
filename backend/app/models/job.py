@@ -6,11 +6,10 @@ Jobs arrive from scrapers (Arbeitnow, Remotive, Jobicy, Working Nomads)
 or manual entry, then flow through: new -> matched -> approved/rejected -> applied.
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, Integer, String, Text
 
 from app.core.database import Base
+from app.core.timeutil import utc_now
 
 
 class JobPosting(Base):
@@ -46,9 +45,9 @@ class JobPosting(Base):
     # new -> matched -> approved | rejected | dismissed -> applied
 
     published_at = Column(DateTime, nullable=True)
-    scraped_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    scraped_at = Column(DateTime, default=utc_now, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     # Relationships are defined on MatchResult (backref: match_result) and Application (backref: applications)
 

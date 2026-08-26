@@ -6,12 +6,11 @@ instead of "is this candidate right for the job", it stores
 "is this job right for me" — with an apply recommendation and cover note.
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
+from app.core.timeutil import utc_now
 
 
 class MatchResult(Base):
@@ -41,8 +40,8 @@ class MatchResult(Base):
     model_used = Column(String(50), nullable=True)
     processing_time_ms = Column(Integer, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     # Relationships
     job = relationship("JobPosting", backref="match_result")

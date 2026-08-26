@@ -10,7 +10,7 @@ filters what gets stored at all.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.dedupe import dedupe_key_for
+from app.core.timeutil import utc_now
 from app.models import JobPosting, MatchResult, Profile, ScrapeRun
 from app.schemas.common import dump_json_list, parse_json_list
 from app.services import matcher_service, source_packs
@@ -77,14 +78,14 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
     if scraper_cls is None:
         run.status = "failed"
         run.error = f"Unknown source: {source_name}"
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utc_now()
         db.commit()
         return run
 
     if not scraper_cls.is_configured(ctx):
         run.status = "skipped"
         run.error = f"{source_name} not configured (see backend/.env.example)"
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utc_now()
         db.commit()
         return run
 
@@ -107,7 +108,7 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
             jobs = [
                 nj
                 for nj in jobs
-                if nj.published_at is None or nj.published_at >= datetime.utcnow() - max_age
+                if nj.published_at is None or nj.published_at >= utc_now() - max_age
             ]
             if fresh != len(jobs):
                 logger.info("[%s] freshness gate: %d -> %d jobs", source_name, fresh, len(jobs))
@@ -161,7 +162,7 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
         run.error = str(e)[:2000]
         logger.error("[%s] scrape failed: %s", source_name, e)
     finally:
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utc_now()
         db.commit()
 
     return run
@@ -267,7 +268,7 @@ def run_pipeline(
 def _maintenance_sweeps(db: Session) -> None:
     """Queue hygiene: expire stale unmatched postings and auto-pass stale
     pending matches. Runs inside every pipeline run."""
-    now = datetime.utcnow()
+    now = utc_now()
 
     from sqlalchemy import or_
 

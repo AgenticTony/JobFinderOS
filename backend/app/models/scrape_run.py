@@ -2,11 +2,10 @@
 ScrapeRun model for JobFinderOS — audit trail for scraper executions.
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, Integer, String, Text
 
 from app.core.database import Base
+from app.core.timeutil import utc_now
 
 
 class ScrapeRun(Base):
@@ -22,7 +21,7 @@ class ScrapeRun(Base):
     matches_created = Column(Integer, default=0, nullable=False)
     error = Column(Text, nullable=True)
 
-    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, default=utc_now, nullable=False)
     finished_at = Column(DateTime, nullable=True)
 
     def __repr__(self):

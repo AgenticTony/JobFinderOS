@@ -5,11 +5,10 @@ Inverse of TalentHive's Candidate: instead of many candidates per job,
 there is ONE job seeker with a CV on file, matched against many jobs.
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, Integer, String, Text
 
 from app.core.database import Base
+from app.core.timeutil import utc_now
 
 
 class Profile(Base):
@@ -60,8 +59,8 @@ class Profile(Base):
     languages = Column(Text, nullable=True)  # JSON array — languages the user works in
 
     is_active = Column(Integer, default=1, nullable=False)  # single active profile
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     def __repr__(self):
         return f"<Profile {self.full_name or self.id}>"

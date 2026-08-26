@@ -127,7 +127,14 @@ Supabase project (URL + service key) — config-ready, no code changes.
 **Phase 1a — Public site & auth UI:** route split (/ vs /console),
 signup/login on Phase-0 endpoints, landing + pricing, wizard entry.
 
-**Phase 1b — Multi-user core:** user_id on profiles/matches/drafts/applications;
+**Phase 1b — Multi-user core (review-hardened scope):** user_id FKs +
+Alembic migration + backfill; every crud query and all 12
+get_active_profile() sites scoped to the caller; Depends(current_active_user)
+on every route + frontend token layer (findings #2/#4 — the two NOT fixed);
+drop the is_active singleton (second upload currently takes over the app);
+IDOR checks (draft PDF downloads serve any integer ID); on_after_register
+creates the Profile row; per-user rate limiting on AI-spending endpoints;
+pin dependencies + lockfile; Dockerfile; account deletion (GDPR). user_id on profiles/matches/drafts/applications;
 shared pool + match-time gates + watermarks; embeddings layer; match queue
 with reserved slots + login ordering; per-country cron scheduler; frontend
 account flows.
