@@ -37,6 +37,27 @@ def _get_user_lock(user_id):
         return _user_locks[user_id]
 
 
+def resolve_samples(samples):
+    """The scoring protocol's resolution step — SINGLE source of truth.
+
+    Average the sample scores once; select the payload (reasoning,
+    recommendation, confidence, skills, cover_note) from the sample
+    CLOSEST to the final mean, because the prose must agree with the
+    number the user sees.
+
+    Both this service and scripts/rescore_backlog.py call this function.
+    The script previously ran its own copy that kept only the scores and
+    discarded the payloads — 241 rows got a current-prompt score next to
+    legacy-prompt prose, the F1 defect reproduced at full scale by the
+    shadow copy of the protocol.
+
+    Returns (final_score, best_payload_sample).
+    """
+    final_score = round(statistics.mean(s["score"] for s in samples))
+    best_payload = min(samples, key=lambda s: abs(s["score"] - final_score))
+    return final_score, best_payload
+
+
 def is_matching_running() -> bool:
     return _matching_in_progress
 
@@ -263,17 +284,16 @@ def _run_matching_inner(
                         logger.warning("Keeper re-sample failed for job %s: %s", job.id, e)
                         break
 
-            # Average once
-            final_score = round(statistics.mean(s["score"] for s in samples))
+            # Average once; F1: the payload comes from the sample closest to
+            # the mean — via resolve_samples, the shared protocol the
+            # re-score script also calls. The prose, recommendation,
+            # confidence, skills and cover_note must agree with the
+            # displayed number — a score of 40 paired with
+            # recommendation='skip' and reasoning='barely match' (from a
+            # sample that scored 26) is incoherent and breaks MatchCard's
+            # 'AI says: apply' chip and the recommendation filter.
+            final_score, best_payload = resolve_samples(samples)
             final_tier = AIService._tier_for_score(final_score)
-
-            # F1 FIX: select the payload from the sample closest to the mean.
-            # The prose, recommendation, confidence, skills and cover_note
-            # must agree with the displayed number — a score of 40 paired
-            # with recommendation='skip' and reasoning='barely match'
-            # (from a sample that scored 26) is incoherent and breaks
-            # MatchCard's 'AI says: apply' chip and the recommendation filter.
-            best_payload = min(samples, key=lambda s: abs(s["score"] - final_score))
             if len(samples) > 1:
                 logger.info(
                     "Scored job %s: scores=%s -> %d (%s), payload from sample scoring %d",

@@ -133,14 +133,14 @@ def _job_row(db, status="approved"):
     return j
 
 
-def _rescore_derivation():
-    """Load derive_dismissal from the PRODUCTION re-score script, by path.
+def _rescore_module():
+    """Load scripts/rescore_backlog.py (the PRODUCTION module), by path.
 
     scripts/ isn't a package and pytest doesn't put backend/ on sys.path,
-    hence importlib. The point: the invariant test must run the script's
-    own code. A reimplementation in this file only guards itself —
-    regressing the script to the one-directional 176-row bug left 26 tests
-    passing when the test ran its own inline copy of the rules.
+    hence importlib. The point: tests must run the script's own code —
+    apply_rescore and derive_dismissal. A reimplementation in this file
+    only guards itself (regressing the script to the one-directional
+    176-row bug left 26 tests passing when the test ran its own copy).
     """
     import importlib.util
     from pathlib import Path
@@ -149,7 +149,7 @@ def _rescore_derivation():
     spec = importlib.util.spec_from_file_location("rescore_backlog_under_test", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.derive_dismissal
+    return mod
 
 
 class TestSubmitStateMachine:
@@ -441,7 +441,7 @@ class TestDeadBand:
         from app.core.config import settings
         from app.models import MatchResult
 
-        derive_dismissal = _rescore_derivation()
+        derive_dismissal = _rescore_module().derive_dismissal
         keep = settings.MATCH_KEEP_MIN_SCORE
 
         profile = _profile(db)
@@ -517,6 +517,145 @@ class TestDeadBand:
         assert v2 == 0, f"{v2} sub-threshold rows with decision=NULL — invariant violated"
         assert v3 == 0, f"{v3} strong rows wrongly dismissed — invariant violated"
         assert v4 == 0, f"{v4} strong rows with skip recommendation — invariant violated"
+
+
+class TestRescorePayload:
+    """F1 at full scale: the re-score script must refresh the PROSE with
+    the score. The previous run kept only result['score'] and discarded
+    the payloads — 241 rows ended up with a current-prompt score next to
+    legacy-prompt prose (0 cover_note changes vs the pre-run snapshot
+    proved no fresh payload was ever written). All tests run the
+    PRODUCTION apply_rescore / derive_dismissal imported from the script."""
+
+    def test_apply_rescore_refreshes_payload_not_just_score(self, db):
+        from app.models import MatchResult
+        from app.schemas.common import parse_json_list
+
+        apply_rescore = _rescore_module().apply_rescore
+
+        profile = _profile(db)
+        job = _job_row(db, status="matched")
+        m = MatchResult(
+            user_id=profile.user_id, job_id=job.id, score=45, tier="stretch",
+            reasoning="LEGACY PROSE from the old prompt",
+            recommendation="maybe", cover_note="LEGACY COVER NOTE",
+            confidence="low", prompt_version="legacy-unversioned",
+        )
+        db.add(m)
+        db.commit()
+
+        # mean(72, 45, 70) = 62.33 -> 62; closest sample is the 70
+        samples = [
+            {"score": 72, "reasoning": "prose from 72", "recommendation": "apply",
+             "cover_note": "note from 72", "confidence": "high",
+             "matched_skills": ["Python"], "missing_skills": ["Kafka"],
+             "transferable_skills": ["Go"]},
+            {"score": 45, "reasoning": "prose from 45", "recommendation": "skip",
+             "cover_note": "note from 45", "confidence": "low",
+             "matched_skills": [], "missing_skills": [],
+             "transferable_skills": []},
+            {"score": 70, "reasoning": "prose from 70", "recommendation": "apply",
+             "cover_note": "note from 70", "confidence": "high",
+             "matched_skills": ["Python", "SQL"], "missing_skills": [],
+             "transferable_skills": []},
+        ]
+        final = apply_rescore(m, samples, model="glm-5.1")
+        db.commit()
+
+        assert final == 62
+        assert m.score == 62
+        # Payload from the sample CLOSEST to the mean — never the legacy row
+        assert m.reasoning == "prose from 70", "stale prose survived a re-score"
+        assert m.cover_note == "note from 70", "stale cover_note survived a re-score"
+        assert m.recommendation == "apply"
+        assert m.confidence == "high"
+        assert parse_json_list(m.matched_skills) == ["Python", "SQL"]
+        assert parse_json_list(m.missing_skills) == []
+        assert parse_json_list(m.transferable_skills) == []
+        assert m.prompt_version != "legacy-unversioned"
+        assert m.model_used == "glm-5.1"
+        # Keeper above keep-min: no dismissal
+        assert m.decision is None and m.dismissed_reason is None
+
+    def test_apply_rescore_subthreshold_stamps_autopass(self, db):
+        from app.core.config import settings
+        from app.models import MatchResult
+
+        apply_rescore = _rescore_module().apply_rescore
+        stamp = _rescore_module().AUTOPASS_REASONING
+
+        profile = _profile(db)
+        job = _job_row(db, status="matched")
+        m = MatchResult(
+            user_id=profile.user_id, job_id=job.id, score=41, tier="stretch",
+            reasoning="old keeper prose", recommendation="apply",
+            decision=None, dismissed_reason=None,
+            prompt_version="legacy-unversioned",
+        )
+        db.add(m)
+        db.commit()
+
+        # mean(20, 18) = 19 — below keep-min, single triage semantics
+        samples = [
+            {"score": 20, "reasoning": "weak", "recommendation": "skip",
+             "confidence": "high", "matched_skills": [], "missing_skills": [],
+             "transferable_skills": []},
+            {"score": 18, "reasoning": "weak too", "recommendation": "skip",
+             "confidence": "high", "matched_skills": [], "missing_skills": [],
+             "transferable_skills": []},
+        ]
+        final = apply_rescore(m, samples, model="glm-5.1")
+        db.commit()
+
+        assert final == 19
+        assert final < settings.MATCH_KEEP_MIN_SCORE
+        assert m.decision == "rejected"
+        assert m.dismissed_reason == "below_threshold"
+        assert m.recommendation == "skip"
+        assert m.reasoning == stamp, "sub-threshold row must carry the auto-pass stamp"
+
+    def test_rise_branch_clears_the_full_autopass_stamp(self, db):
+        """A row that dips below keep-min and recovers must shed ALL FOUR
+        stamp fields. The rise-branch used to leave reasoning='Auto-passed…'
+        on a strong score — MatchCard renders reasoning as the primary
+        explanation, so a keeper told the user it was auto-passed for
+        being too weak."""
+        from app.core.config import settings
+        from app.models import MatchResult
+
+        derive_dismissal = _rescore_module().derive_dismissal
+        keep = settings.MATCH_KEEP_MIN_SCORE
+        stamp = _rescore_module().AUTOPASS_REASONING
+
+        profile = _profile(db)
+        job = _job_row(db, status="matched")
+        m = MatchResult(
+            user_id=profile.user_id, job_id=job.id, score=72,
+            tier="good_match",
+            reasoning="Your Python and FastAPI experience matches what they ask for.",
+            recommendation="apply", decision=None, dismissed_reason=None,
+        )
+        db.add(m)
+        db.commit()
+
+        # Fall below keep-min: the stamp goes on
+        m.score = 18
+        derive_dismissal(m, keep)
+        db.commit()
+        assert m.decision == "rejected"
+        assert m.reasoning == stamp, "fall-branch must stamp reasoning"
+
+        # Recover above keep-min: the ENTIRE stamp comes off
+        m.score = 72
+        derive_dismissal(m, keep)
+        db.commit()
+        assert m.decision is None
+        assert m.dismissed_reason is None
+        assert m.recommendation is None
+        assert m.reasoning is None, (
+            "stale auto-pass prose survived on a strong row — the rise-branch "
+            "must shed all four stamp fields"
+        )
 
 
 class TestDismissalIsPerUser:

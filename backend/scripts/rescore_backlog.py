@@ -1,20 +1,20 @@
 """Re-score the legacy backlog with 3-sample averaging.
 
-Re-scores all match_results rows whose prompt_version is 'legacy-unversioned'
-(the pre-anchors, pre-temperature-fix prompt). Each keeper gets 3 samples
-averaged (±6 instead of ±11), stamped with the current prompt_version.
-Sub-25 scores get single-sample auto-pass (the triage path — no point
-averaging a confident rejection).
+Re-scores match_results rows on a given prompt_version (default:
+'legacy-unversioned'). Each keeper gets 3 samples averaged (±6 instead of
+±11), and score AND prose are refreshed together via resolve_samples —
+the shared matcher protocol — so no row ever pairs a current-prompt score
+with legacy-prompt prose. Sub-25 scores get single-sample auto-pass (the
+triage path — no point averaging a confident rejection).
 
 Usage:
-    .venv/bin/python scripts/rescore_backlog.py [--dry-run]
+    .venv/bin/python scripts/rescore_backlog.py [--dry-run] [--prompt-version <ver>]
 
 Cost: ~243 rows × 3 samples × $0.004 ≈ $3.00
 Time: ~243 × 3 × 6s ≈ 73 minutes (single-threaded, respectful of API limits)
 """
 
 import os
-import statistics
 import sys
 from pathlib import Path
 
@@ -24,9 +24,47 @@ os.environ.setdefault("DEBUG", "true")
 from app.core.config import settings  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.models import JobPosting, MatchResult, Profile  # noqa: E402
+from app.schemas.common import dump_json_list  # noqa: E402
 from app.services.ai_service import AIService  # noqa: E402
 from app.services.cv_service import build_profile_context  # noqa: E402
-from app.services.matcher_service import _job_text  # noqa: E402
+from app.services.matcher_service import _job_text, resolve_samples  # noqa: E402
+
+# The auto-pass stamp the matcher writes on sub-threshold rows. A constant,
+# not a literal in two places: the fall-branch writes it and the rise-branch
+# recognizes it by exact match (so it can shed the stamp without ever
+# touching fresh model prose, which just overwrote the field).
+AUTOPASS_REASONING = "Auto-passed: below the score threshold for your CV."
+
+
+def apply_rescore(match: MatchResult, samples: list, model: str) -> int:
+    """Write a COMPLETE re-score onto a match row: score AND prose.
+
+    resolve_samples is the shared protocol (matcher_service): the payload
+    comes from the sample closest to the final mean. The previous version
+    of this script kept only result["score"] and discarded the payloads —
+    241 rows ended up with a current-prompt score next to legacy-prompt
+    prose (verified against the pre-run snapshot: 0 cover_note changes).
+
+    Then version stamps, then the bidirectional dismissal derivation,
+    which overwrites the payload fields with the auto-pass stamp on
+    sub-threshold rows — mirroring the matcher's auto-pass write.
+
+    Mutates `match` in place; the caller commits. Returns the final score.
+    """
+    averaged, best_payload = resolve_samples(samples)
+    match.score = averaged
+    match.tier = AIService._tier_for_score(averaged)
+    match.prompt_version = AIService.matching_prompt_version()
+    match.model_used = model
+    match.reasoning = best_payload.get("reasoning")
+    match.matched_skills = dump_json_list(best_payload.get("matched_skills", []))
+    match.missing_skills = dump_json_list(best_payload.get("missing_skills", []))
+    match.transferable_skills = dump_json_list(best_payload.get("transferable_skills", []))
+    match.recommendation = best_payload.get("recommendation")
+    match.cover_note = best_payload.get("cover_note")
+    match.confidence = best_payload.get("confidence")
+    derive_dismissal(match, settings.MATCH_KEEP_MIN_SCORE)
+    return averaged
 
 
 def derive_dismissal(match: MatchResult, keep_min: int) -> None:
@@ -37,10 +75,13 @@ def derive_dismissal(match: MatchResult, keep_min: int) -> None:
     directions:
 
     - score >= keep_min: a row that rose above keep-min sheds any auto-pass
-      stamp from the older, lower score. The stamp is three fields —
-      decision, dismissed_reason, AND recommendation='skip' — clearing only
-      the first two leaves a strong row carrying 'skip', which trips the
-      post-run invariant (and hides a keeper the user should review).
+      stamp from the older, lower score. The stamp is FOUR fields —
+      decision, dismissed_reason, recommendation='skip', AND the
+      AUTOPASS_REASONING text. Clearing only the first three leaves a
+      strong row telling the user it was auto-passed for being too weak
+      (MatchCard renders reasoning as the primary explanation). Reasoning
+      is matched by exact stamp text so fresh model prose — written just
+      before this runs — is never touched.
     - score < keep_min: sub-threshold rows never stay live, whatever the
       previous decision was — reject with below_threshold.
 
@@ -59,16 +100,28 @@ def derive_dismissal(match: MatchResult, keep_min: int) -> None:
             match.dismissed_reason = None
             if match.recommendation == "skip":
                 match.recommendation = None
+            if match.reasoning == AUTOPASS_REASONING:
+                match.reasoning = None
     else:
         match.decision = "rejected"
         match.decided_at = None
         match.dismissed_reason = "below_threshold"
         match.recommendation = "skip"
-        match.reasoning = "Auto-passed: below the score threshold for your CV."
+        match.reasoning = AUTOPASS_REASONING
 
 
 def main() -> int:
     dry_run = "--dry-run" in sys.argv
+
+    # --prompt-version <ver>: re-score rows currently stamped with that
+    # version. Default stays 'legacy-unversioned' (the original backlog).
+    # Needed for the one-time correction after the payload bug: the broken
+    # run stamped prompt_version=current while leaving legacy prose, so
+    # those rows are selected by their CURRENT version — 'legacy-unversioned'
+    # no longer matches them.
+    target_version = "legacy-unversioned"
+    if "--prompt-version" in sys.argv:
+        target_version = sys.argv[sys.argv.index("--prompt-version") + 1]
 
     if not settings.GLM_API_KEY:
         print("ERROR: GLM_API_KEY not set — cannot re-score.")
@@ -120,10 +173,10 @@ def main() -> int:
 
     backlog = (
         db.query(MatchResult)
-        .filter(MatchResult.prompt_version == "legacy-unversioned")
+        .filter(MatchResult.prompt_version == target_version)
         .all()
     )
-    print(f"Backlog: {len(backlog)} legacy-unversioned matches")
+    print(f"Backlog: {len(backlog)} rows on prompt_version '{target_version}'")
     if dry_run:
         for m in backlog[:5]:
             job = db.get(JobPosting, m.job_id)
@@ -155,30 +208,24 @@ def main() -> int:
 
         try:
             text = _job_text(job)
-            scores = []
+            samples = []
             for sample in range(3):
                 result = svc.match_job(
                     profile_context=ctx,
                     cv_text=profile.cv_text,
                     job_description=text,
                 )
-                scores.append(result["score"])
+                # FULL result dicts — the payload must be refreshed with the
+                # score. The previous run kept only result["score"]: 241 rows
+                # ended up with a current-prompt score next to legacy-prompt
+                # prose (0 cover_note changes vs the pre-run snapshot).
+                samples.append(result)
                 if sample == 0 and result["score"] < settings.MATCH_KEEP_MIN_SCORE:
                     # Confident rejection from triage — single sample suffices
                     break
 
-            averaged = round(statistics.mean(scores)) if len(scores) > 1 else scores[0]
-            tier = AIService._tier_for_score(averaged)
             old_score = match.score
-
-            match.score = averaged
-            match.tier = tier
-            match.prompt_version = AIService.matching_prompt_version()
-            match.model_used = svc.model
-
-            # BIDIRECTIONAL dismissal derivation (the one-directional version
-            # left 176 sub-threshold rows live in the queue)
-            derive_dismissal(match, settings.MATCH_KEEP_MIN_SCORE)
+            averaged = apply_rescore(match, samples, svc.model)
 
             db.add(match)
             db.commit()
@@ -187,8 +234,8 @@ def main() -> int:
             if (i + 1) % 10 == 0 or i == len(backlog) - 1:
                 print(
                     f"  [{i+1}/{len(backlog)}] job={job.title[:35]:35} "
-                    f"{old_score:>3} -> {averaged:>3} ({tier[:14]:14}) "
-                    f"samples={sorted(scores)}"
+                    f"{old_score:>3} -> {averaged:>3} ({match.tier[:14]:14}) "
+                    f"samples={sorted(s['score'] for s in samples)}"
                 )
 
         except Exception as e:
