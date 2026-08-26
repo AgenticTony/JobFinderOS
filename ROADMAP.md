@@ -74,9 +74,15 @@ Pipeline: harvest → gate → store → match/score → decide → tailor → s
 
 ## Phases
 
-**Phase 0 — Foundations:** Neon Postgres migration (SQLAlchemy config + data
-copy), fastapi-users auth skeleton, CI (ruff + tsc + flow test + build),
-CV storage → Vercel Blob.
+**Phase 0 — Foundations (DONE Aug 2026, CI green):** Postgres-capable
+dual-engine DB layer + Alembic (migrate-on-boot for Postgres; initial
+migration verified on real Postgres 16) + fastapi-users v15 auth skeleton
+(register/JWT/me verified on Postgres AND SQLite) + /health + CV storage
+abstraction (local verified; Supabase REST env-gated — Vercel Blob rejected
+as undocumented) + GitHub Actions CI (lint, migrations, auth roundtrip,
+flow test, tsc, build). Remaining for Phase 0 completion at deploy time:
+create the Neon project (paste pooled URL into DATABASE_URL) and the
+Supabase project (URL + service key) — config-ready, no code changes.
 
 **Phase 1 — Multi-user core:** user_id on profiles/matches/drafts/applications;
 shared pool + match-time gates + watermarks; embeddings layer; match queue

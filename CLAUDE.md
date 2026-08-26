@@ -203,6 +203,27 @@ max yearly plan makes cost moot. Tailor/profile/suggest calls also run on 5.1
 (better writing, single calls) at their own temperature (0.3 via default).
 Remaining upgrade levers: batch-5-per-call, Z.ai tier.
 
+## Phase 0 — enterprise foundations (DONE, Aug 2026, CI green)
+
+- Dual engines off one DATABASE_URL: sync app engine (psycopg) + async auth
+  engine (asyncpg/aiosqlite) — fastapi-users v15 SQLAlchemy adapter is
+  async-only (official docs). Neon pooled URL works as-is.
+- Alembic owns the Postgres schema (backend/alembic; env.py reads DATABASE_URL,
+  renders fastapi-users GUID as portable sa.Uuid). Postgres envs migrate on
+  boot via init_db; SQLite dev keeps create_all + light column migrations.
+- Auth skeleton (app/users.py): users table (UUID), POST /api/v1/auth/register,
+  /api/v1/auth/jwt/login (Bearer JWT, 7-day), /api/v1/users/me. AUTH_SECRET in
+  backend/.env (generated). Verify/reset routers await the mailer (Phase 2).
+  Frontend auth UI = Phase 1.
+- /health: {status, database, version} — uptime-ready.
+- CV storage abstraction (app/services/storage.py): STORAGE_BACKEND=local
+  (default, verified) | supabase (official REST docs). Vercel Blob REJECTED:
+  undocumented REST, SDK-only. CV upload path routed through get_storage().
+- CI (.github/workflows/ci.yml): backend job = ruff (I,F) + alembic upgrade on
+  a Postgres 16 service + schema assertions + TestClient auth roundtrip on
+  Postgres + flow test (now runs with EMPTY GLM key — draft_service mocked
+  too); frontend job = tsc + next build. Green on main.
+
 ## Pipeline gates & hygiene (all enforced every run)
 
 Scrape-time gates (in order): location (area pass; remote/locationless only when
