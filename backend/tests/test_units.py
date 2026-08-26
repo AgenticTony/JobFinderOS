@@ -278,12 +278,12 @@ class TestDeadBand:
         return calls["n"], job, profile
 
     def test_borderline_is_rescored_and_averaged_up(self, db, monkeypatch):
-        """22 then 30 averages to 26 — keeper path adds 2 more samples.
-        4 calls total: 1 triage + 1 dead-band re-score + 2 keeper samples."""
+        """22 in dead-band → re-score gets 30, preliminary mean 26 ≥ keep-min
+        → keeper adds 1 more (30). 3 calls, samples [22,30,30], mean 27."""
         from app.models import MatchResult
 
         n, job, profile = self._run_with_scores(db, monkeypatch, [22, 30])
-        assert n == 4, "dead-band (1+1) + keeper 3-sample (2 more) = 4 calls"
+        assert n == 3, "1 triage + 1 dead-band + 1 keeper = 3 calls (3 total samples)"
         row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
         assert row.score >= 25, "averaged above keep-min must stay in the queue"
         assert row.dismissed_reason is None
@@ -310,6 +310,41 @@ class TestDeadBand:
         assert n == 3, "keeper = 1 triage + 2 re-samples = 3 calls"
         row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
         assert row.score == 30, "mean of [70, 10, 10] = 30 — stored single value"
+        assert row.dismissed_reason is None
+
+    def test_subthreshold_after_averaging_is_dismissed_not_queued(self, db, monkeypatch):
+        """WO2 defect 3: first sample clears keep-min, but the 3-sample mean
+        falls below it — the result must be DISMISSED, not queued. Samples
+        [26, 20, 18] average to 21, which is below MATCH_KEEP_MIN_SCORE=25."""
+        from app.models import MatchResult
+
+        n, job, profile = self._run_with_scores(db, monkeypatch, [26, 20, 18])
+        assert n == 3, "triage >=25 triggers the keeper path (1 + 2 calls)"
+        row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
+        assert row.score == 21, "mean of [26, 20, 18] = 21"
+        assert row.dismissed_reason == "below_threshold", (
+            f"score {row.score} < keep-min {25} but dismissed_reason is "
+            f"{row.dismissed_reason} — sub-threshold scores must never enter "
+            "the queue as live matches"
+        )
+        assert row.decision == "rejected"
+
+    def test_deadband_keeper_produces_clean_unweighted_mean(self, db, monkeypatch):
+        """WO2 defect 2: a dead-band score that averages up enters the keeper
+        path; the final stored value must be the mean of ALL raw samples
+        equally, not mean(mean(s1,s2), s3, s4). Samples [20, 30, 40]:
+        dead-band 20+30 preliminary=25 clears keep-min, keeper adds 40.
+        Correct: mean(20, 30, 40) = 30.
+        Old buggy path: mean(mean(20,30), 40, 40) = mean(25, 40, 40) = 35."""
+        from app.models import MatchResult
+
+        n, job, profile = self._run_with_scores(db, monkeypatch, [20, 30, 40])
+        assert n == 3, "1 triage + 1 dead-band + 1 keeper = 3 calls"
+        row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
+        assert row.score == 30, (
+            f"mean(20,30,40) = 30. Got {row.score} — if this is 35, "
+            "the dead-band mean was weighted into the keeper average (defect 2)"
+        )
         assert row.dismissed_reason is None
 
     def test_every_match_row_is_stamped_with_the_prompt_version(self, db, monkeypatch):

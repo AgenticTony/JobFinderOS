@@ -211,13 +211,30 @@ def _run_matching_inner(
 
             elapsed_ms = int((time.time() - started) * 1000)
 
-            # DEAD-BAND: scores carry about +/-7 of run-to-run noise even at
-            # temperature 0 (measured: spread 6-10 over 5 runs on glm-5.1),
-            # and dismissal is permanent. A job whose true score is just over
-            # the keep line would be dropped forever on one unlucky sample.
-            # Re-score once inside the band and average the two — halving the
-            # noise exactly where it changes the outcome. Confidently-bad
-            # scores below the band never pay for the second call.
+            # SCORING PROTOCOL: collect raw samples, average ONCE, then check
+            # keep-min on the final value. This fixes two defects:
+            #
+            # Defect 2 (weighted average): the old path seeded the keeper
+            # average with the dead-band's mean(s1,s2), then appended s3,s4 —
+            # producing mean(mean(s1,s2), s3, s4) where s1,s2 carried 1/6
+            # weight each and s3,s4 carried 1/3. Four calls producing something
+            # that wasn't a clean mean of anything.
+            #
+            # Defect 3 (sub-threshold inclusion): the keep check ran before the
+            # 3-sample average, so samples [26,20,18] averaged to 21 and was
+            # stored as a live queue row with tier=poor_match — violating
+            # "below MATCH_KEEP_MIN_SCORE a match never enters the queue."
+            # Now the check runs on the final averaged value.
+            #
+            # Cost note: 41% of real backlog rows clear the keep line, making
+            # this ~2.06x the single-sample cost (not ~1.2x as previously
+            # claimed). The embeddings prefilter (ROADMAP) is the lever that
+            # brings this back down.
+            raw_scores = [result["score"]]
+
+            # Dead-band: one extra sample when the triage score is in
+            # [DEADBAND, KEEP_MIN) — the outcome is uncertain and dismissal
+            # is permanent. Confidently-bad (below the band) never pays.
             if (
                 settings.MATCH_DEADBAND_MIN_SCORE
                 <= result["score"]
@@ -229,26 +246,43 @@ def _run_matching_inner(
                         cv_text=profile.cv_text,
                         job_description=_job_text(job),
                     )
-                    averaged = round((result["score"] + second["score"]) / 2)
-                    logger.info(
-                        "Dead-band re-score job %s: %d + %d -> %d",
-                        job.id, result["score"], second["score"], averaged,
-                    )
-                    result = second if second["score"] > result["score"] else result
-                    result["score"] = averaged
-                    result["tier"] = AIService._tier_for_score(averaged)
-                except Exception as e:  # noqa: BLE001 — fall back to the first sample
+                    raw_scores.append(second["score"])
+                except Exception as e:  # noqa: BLE001
                     logger.warning("Dead-band re-score failed for job %s: %s", job.id, e)
 
-            if result["score"] < settings.MATCH_KEEP_MIN_SCORE:
-                # Too weak for the queue: record an AUTO-PASSED match for THIS
-                # user (decision='rejected') so it's never re-evaluated, never
-                # clutters the pending queue, and stays per-user.
+            # Keeper path: if the samples so far suggest this clears the keep
+            # line, collect enough for a 3-sample mean (±6 instead of ±11)
+            preliminary = statistics.mean(raw_scores)
+            if preliminary >= settings.MATCH_KEEP_MIN_SCORE and len(raw_scores) < 3:
+                needed = 3 - len(raw_scores)
+                for _ in range(needed):
+                    try:
+                        extra = service.match_job(
+                            profile_context=profile_context,
+                            cv_text=profile.cv_text,
+                            job_description=_job_text(job),
+                        )
+                        raw_scores.append(extra["score"])
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("Keeper re-sample failed for job %s: %s", job.id, e)
+                        break
+
+            # Average once, from the flat sample list
+            final_score = round(statistics.mean(raw_scores))
+            final_tier = AIService._tier_for_score(final_score)
+            if len(raw_scores) > 1:
+                logger.info(
+                    "Scored job %s: samples=%s -> %d (%s)",
+                    job.id, sorted(raw_scores), final_score, final_tier,
+                )
+
+            # Keep-min check on the FINAL averaged value (defect 3 fix)
+            if final_score < settings.MATCH_KEEP_MIN_SCORE:
                 auto_pass = MatchResult(
                     user_id=user_id,
                     job_id=job.id,
-                    score=result["score"],
-                    tier=result["tier"],
+                    score=final_score,
+                    tier=final_tier,
                     reasoning="Auto-passed: below the score threshold for your CV.",
                     matched_skills=dump_json_list(result.get("matched_skills", [])),
                     missing_skills=dump_json_list(result.get("missing_skills", [])),
@@ -268,39 +302,11 @@ def _run_matching_inner(
                     db.rollback()
                 continue
 
-            # KEEPER: re-sample to 3 and store the MEAN. One value stored —
-            # badge, sort, filter and display all read it. At single-sample
-            # noise of ±11, a stored 78 and 82 are the same job; the mean
-            # of 3 tightens to ±6. Cost: 2 extra calls per keeper, and most
-            # jobs never clear the keep line (single-sample triage as before).
-            # The dead-band re-score above is now redundant for keepers —
-            # the 3-sample mean subsumes it — but stays for the sub-25 band.
-            keeper_scores = [result["score"]]
-            for _ in range(2):
-                try:
-                    extra = service.match_job(
-                        profile_context=profile_context,
-                        cv_text=profile.cv_text,
-                        job_description=_job_text(job),
-                    )
-                    keeper_scores.append(extra["score"])
-                except Exception as e:  # noqa: BLE001 — use what we have
-                    logger.warning("Keeper re-sample failed for job %s: %s", job.id, e)
-                    break
-            if len(keeper_scores) > 1:
-                averaged = round(statistics.mean(keeper_scores))
-                logger.info(
-                    "Keeper 3-sample job %s: %s -> %d",
-                    job.id, sorted(keeper_scores), averaged,
-                )
-                result["score"] = averaged
-                result["tier"] = AIService._tier_for_score(averaged)
-
             match = MatchResult(
                 user_id=user_id,
                 job_id=job.id,
-                score=result["score"],
-                tier=result["tier"],
+                score=final_score,
+                tier=final_tier,
                 reasoning=result.get("reasoning"),
                 matched_skills=dump_json_list(result.get("matched_skills", [])),
                 missing_skills=dump_json_list(result.get("missing_skills", [])),

@@ -21,15 +21,20 @@ else
 fi
 
 # --- CV uploads (personal data — not in the DB) ---
-if [ -d "$PROJECT/backend/uploads/cvs" ] && [ -n "$(ls -A "$PROJECT/backend/uploads/cvs" 2>/dev/null)" ]; then
-    rsync -a --delete "$PROJECT/backend/uploads/cvs/" "$BACKUP_DIR/cvs/"
-    echo "$(date -Iseconds) CVs synced: $(ls "$BACKUP_DIR/cvs/" | wc -l | tr -d ' ') files"
+# APPEND-ONLY: no --delete. Original CVs are non-regenerable (invariant #1),
+# so partial loss must NEVER propagate to the mirror. The mirror grows
+# additively; a periodic manual review can clean orphans if needed.
+# (macOS openrsync's --backup-dir is unreliable; append-only is simpler
+# and strictly safer than any --delete variant.)
+if [ -d "$PROJECT/backend/uploads/cvs" ]; then
+    rsync -a "$PROJECT/backend/uploads/cvs/" "$BACKUP_DIR/cvs/"
+    echo "$(date -Iseconds) CVs mirrored: $(ls "$BACKUP_DIR/cvs/" | wc -l | tr -d ' ') files (append-only)"
 fi
 
-# --- Draft PDFs (tailored CVs + cover letters) ---
+# --- Draft PDFs (tailored CVs + cover letters) — same append-only policy
 if [ -d "$PROJECT/backend/uploads/drafts" ]; then
     mkdir -p "$BACKUP_DIR/drafts"
-    rsync -a --delete "$PROJECT/backend/uploads/drafts/" "$BACKUP_DIR/drafts/"
+    rsync -a "$PROJECT/backend/uploads/drafts/" "$BACKUP_DIR/drafts/"
 fi
 
 # --- Rotation: remove backups older than KEEP_DAYS ---
