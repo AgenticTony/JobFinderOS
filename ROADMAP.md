@@ -72,6 +72,46 @@ Pipeline: harvest → gate → store → match/score → decide → tailor → s
   credits); JobRight $39.99; flat pricing at £12 is bottom-of-market with
   best-in-class margin because scraping/OpenAI-retail costs aren't in our stack.
 
+## Public site & account journey (spec; build as Phase 1a)
+
+Route restructure (Next.js App Router groups):
+- `/`            landing (public) — marketing, how-it-works, pricing, FAQ
+- `/signup` `/login`  auth pages — hit the LIVE Phase-0 endpoints
+                 (POST /api/v1/auth/register, /api/v1/auth/jwt/login)
+- `/console`     the existing app (moved; client-side guard: no token ->
+                 redirect /login; 401 responses -> clear token + redirect)
+
+Landing page sections (content grounded in the competitive research):
+1. Hero: "Your job hunt on autopilot — nothing sent without your approval."
+   Sub: hunts twice daily, scores every job honestly (show the real
+   0-100 + reasoning card), tailors CV + letter per job, YOU press send.
+2. How it works: Hunt -> Match (transparent score) -> Tailor -> You send
+   (four steps, real UI screenshots of Hunt Pulse / match card / draft)
+3. Why different (attacks the documented complaints): flat £12 — no credits,
+   no application limits; every document kept forever (paper trail); area +
+   language gates (jobs actually in your region, in your language — SE/UK
+   launch); original CV never modified; cancel anytime.
+4. Comparison table vs $24-40/mo credit-based tools.
+5. Pricing: £12/mo flat, £99/yr (2 months free), incl. VAT, refund-friendly
+   policy line. (Outcome stats section: placeholder until beta data.)
+6. FAQ built from the Reddit complaints: "does it apply without me?" (no),
+   "which boards?" (official sources: Platsbanken/JobTech, Reed, Adzuna,
+   Careerjet + employer-direct ATS), "what does the score mean?",
+   "can I edit the letter?" (yes, always).
+7. CTA: Create account -> upload CV -> onboarding wizard -> first hunt.
+
+Account journey: signup (email+password; Google OAuth later via Supabase
+auth if adopted) -> CV upload -> existing 5-step wizard (country, area,
+languages, remote switches, titles) -> first hunt runs immediately ->
+landed in the console with the live Hunt Pulse. Logged-out users hitting
+/console are redirected to /login with return-to.
+
+Build order: 1) route split + guard (console untouched, just moved),
+2) signup/login pages on the existing endpoints, 3) landing page +
+pricing (static content, no backend deps), 4) wizard entry from signup.
+Marketing page is deployable to Cloudflare Pages independently of the
+SaaS backend.
+
 ## Phases
 
 **Phase 0 — Foundations (DONE Aug 2026, CI green):** Postgres-capable
@@ -84,7 +124,10 @@ flow test, tsc, build). Remaining for Phase 0 completion at deploy time:
 create the Neon project (paste pooled URL into DATABASE_URL) and the
 Supabase project (URL + service key) — config-ready, no code changes.
 
-**Phase 1 — Multi-user core:** user_id on profiles/matches/drafts/applications;
+**Phase 1a — Public site & auth UI:** route split (/ vs /console),
+signup/login on Phase-0 endpoints, landing + pricing, wizard entry.
+
+**Phase 1b — Multi-user core:** user_id on profiles/matches/drafts/applications;
 shared pool + match-time gates + watermarks; embeddings layer; match queue
 with reserved slots + login ordering; per-country cron scheduler; frontend
 account flows.
@@ -94,8 +137,9 @@ CORS lockdown; Composio MailSender (send from user's Gmail); Stripe
 (closed beta behind invite codes first, payments on public launch).
 
 **Phase 3 — Launch:** GDPR pack (full-delete cascade incl. Composio teardown,
-data export, retention; review Z.ai as CV-data processor), landing + pricing
-page, Sentry + scheduler dead-man alert, beta cohort.
+data export, retention; review Z.ai as CV-data processor), outcome-stats
+section on the landing page (real beta numbers), Sentry + scheduler
+dead-man alert, beta cohort ramp. (Landing itself built in 1a.)
 
 ## Competitive landscape (researched Aug 2026)
 
