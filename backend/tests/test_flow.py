@@ -66,6 +66,8 @@ def main():
     Base.metadata.create_all(bind=engine)
     AIService._complete = fake_complete  # monkeypatch the GLM call
     matcher_service.ai_service_available = lambda: True
+    from app.services import draft_service
+    draft_service.ai_service_available = lambda: True
     fake_service = AIService.__new__(AIService)
     fake_service.model = "glm-test"
     matcher_service.get_ai_service = lambda: fake_service
