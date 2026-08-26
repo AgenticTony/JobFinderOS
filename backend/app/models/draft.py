@@ -6,7 +6,7 @@ and cover letter to the approved job, the user reviews and edits both, and
 only then is the application submitted.
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -19,6 +19,7 @@ class ApplicationDraft(Base):
     __tablename__ = "application_drafts"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Uuid, ForeignKey("users.id"), nullable=True, index=True)
     job_id = Column(Integer, ForeignKey("job_postings.id"), nullable=False, index=True)
     match_id = Column(Integer, ForeignKey("match_results.id"), nullable=True)
 

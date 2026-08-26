@@ -26,13 +26,32 @@ def start_scheduler() -> None:
     _scheduler = BackgroundScheduler(daemon=True)
 
     def _run_pipeline():
+        from app.core.database import SessionLocal
+        from app.models import Profile
         from app.services.pipeline import run_pipeline
 
+        # One hunt per onboarded user (staggered by the job interval);
+        # each user's context drives their own pack/gates/matching.
+        db = SessionLocal()
         try:
-            summary = run_pipeline()
-            logger.info("Scheduled pipeline: %s", summary)
-        except Exception as e:
-            logger.error("Scheduled pipeline failed: %s", e)
+            user_ids = [
+                row[0]
+                for row in db.query(Profile.user_id)
+                .filter(Profile.country.isnot(None), Profile.user_id.isnot(None))
+                .distinct()
+                .all()
+            ]
+        finally:
+            db.close()
+        if not user_ids:
+            logger.info("Scheduled pipeline: no onboarded users — nothing to do")
+            return
+        for uid in user_ids:
+            try:
+                summary = run_pipeline(user_id=uid)
+                logger.info("Scheduled pipeline (user %s): %s", uid, summary)
+            except Exception as e:
+                logger.error("Scheduled pipeline failed for user %s: %s", uid, e)
 
     _scheduler.add_job(
         _run_pipeline,

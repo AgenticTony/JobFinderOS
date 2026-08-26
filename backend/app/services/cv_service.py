@@ -87,10 +87,12 @@ def create_or_replace_profile_from_pdf(
     db: Session,
     file_content: bytes,
     filename: str,
+    user_id=None,
 ) -> Profile:
     """
     Upload flow: validate + extract PDF text, store the file,
-    run AI profile extraction, and save as the single active profile.
+    run AI profile extraction, and save as THE USER'S profile (one each —
+    re-upload replaces that user's own profile, never anyone else's).
     """
     FileService.validate_pdf(file_content)
     cv_text = FileService.extract_text_from_pdf(file_content)
@@ -105,37 +107,50 @@ def create_or_replace_profile_from_pdf(
     else:
         logger.warning("GLM_API_KEY not set — profile stored with CV text only; AI matching disabled")
 
-    # Deactivate previous profiles (single active profile model)
-    db.query(Profile).filter(Profile.is_active == 1).update({"is_active": 0})
-
-    profile = Profile(
-        is_active=1,
-        cv_text=cv_text,
-        cv_file_path=path,
-        cv_file_name=filename.rsplit("/", 1)[-1],
-        cv_file_size=len(file_content),
-        full_name=extracted.get("full_name") or None,
-        email=extracted.get("email") or None,
-        phone=extracted.get("phone") or None,
-        location=extracted.get("location") or None,
-        professional_title=extracted.get("professional_title") or None,
-        experience_years=_safe_int(extracted.get("experience_years")),
-        skills=dump_json_list(extracted.get("skills") or []),
-        recent_roles=dump_json_list(extracted.get("recent_roles") or []),
-        education=dump_json_list(extracted.get("education") or []),
-        certifications=dump_json_list(extracted.get("certifications") or []),
-        keywords=dump_json_list(extracted.get("keywords") or []),
-        ai_summary=extracted.get("summary") or None,
+    # Per-user: replace THIS user's profile if it exists (the singleton
+    # takeover — second upload stealing the whole app — died with this)
+    profile = (
+        db.query(Profile).filter(Profile.user_id == user_id).first()
+        if user_id is not None
+        else None
     )
+    if profile is None:
+        profile = Profile(user_id=user_id, is_active=1)
+    profile.cv_text = cv_text
+    profile.cv_file_path = path
+    profile.cv_file_name = filename.rsplit("/", 1)[-1]
+    profile.cv_file_size = len(file_content)
+    _apply_extraction(profile, extracted)
     db.add(profile)
     db.commit()
     db.refresh(profile)
-    logger.info("Created active profile id=%s from %s", profile.id, safe_name)
+    logger.info("Saved profile id=%s (user=%s) from %s", profile.id, user_id, safe_name)
     return profile
 
 
-def get_active_profile(db: Session) -> Optional[Profile]:
-    return db.query(Profile).filter(Profile.is_active == 1).first()
+def _apply_extraction(profile: Profile, extracted: dict) -> None:
+    """Write AI-extracted fields onto the profile."""
+    profile.full_name = extracted.get("full_name") or None
+    profile.email = extracted.get("email") or None
+    profile.phone = extracted.get("phone") or None
+    profile.location = extracted.get("location") or None
+    profile.professional_title = extracted.get("professional_title") or None
+    profile.experience_years = _safe_int(extracted.get("experience_years"))
+    profile.skills = dump_json_list(extracted.get("skills") or [])
+    profile.recent_roles = dump_json_list(extracted.get("recent_roles") or [])
+    profile.education = dump_json_list(extracted.get("education") or [])
+    profile.certifications = dump_json_list(extracted.get("certifications") or [])
+    profile.keywords = dump_json_list(extracted.get("keywords") or [])
+    profile.ai_summary = extracted.get("summary") or None
+
+
+def get_active_profile(db: Session, user_id=None) -> Optional[Profile]:
+    """The caller's profile. user_id is the scoping key; legacy callers
+    without a user fall back to the single stored profile (migration period
+    only — every route passes the authenticated user's id)."""
+    if user_id is not None:
+        return db.query(Profile).filter(Profile.user_id == user_id).first()
+    return db.query(Profile).order_by(Profile.id.desc()).first()
 
 
 def _safe_int(value) -> Optional[int]:

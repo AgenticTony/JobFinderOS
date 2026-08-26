@@ -35,6 +35,7 @@ def run_matching(
     limit: int = None,
     profile: Profile = None,
     max_seconds: int = 300,
+    user_id=None,
 ) -> Dict:
     """
     Match all unmatched jobs against the active profile.
@@ -58,7 +59,9 @@ def run_matching(
             "error": "A matching run is already in progress",
         }
     try:
-        return _run_matching_inner(db, limit=limit, profile=profile, max_seconds=max_seconds)
+        return _run_matching_inner(
+            db, limit=limit, profile=profile, max_seconds=max_seconds, user_id=user_id
+        )
     finally:
         _matching_lock.release()
 
@@ -68,6 +71,7 @@ def _run_matching_inner(
     limit: int = None,
     profile: Profile = None,
     max_seconds: int = 300,
+    user_id=None,
 ) -> Dict:
     if not ai_service_available():
         return {
@@ -78,7 +82,7 @@ def _run_matching_inner(
         }
 
     if profile is None:
-        profile = get_active_profile(db)
+        profile = get_active_profile(db, user_id=user_id)
     if profile is None or not profile.cv_text:
         return {
             "status": "skipped",
@@ -90,11 +94,22 @@ def _run_matching_inner(
 
     limit = limit or settings.MAX_JOBS_PER_MATCH_RUN
 
-    # Jobs that are new (never matched) — MatchResult.job_id is unique,
-    # so a left-join filter gives us exactly the unmatched ones.
+    # Per-user: jobs THIS user has never evaluated (no match row for
+    # (user, job)), freshest first. Postings globally dismissed as junk
+    # (stale sweep) stay excluded. job.status 'matched' is bookkeeping for
+    # "someone evaluated this" — every user still gets their own evaluation.
+    from sqlalchemy import and_
+
     unmatched = (
         db.query(JobPosting)
-        .filter(JobPosting.status == "new")
+        .outerjoin(
+            MatchResult,
+            and_(MatchResult.job_id == JobPosting.id, MatchResult.user_id == user_id),
+        )
+        .filter(
+            MatchResult.id.is_(None),
+            JobPosting.status != "dismissed",
+        )
         .order_by(JobPosting.scraped_at.desc())
         .limit(limit)
         .all()
@@ -126,7 +141,7 @@ def _run_matching_inner(
         row[0]
         for row in db.query(JobPosting.dedupe_key)
         .join(MatchResult, MatchResult.job_id == JobPosting.id)
-        .filter(JobPosting.dedupe_key.isnot(None))
+        .filter(JobPosting.dedupe_key.isnot(None), MatchResult.user_id == user_id)
         .all()
     }
     deduped = []
@@ -181,13 +196,32 @@ def _run_matching_inner(
 
             elapsed_ms = int((time.time() - started) * 1000)
             if result["score"] < settings.MATCH_KEEP_MIN_SCORE:
-                # Too weak for the queue — count it as seen and move on;
-                # no MatchResult row, so it never clutters decisions
-                job.status = "dismissed"
-                db.add(job)
-                db.commit()
+                # Too weak for the queue: record an AUTO-PASSED match for THIS
+                # user (decision='rejected') so it's never re-evaluated, never
+                # clutters the pending queue, and stays per-user.
+                auto_pass = MatchResult(
+                    user_id=user_id,
+                    job_id=job.id,
+                    score=result["score"],
+                    tier=result["tier"],
+                    reasoning="Auto-passed: below the score threshold for your CV.",
+                    matched_skills=dump_json_list(result.get("matched_skills", [])),
+                    missing_skills=dump_json_list(result.get("missing_skills", [])),
+                    transferable_skills=dump_json_list(result.get("transferable_skills", [])),
+                    recommendation="skip",
+                    confidence=result.get("confidence"),
+                    model_used=service.model,
+                    processing_time_ms=elapsed_ms,
+                    decision="rejected",
+                )
+                db.add(auto_pass)
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
                 continue
             match = MatchResult(
+                user_id=user_id,
                 job_id=job.id,
                 score=result["score"],
                 tier=result["tier"],

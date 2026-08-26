@@ -38,8 +38,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt ruff pytest
+      - name: Install dependencies (locked)
+        run: pip install -r requirements.lock ruff pytest
 
       - name: Lint (imports + errors)
         run: ruff check --select I,F app/
@@ -86,8 +86,21 @@ jobs:
       - name: Unit tests (gates, dedupe, language, state machines)
         run: PYTHONPATH=. python -m pytest tests/test_units.py -q
 
+      - name: Multi-user tests (isolation, IDOR, rate limits, GDPR)
+        run: PYTHONPATH=. python -m pytest tests/test_multiuser.py -q
+
       - name: Flow test (mocked AI, SQLite)
         run: PYTHONPATH=. python tests/test_flow.py
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t jobfinderos-backend:ci backend/
+      - name: Image smoke (imports, boots schema)
+        run: docker run --rm --entrypoint python -e DEBUG=true jobfinderos-backend:ci -c "import app.main; print('container OK')"
 
   frontend:
     name: Frontend (type-check + build)

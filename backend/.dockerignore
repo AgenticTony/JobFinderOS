@@ -1,0 +1,11 @@
+# Never ship secrets, databases, CVs, or venvs in the image
+.env
+*.db
+*.db-wal
+*.db-shm
+uploads/
+.venv/
+__pycache__/
+*.pyc
+tests/
+.git/

@@ -28,11 +28,14 @@ from app.services.scrapers import SCRAPER_REGISTRY, NormalizedJob
 logger = logging.getLogger(__name__)
 
 
-def build_scrape_context(db: Session) -> Optional[Dict]:
-    """Per-user scrape settings from the active profile's onboarding."""
-    profile = (
-        db.query(Profile).filter(Profile.is_active == 1, Profile.country.isnot(None)).first()
-    )
+def build_scrape_context(db: Session, user_id=None) -> Optional[Dict]:
+    """Per-user scrape settings from the caller's onboarded profile."""
+    q = db.query(Profile).filter(Profile.country.isnot(None))
+    if user_id is not None:
+        q = q.filter(Profile.user_id == user_id)
+    else:
+        q = q.order_by(Profile.id.desc())
+    profile = q.first()
     if not profile:
         return None
     return {
@@ -194,6 +197,7 @@ def run_pipeline(
     sources: Optional[List[str]] = None,
     match: bool = True,
     max_matches: Optional[int] = None,
+    user_id=None,
 ) -> Dict:
     """
     Run the full pipeline (used by the API and the scheduler).
@@ -202,7 +206,7 @@ def run_pipeline(
     """
     db = SessionLocal()
     try:
-        ctx = build_scrape_context(db)
+        ctx = build_scrape_context(db, user_id=user_id)
         # Per-user pack when onboarded; explicit request or global allow-list otherwise
         if sources:
             requested = sources
@@ -235,7 +239,10 @@ def run_pipeline(
         if match:
             try:
                 match_summary = matcher_service.run_matching(
-                    db, limit=max_matches, max_seconds=settings.MATCH_TIME_BUDGET_SECONDS
+                    db,
+                    limit=max_matches,
+                    max_seconds=settings.MATCH_TIME_BUDGET_SECONDS,
+                    user_id=user_id,
                 )
             except Exception as e:  # noqa: BLE001 — report in summary, never 500 the endpoint
                 db.rollback()

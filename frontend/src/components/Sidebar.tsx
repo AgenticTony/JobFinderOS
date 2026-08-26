@@ -13,6 +13,7 @@ import {
   ChevronDown,
   Crosshair,
   LayoutDashboard,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Radar,
@@ -23,6 +24,7 @@ import {
 import type { Profile } from '@/types';
 import { cn } from '@/lib/utils';
 import NextHunt, { useNextRunLabel } from './NextHunt';
+import { logout } from '@/lib/api';
 
 export type View =
   | 'dashboard'
@@ -274,6 +276,20 @@ export default function Sidebar({
                     .join(' · ') || 'Set your area'
                 : 'Not set up'}
             </span>
+          </span>
+        </button>
+
+        <button
+          onClick={() => logout()}
+          className={cn(
+            'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2',
+            collapsed && 'justify-center px-0'
+          )}
+          title='Sign out'
+        >
+          <LogOut className='h-4 w-4 shrink-0 text-low' aria-hidden />
+          <span className={cn('text-xs text-low', showLabels ? 'hidden lg:block' : 'hidden')}>
+            Sign out
           </span>
         </button>
       </div>

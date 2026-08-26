@@ -7,8 +7,11 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_authenticated_user, owns_or_404
 from app.core.database import get_db
+from app.core.ratelimit import enforce
 from app.crud import get_application, get_job, list_applications
+from app.models import User
 from app.schemas.application import (
     ApplicationResponse,
     DraftResponse,
@@ -37,7 +40,12 @@ VALID_METHODS = {"email", "browser", "manual"}
 
 
 @router.post("/draft/{job_id}", response_model=DraftResponse, status_code=201)
-async def prepare_draft(job_id: int, force: bool = False, db: Session = Depends(get_db)):
+async def prepare_draft(
+    job_id: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
     """
     Tailor the CV + cover letter for an approved job (AI, ~5-20s).
     Returns the draft for user review and editing.
@@ -45,11 +53,25 @@ async def prepare_draft(job_id: int, force: bool = False, db: Session = Depends(
     job = get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.status not in ("approved", "matched"):
-        raise HTTPException(status_code=400, detail="Approve the match before preparing an application")
+    from app.models import MatchResult
+
+    approved = (
+        db.query(MatchResult.id)
+        .filter(
+            MatchResult.job_id == job.id,
+            MatchResult.user_id == user.id,
+            MatchResult.decision == "approved",
+        )
+        .first()
+    )
+    if not approved:
+        raise HTTPException(
+            status_code=400, detail="Approve the match before preparing an application"
+        )
 
     try:
-        draft = await run_in_threadpool(create_draft_for_job, db, job, force)
+        enforce(user.id, 'draft_prepare')
+        draft = await run_in_threadpool(create_draft_for_job, db, job, force, user.id)
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -60,15 +82,20 @@ async def prepare_draft(job_id: int, force: bool = False, db: Session = Depends(
 
 
 @router.get("/drafts", response_model=list[DraftResponse])
-async def get_drafts(limit: int = 100, db: Session = Depends(get_db)):
-    return [DraftResponse.from_orm_draft(d) for d in list_drafts(db, limit)]
+async def get_drafts(
+    limit: int = 100, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
+    return [DraftResponse.from_orm_draft(d) for d in list_drafts(db, limit, user_id=user.id)]
 
 
 @router.get("/draft/{draft_id}", response_model=DraftResponse)
-async def get_draft_detail(draft_id: int, db: Session = Depends(get_db)):
+async def get_draft_detail(
+    draft_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     draft = get_draft(db, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
+    owns_or_404(draft.user_id, user, "Draft")
     return DraftResponse.from_orm_draft(draft)
 
 
@@ -83,23 +110,26 @@ def _pdf_response(blob: bytes, filename: str) -> Response:
     )
 
 
-def _draft_applicant_name(db: Session) -> str:
+def _draft_applicant_name(db: Session, user: User) -> str:
     from app.services.cv_service import get_active_profile
 
-    profile = get_active_profile(db)
+    profile = get_active_profile(db, user_id=user.id)
     return profile.full_name if profile and profile.full_name else "Applicant"
 
 
 @router.get("/draft/{draft_id}/download/cover-letter")
-async def download_cover_letter(draft_id: int, db: Session = Depends(get_db)):
+async def download_cover_letter(
+    draft_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     """Download the (possibly user-edited) cover letter as a PDF — for manual
     upload to portals like LinkedIn that don't allow automated applies."""
     draft = get_draft(db, draft_id)
     if not draft or not draft.cover_letter:
         raise HTTPException(status_code=404, detail="Cover letter not available")
+    owns_or_404(draft.user_id, user, "Draft")
     from app.services import pdf_service
 
-    applicant = _draft_applicant_name(db)
+    applicant = _draft_applicant_name(db, user)
     company = draft.job.company if draft.job else None
     name = f"Cover Letter - {applicant}" + (f" - {company}.pdf" if company else ".pdf")
     blob = await run_in_threadpool(
@@ -109,15 +139,18 @@ async def download_cover_letter(draft_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/draft/{draft_id}/download/cv")
-async def download_tailored_cv(draft_id: int, db: Session = Depends(get_db)):
+async def download_tailored_cv(
+    draft_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     """Download the (possibly user-edited) tailored CV as a PDF — for manual
     upload to portals. The ORIGINAL CV is never modified by tailoring."""
     draft = get_draft(db, draft_id)
     if not draft or not draft.tailored_cv:
         raise HTTPException(status_code=404, detail="Tailored CV not available")
+    owns_or_404(draft.user_id, user, "Draft")
     from app.services import pdf_service
 
-    applicant = _draft_applicant_name(db)
+    applicant = _draft_applicant_name(db, user)
     company = draft.job.company if draft.job else None
     name = f"CV - {applicant} (tailored)" + (f" - {company}.pdf" if company else ".pdf")
     blob = await run_in_threadpool(pdf_service.tailored_cv_pdf, draft.tailored_cv, applicant)
@@ -125,11 +158,17 @@ async def download_tailored_cv(draft_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/draft/{draft_id}", response_model=DraftResponse)
-async def update_draft(draft_id: int, payload: DraftUpdateRequest, db: Session = Depends(get_db)):
+async def update_draft(
+    draft_id: int,
+    payload: DraftUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
     """Save the user's edits to the cover letter / tailored CV."""
     draft = get_draft(db, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
+    owns_or_404(draft.user_id, user, "Draft")
     try:
         draft = await run_in_threadpool(
             save_draft_edits, db, draft, payload.cover_letter, payload.tailored_cv
@@ -140,7 +179,12 @@ async def update_draft(draft_id: int, payload: DraftUpdateRequest, db: Session =
 
 
 @router.post("/draft/{draft_id}/submit", response_model=ApplicationResponse, status_code=201)
-async def submit(draft_id: int, payload: DraftSubmitRequest, db: Session = Depends(get_db)):
+async def submit(
+    draft_id: int,
+    payload: DraftSubmitRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
     """
     Submit the reviewed package.
 
@@ -154,9 +198,12 @@ async def submit(draft_id: int, payload: DraftSubmitRequest, db: Session = Depen
     draft = get_draft(db, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
+    owns_or_404(draft.user_id, user, "Draft")
 
     try:
-        application = await run_in_threadpool(submit_draft, db, draft, payload.method)
+        application = await run_in_threadpool(
+            submit_draft, db, draft, payload.method, None, user.id
+        )
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -172,25 +219,34 @@ async def submit(draft_id: int, payload: DraftSubmitRequest, db: Session = Depen
 
 @router.get("/", response_model=list[ApplicationResponse])
 async def get_applications(
-    limit: int = 100, offset: int = 0, db: Session = Depends(get_db)
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
 ):
-    return list_applications(db, limit, offset)
+    return list_applications(db, limit, offset, user_id=user.id)
 
 
 @router.get("/{application_id}", response_model=ApplicationResponse)
-async def get_application_detail(application_id: int, db: Session = Depends(get_db)):
+async def get_application_detail(
+    application_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     application = get_application(db, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
+    owns_or_404(application.user_id, user, "Application")
     return application
 
 
 @router.post("/{application_id}/retry", response_model=ApplicationResponse)
-async def retry(application_id: int, db: Session = Depends(get_db)):
+async def retry(
+    application_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     """Retry a failed email application."""
     application = get_application(db, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
+    owns_or_404(application.user_id, user, "Application")
     if application.status != "failed":
         raise HTTPException(status_code=400, detail="Only failed applications can be retried")
     try:

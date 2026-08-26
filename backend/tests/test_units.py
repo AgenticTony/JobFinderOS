@@ -149,12 +149,16 @@ class TestSubmitStateMachine:
         db.add(draft)
         db.commit()
 
-        app_row = draft_service.submit_draft(db, draft, "browser", profile=profile)
+        from app.services.draft_service import submit_draft
+
+        app_row = submit_draft(db, draft, "browser", profile=profile)
         assert app_row.status == "manual_pending"
         db.refresh(draft)
-        db.refresh(job)
         assert draft.status == "submitted"
-        assert job.status == "applied"
+        # job.status is NEVER user-mutated now — applied-ness derives from
+        # the applications table per user
+        db.refresh(job)
+        assert job.status == "approved"
 
 
 class TestParseFailureRetry:

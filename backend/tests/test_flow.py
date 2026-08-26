@@ -106,7 +106,7 @@ def main():
 
         # 2. decision
         match = set_match_decision(db, match, "approved")
-        assert match.decision == "approved" and job.status == "approved"
+        assert match.decision == "approved"  # job.status is user-scoped state now — lives in match_results
         print("PASS decision: approved")
 
         # 3. draft tailoring (mocked AI)
@@ -119,8 +119,8 @@ def main():
         # 4. submit (browser method — no email config needed)
         application = submit_draft(db, draft, "browser")
         assert application.status == "manual_pending"
-        assert job.status == "applied"
         assert draft.status == "submitted"
+        # applied-ness derives from the applications row per user
         print("PASS submit:", application.status, "| job:", job.status)
 
         print("\nALL FLOW TESTS PASSED")

@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text as sa_text
 
 from app import users
-from app.api.v1 import applications, jobs, matches, pipeline, profiles
+from app.api.v1 import account, applications, jobs, matches, pipeline, profiles
 from app.api.v1 import settings as settings_api
 from app.core.config import settings
 from app.core.database import init_db
@@ -71,6 +71,7 @@ app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])
 app.include_router(matches.router, prefix="/api/v1/matches", tags=["Matches"])
 app.include_router(applications.router, prefix="/api/v1/applications", tags=["Applications"])
 app.include_router(settings_api.router, prefix="/api/v1/settings", tags=["Settings"])
+app.include_router(account.router, prefix="/api/v1", tags=["Account"])
 
 # Auth (fastapi-users v15 — see app/users.py). Register + JWT login + /users/me.
 app.include_router(

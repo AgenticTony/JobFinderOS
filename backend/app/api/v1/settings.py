@@ -2,9 +2,11 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.api.deps import get_authenticated_user
+from app.models import User
 from app.services import composio_service
 from app.services.cv_service import get_active_profile
 
@@ -33,9 +35,9 @@ def _entity_id() -> str:
 
 
 @router.get("/integrations")
-async def integrations():
+async def integrations(user: User = Depends(get_authenticated_user)):
     """Integration statuses for the Settings page (scoped to this user)."""
-    accounts = await composio_service.list_connections(_entity_id())
+    accounts = await composio_service.list_connections(str(user.id))
     return {
         "composio": {
             "configured": composio_service.is_configured(),
@@ -45,7 +47,9 @@ async def integrations():
 
 
 @router.post("/integrations/composio/connect")
-async def composio_connect(payload: ComposioConnectRequest):
+async def composio_connect(
+    payload: ComposioConnectRequest, user: User = Depends(get_authenticated_user)
+):
     """Initiate the Composio OAuth flow; the frontend opens the redirect URL."""
     if not composio_service.is_configured():
         raise HTTPException(
@@ -53,7 +57,7 @@ async def composio_connect(payload: ComposioConnectRequest):
             detail="COMPOSIO_API_KEY not set — add it to backend/.env (from composio.dev)",
         )
     url = await composio_service.initiate_connection(
-        payload.app_name, payload.redirect_uri, _entity_id()
+        payload.app_name, payload.redirect_uri, str(user.id)
     )
     if not url:
         raise HTTPException(status_code=502, detail="Composio did not return a connection URL")

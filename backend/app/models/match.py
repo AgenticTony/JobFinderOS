@@ -6,7 +6,16 @@ instead of "is this candidate right for the job", it stores
 "is this job right for me" — with an apply recommendation and cover note.
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -19,7 +28,11 @@ class MatchResult(Base):
     __tablename__ = "match_results"
 
     id = Column(Integer, primary_key=True, index=True)
-    job_id = Column(Integer, ForeignKey("job_postings.id"), nullable=False, unique=True, index=True)
+    user_id = Column(Uuid, ForeignKey("users.id"), nullable=True, index=True)
+    job_id = Column(Integer, ForeignKey("job_postings.id"), nullable=False, index=True)
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="uq_match_results_user_job"),
+    )
 
     # Match results — tier system adapted from TalentHive's three tiers
     score = Column(Integer, nullable=False)  # 0-100

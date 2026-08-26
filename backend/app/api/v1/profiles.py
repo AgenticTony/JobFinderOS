@@ -6,9 +6,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_authenticated_user
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.ratelimit import enforce
 from app.crud import get_stats
+from app.models import User
 from app.schemas.profile import (
     OnboardingRequest,
     ProfilePreferencesUpdate,
@@ -26,7 +29,11 @@ router = APIRouter()
 
 
 @router.post("/upload", response_model=ProfileResponse)
-async def upload_cv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_cv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
     """
     Upload a CV PDF: extracts text, stores the file, runs AI profile
     extraction, and replaces the active profile.
@@ -34,6 +41,7 @@ async def upload_cv(file: UploadFile = File(...), db: Session = Depends(get_db))
     The heavy work (PDF parsing + GLM call, up to ~2 min when Z.ai is slow)
     runs in a threadpool so the rest of the API stays responsive.
     """
+    enforce(user.id, "cv_upload")
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Please upload a PDF file")
 
@@ -52,9 +60,11 @@ async def upload_cv(file: UploadFile = File(...), db: Session = Depends(get_db))
 
 
 @router.get("/me", response_model=ProfileResponse)
-async def get_my_profile(db: Session = Depends(get_db)):
+async def get_my_profile(
+    db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     """Get the active profile (404 until a CV is uploaded)."""
-    profile = get_active_profile(db)
+    profile = get_active_profile(db, user_id=user.id)
     if not profile:
         raise HTTPException(status_code=404, detail="No profile yet — upload a CV first")
     return ProfileResponse.from_orm_profile(profile)
@@ -62,12 +72,14 @@ async def get_my_profile(db: Session = Depends(get_db)):
 
 @router.put("/me", response_model=ProfileResponse)
 async def update_preferences(
-    prefs: ProfilePreferencesUpdate, db: Session = Depends(get_db)
+    prefs: ProfilePreferencesUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
 ):
     """Update contact info and job-search preferences."""
     from app.schemas.common import dump_json_list
 
-    profile = get_active_profile(db)
+    profile = get_active_profile(db, user_id=user.id)
     if not profile:
         raise HTTPException(status_code=404, detail="No profile yet — upload a CV first")
 
@@ -87,7 +99,11 @@ async def update_preferences(
 
 
 @router.post("/onboarding", response_model=ProfileResponse)
-async def save_onboarding(payload: OnboardingRequest, db: Session = Depends(get_db)):
+async def save_onboarding(
+    payload: OnboardingRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
     """
     Save the onboarding wizard result: country, region, municipality,
     remote-only preference, and the approved search queries. This is what
@@ -99,7 +115,7 @@ async def save_onboarding(payload: OnboardingRequest, db: Session = Depends(get_
     if country not in COUNTRIES:
         raise HTTPException(status_code=400, detail=f"Unsupported country: {payload.country}")
 
-    profile = get_active_profile(db)
+    profile = get_active_profile(db, user_id=user.id)
     if not profile:
         raise HTTPException(status_code=404, detail="No profile yet — upload a CV first")
 
@@ -120,7 +136,12 @@ async def save_onboarding(payload: OnboardingRequest, db: Session = Depends(get_
 
 
 @router.post("/suggest-queries")
-async def suggest_queries(country: str, mode: str = "field", db: Session = Depends(get_db)):
+async def suggest_queries(
+    country: str,
+    mode: str = "field",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
     """
     AI suggests job-search queries for the active profile's CV in the given
     country, shaped by the user's chosen search strategy:
@@ -135,7 +156,8 @@ async def suggest_queries(country: str, mode: str = "field", db: Session = Depen
     if mode not in ("field", "adjacent", "widen"):
         raise HTTPException(status_code=400, detail="mode must be field, adjacent or widen")
 
-    profile = get_active_profile(db)
+    enforce(user.id, "ai_suggest")
+    profile = get_active_profile(db, user_id=user.id)
     if not profile or not profile.cv_text:
         raise HTTPException(status_code=400, detail="Upload a CV first")
 
@@ -161,13 +183,15 @@ async def get_geo():
 
 
 @router.get("/status")
-async def profile_status(db: Session = Depends(get_db)):
+async def profile_status(
+    db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     """Quick readiness check used by the dashboard."""
-    profile = get_active_profile(db)
+    profile = get_active_profile(db, user_id=user.id)
     return {
         "has_profile": profile is not None,
         "has_cv_text": bool(profile and profile.cv_text),
         "ai_enabled": ai_service_available(),
         "email_apply_enabled": bool(settings.RESEND_API_KEY),
-        "stats": get_stats(db),
+        "stats": get_stats(db, user_id=user.id),
     }

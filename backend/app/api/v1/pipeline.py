@@ -6,10 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_authenticated_user
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.ratelimit import enforce
 from app.crud import get_stats, list_scrape_runs
-from app.models import MatchResult
+from app.models import MatchResult, User
 from app.schemas.match import MatchWithJobResponse
 from app.schemas.pipeline import PipelineRunRequest, PipelineRunResponse, ScrapeSummary
 from app.services.pipeline import run_pipeline
@@ -20,7 +22,11 @@ router = APIRouter()
 
 
 @router.post("/run", response_model=PipelineRunResponse)
-async def run(payload: PipelineRunRequest, db: Session = Depends(get_db)):
+async def run(
+    payload: PipelineRunRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
     """
     Run the full pipeline: scrape enabled sources, store new jobs,
     AI-match them against the active profile, return top recommendations.
@@ -35,8 +41,13 @@ async def run(payload: PipelineRunRequest, db: Session = Depends(get_db)):
             detail=f"Unknown sources {unknown}. Available: {sorted(SCRAPER_REGISTRY)}",
         )
 
+    enforce(user.id, 'hunt')
     summary = await run_in_threadpool(
-        run_pipeline, sources=sources, match=payload.match, max_matches=payload.max_matches
+        run_pipeline,
+        sources=sources,
+        match=payload.match,
+        max_matches=payload.max_matches,
+        user_id=user.id,
     )
 
     # Re-read top matches with jobs joined for the response
@@ -58,7 +69,9 @@ async def run(payload: PipelineRunRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/status")
-async def status(db: Session = Depends(get_db)):
+async def status(
+    db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     """Dashboard readiness: source list, stats, recent scrape runs, live match flag."""
     from app.services.matcher_service import is_matching_running
     from app.services.scheduler import get_next_run_time
@@ -72,7 +85,7 @@ async def status(db: Session = Depends(get_db)):
         "scrape_interval_minutes": settings.SCRAPE_INTERVAL_MINUTES,
         "next_run_at": next_run.isoformat() if next_run else None,
         "matching_running": is_matching_running(),
-        "stats": get_stats(db),
+        "stats": get_stats(db, user_id=user.id),
         "recent_runs": [
             {
                 "source": r.source,

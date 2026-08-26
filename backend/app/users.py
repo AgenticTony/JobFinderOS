@@ -50,8 +50,18 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_register(
         self, user: User, request: Optional[Request] = None
     ) -> None:
-        # Phase 1 hooks: create the user's Profile row here
-        pass
+        # Every account gets its Profile row at registration — the per-user
+        # world hangs off this link
+        from app.core.database import SessionLocal
+        from app.models import Profile as ProfileModel
+
+        db = SessionLocal()
+        try:
+            if not db.query(ProfileModel).filter(ProfileModel.user_id == user.id).first():
+                db.add(ProfileModel(user_id=user.id, is_active=1))
+                db.commit()
+        finally:
+            db.close()
 
 
 async def get_user_manager(

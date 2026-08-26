@@ -72,100 +72,53 @@ def get_db():
 
 
 def init_db():
-    """Initialize the schema.
+    """Initialize/migrate the schema — Alembic owns BOTH backends now.
 
-    Postgres environments (Neon/CI/production): Alembic owns the schema —
-    `upgrade head` runs on boot; create_all is never used there. SQLite dev
-    keeps the original create_all + light column migrations so existing
-    local databases keep working unchanged.
+    - Postgres: upgrade head directly.
+    - SQLite: fresh DB -> upgrade head from scratch; legacy create_all DB ->
+      stamp at the initial revision (its historical shape) then upgrade, so
+      local databases migrate into the per-user schema automatically.
     """
+    from alembic.config import Config
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text as sa_text
+
+    from alembic import command
+
+    ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
+    cfg = Config(str(ini))
+    cfg.set_main_option(
+        "sqlalchemy.url",
+        DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1),
+    )
+
     if DATABASE_URL.startswith("postgres"):
-        from alembic.config import Config
-
-        from alembic import command
-
-        ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
-        cfg = Config(str(ini))
-        cfg.set_main_option(
-            "sqlalchemy.url",
-            DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1),
-        )
         command.upgrade(cfg, "head")
         logger.info("Alembic migrations applied (postgres)")
         return
 
-    from app.models import (  # noqa: F401
-        application,
-        draft,
-        job,
-        match,
-        profile,
-        scrape_run,
-    )
+    insp = sa_inspect(engine)
+    has_tables = bool(insp.get_table_names())
+    has_version = "alembic_version" in insp.get_table_names()
 
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables initialized")
-
-    # Simple column migrations for pre-existing databases (TalentHive pattern)
-    from sqlalchemy import text as sa_text
-
-    new_columns = [
-        ("profiles", "onboarded", "INTEGER DEFAULT 0"),
-        ("profiles", "country", "VARCHAR(2)"),
-        ("profiles", "region", "VARCHAR(255)"),
-        ("profiles", "municipality", "VARCHAR(255)"),
-        ("profiles", "remote_only", "INTEGER DEFAULT 0"),
-        ("profiles", "search_queries", "TEXT"),
-        ("profiles", "languages", "TEXT"),
-        ("profiles", "include_remote", "INTEGER DEFAULT 0"),
-        ("job_postings", "dedupe_key", "VARCHAR(16)"),
-        ("applications", "draft_id", "INTEGER"),
-    ]
-    try:
+    if not has_tables:
+        command.upgrade(cfg, "head")
+        logger.info("Fresh SQLite database created via Alembic")
+        return
+    if not has_version:
+        # Legacy create_all database: its shape matches the initial migration
         with engine.connect() as conn:
-            for table, column, ddl in new_columns:
-                try:
-                    conn.execute(sa_text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-                    conn.commit()
-                    logger.info("Added %s.%s column", table, column)
-                except Exception:
-                    pass  # Column already exists
-    except Exception as e:
-        logger.warning("Migration check: %s", e)
-
-    # Backfill dedupe keys for pre-existing rows, and dismiss older copies
-    # of cross-board duplicates that were never matched
-    from app.core.dedupe import dedupe_key_for
-
-    try:
-        from sqlalchemy import text as t
-
-        with engine.connect() as conn:
-            rows = conn.execute(t("SELECT id, title, company, location FROM job_postings")).fetchall()
-            seen: dict[str, int] = {}
-            dismiss: list[int] = []
-            for job_id, title, company, location in rows:
-                conn.execute(
-                    t("UPDATE job_postings SET dedupe_key = :k WHERE id = :i"),
-                    {"k": dedupe_key_for(title, company, location), "i": job_id},
+            conn.execute(
+                sa_text(
+                    "CREATE TABLE IF NOT EXISTS alembic_version "
+                    "(version_num VARCHAR(32) NOT NULL)"
                 )
-            # Re-read with statuses; keep the NEWEST copy of each key
-            rows = conn.execute(
-                t("SELECT id, dedupe_key, status, scraped_at FROM job_postings ORDER BY scraped_at DESC")
-            ).fetchall()
-            for job_id, key, status, _scraped in rows:
-                if status != "new" or not key:
-                    continue
-                if key in seen:
-                    dismiss.append(job_id)
-                else:
-                    seen[key] = job_id
-            for job_id in dismiss:
-                conn.execute(
-                    t("UPDATE job_postings SET status = 'dismissed' WHERE id = :i"), {"i": job_id}
-                )
+            )
+            conn.execute(
+                sa_text("INSERT INTO alembic_version (version_num) VALUES ('ab219adaba28')")
+            )
             conn.commit()
-            if dismiss:
-                logger.info("Dedupe backfill: dismissed %d older duplicate postings", len(dismiss))
-    except Exception as e:
-        logger.warning("Dedupe backfill skipped: %s", e)
+        logger.info("Stamped legacy SQLite schema at ab219adaba28")
+    command.upgrade(cfg, "head")
+    logger.info("SQLite migrated to head via Alembic")
+

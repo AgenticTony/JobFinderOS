@@ -3,10 +3,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_authenticated_user
 from app.core.database import get_db
 from app.core.dedupe import dedupe_key_for
 from app.crud import delete_job, get_job, list_jobs
-from app.models import JobPosting, MatchResult
+from app.models import JobPosting, MatchResult, User
 from app.schemas.common import dump_json_list
 from app.schemas.job import JobCreate, JobDetailResponse, JobResponse, JobStatusUpdate
 
@@ -17,6 +18,7 @@ VALID_STATUSES = {"new", "matched", "approved", "rejected", "dismissed", "applie
 
 @router.get("/", response_model=list[JobResponse])
 async def get_jobs(
+    user: User = Depends(get_authenticated_user),
     status: str | None = None,
     source: str | None = None,
     q: str | None = None,
@@ -28,7 +30,9 @@ async def get_jobs(
 
 
 @router.get("/{job_id}", response_model=JobDetailResponse)
-async def get_job_detail(job_id: int, db: Session = Depends(get_db)):
+async def get_job_detail(
+    job_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     job = get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -36,7 +40,9 @@ async def get_job_detail(job_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=JobDetailResponse, status_code=201)
-async def create_manual_job(payload: JobCreate, db: Session = Depends(get_db)):
+async def create_manual_job(
+    payload: JobCreate, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     """Add a job manually (e.g. pasted from a site we don't scrape yet)."""
     job = JobPosting(
         source="manual",
@@ -61,7 +67,10 @@ async def create_manual_job(payload: JobCreate, db: Session = Depends(get_db)):
 
 @router.patch("/{job_id}/status", response_model=JobResponse)
 async def update_job_status(
-    job_id: int, payload: JobStatusUpdate, db: Session = Depends(get_db)
+    job_id: int,
+    payload: JobStatusUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
 ):
     if payload.status not in VALID_STATUSES:
         raise HTTPException(
@@ -85,6 +94,8 @@ async def update_job_status(
 
 
 @router.delete("/{job_id}", status_code=204)
-async def remove_job(job_id: int, db: Session = Depends(get_db)):
+async def remove_job(
+    job_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
+):
     if not delete_job(db, job_id):
         raise HTTPException(status_code=404, detail="Job not found")

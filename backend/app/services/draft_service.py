@@ -39,16 +39,16 @@ def get_draft(db: Session, draft_id: int) -> Optional[ApplicationDraft]:
     return db.query(ApplicationDraft).filter(ApplicationDraft.id == draft_id).first()
 
 
-def list_drafts(db: Session, limit: int = 100) -> List[ApplicationDraft]:
-    return (
-        db.query(ApplicationDraft)
-        .order_by(ApplicationDraft.updated_at.desc())
-        .limit(limit)
-        .all()
-    )
+def list_drafts(db: Session, limit: int = 100, user_id=None) -> List[ApplicationDraft]:
+    query = db.query(ApplicationDraft)
+    if user_id is not None:
+        query = query.filter(ApplicationDraft.user_id == user_id)
+    return query.order_by(ApplicationDraft.updated_at.desc()).limit(limit).all()
 
 
-def create_draft_for_job(db: Session, job: JobPosting, force: bool = False) -> ApplicationDraft:
+def create_draft_for_job(
+    db: Session, job: JobPosting, force: bool = False, user_id=None
+) -> ApplicationDraft:
     """
     Generate (or regenerate) the tailored application package for an approved job.
 
@@ -57,7 +57,11 @@ def create_draft_for_job(db: Session, job: JobPosting, force: bool = False) -> A
     """
     existing = (
         db.query(ApplicationDraft)
-        .filter(ApplicationDraft.job_id == job.id, ApplicationDraft.status != "submitted")
+        .filter(
+            ApplicationDraft.job_id == job.id,
+            ApplicationDraft.user_id == user_id,
+            ApplicationDraft.status != "submitted",
+        )
         .first()
     )
     if existing and existing.status == "ready" and not force:
@@ -71,11 +75,15 @@ def create_draft_for_job(db: Session, job: JobPosting, force: bool = False) -> A
         raise DraftError("GLM_API_KEY not configured — cannot tailor applications")
 
     match: Optional[MatchResult] = (
-        db.query(MatchResult).filter(MatchResult.job_id == job.id).first()
+        db.query(MatchResult)
+        .filter(MatchResult.job_id == job.id, MatchResult.user_id == user_id)
+        .first()
     )
 
     # Reuse the existing row when regenerating a failed draft
-    draft = existing or ApplicationDraft(job_id=job.id, match_id=match.id if match else None)
+    draft = existing or ApplicationDraft(
+        user_id=user_id, job_id=job.id, match_id=match.id if match else None
+    )
     draft.status = "drafting"
     draft.error = None
     db.add(draft)
@@ -129,7 +137,11 @@ def save_draft_edits(
 
 
 def submit_draft(
-    db: Session, draft: ApplicationDraft, method: str, profile: Optional[Profile] = None
+    db: Session,
+    draft: ApplicationDraft,
+    method: str,
+    profile: Optional[Profile] = None,
+    user_id=None,
 ) -> Application:
     """
     Submit the reviewed package.
@@ -158,6 +170,7 @@ def submit_draft(
 
     applicant = profile.full_name if profile else None
     application = Application(
+        user_id=user_id if user_id is not None else draft.user_id,
         job_id=job.id,
         match_id=draft.match_id,
         draft_id=draft.id,
@@ -177,19 +190,14 @@ def submit_draft(
         application.status = "manual_pending"
 
     # State follows the outcome: a FAILED email send leaves the draft
-    # editable and the job approved, so "Finish applying" still shows it
-    # (the whole point of that safety net). Only real outcomes advance.
-    if application.status == "failed":
+    # editable, so "Finish applying" still shows it. Applied-ness is DERIVED
+    # from the applications table per user — job.status is never written
+    # here (it's shared across users).
+    if application.status != "failed":
+        draft.status = "submitted"
+    else:
         draft.status = "ready"
-        # job stays 'approved'
-    elif application.status == "manual_pending":
-        draft.status = "submitted"
-        job.status = "applied"  # user's next step is on the portal
-    else:  # sent
-        draft.status = "submitted"
-        job.status = "applied"
     db.add(draft)
-    db.add(job)
     db.commit()
     db.refresh(application)
     return application

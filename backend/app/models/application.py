@@ -5,7 +5,7 @@ Tracks the apply stage: after the user approves a match, an application
 is created and executed via email (Resend/SMTP) or queued for browser/manual apply.
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -18,6 +18,7 @@ class Application(Base):
     __tablename__ = "applications"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Uuid, ForeignKey("users.id"), nullable=True, index=True)
     job_id = Column(Integer, ForeignKey("job_postings.id"), nullable=False, index=True)
     match_id = Column(Integer, ForeignKey("match_results.id"), nullable=True)
     draft_id = Column(Integer, ForeignKey("application_drafts.id"), nullable=True)

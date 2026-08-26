@@ -32,6 +32,24 @@ function apiErrorMessage(error: unknown): string {
 
 export { apiErrorMessage };
 
+// --- Auth token layer (Phase 1b) ---
+// JWT lives in localStorage; every request carries it; any 401 clears it
+// and sends the user to the login page.
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('jfos-token');
+}
+
+export function setAuthToken(token: string | null): void {
+  if (token === null) localStorage.removeItem('jfos-token');
+  else localStorage.setItem('jfos-token', token);
+}
+
+export function logout(): void {
+  setAuthToken(null);
+  if (typeof window !== 'undefined') window.location.href = '/login';
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000,

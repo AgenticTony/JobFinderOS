@@ -5,7 +5,7 @@ Inverse of TalentHive's Candidate: instead of many candidates per job,
 there is ONE job seeker with a CV on file, matched against many jobs.
 """
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Uuid
 
 from app.core.database import Base
 from app.core.timeutil import utc_now
@@ -58,7 +58,10 @@ class Profile(Base):
     search_queries = Column(Text, nullable=True)  # JSON array — AI-suggested, user-approved
     languages = Column(Text, nullable=True)  # JSON array — languages the user works in
 
-    is_active = Column(Integer, default=1, nullable=False)  # single active profile
+    user_id = Column(Uuid, ForeignKey("users.id"), unique=True, nullable=True, index=True)
+    # is_active kept for the migration backfill only; per-user semantics
+    # replace the singleton (one profile per user via the unique FK)
+    is_active = Column(Integer, default=1, nullable=False)
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 

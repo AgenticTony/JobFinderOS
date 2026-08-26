@@ -65,8 +65,11 @@ def list_matches(
     pending_only: bool = False,
     limit: int = 100,
     offset: int = 0,
+    user_id=None,
 ) -> List[MatchResult]:
     query = db.query(MatchResult).join(JobPosting, MatchResult.job_id == JobPosting.id)
+    if user_id is not None:
+        query = query.filter(MatchResult.user_id == user_id)
     if tier:
         query = query.filter(MatchResult.tier == tier)
     if recommendation:
@@ -91,10 +94,9 @@ def set_match_decision(db: Session, match: MatchResult, decision: str) -> MatchR
 
     match.decision = decision
     match.decided_at = utc_now()
-    job = get_job(db, match.job_id)
-    if job:
-        job.status = "approved" if decision == "approved" else "rejected"
-        db.add(job)
+    # NOTE: job.status is NOT touched — approval/rejection is per-user state
+    # that lives here in match_results.decision. Writing it onto the shared
+    # job row leaked one user's decision to every other user.
     db.add(match)
     db.commit()
     db.refresh(match)
@@ -103,9 +105,14 @@ def set_match_decision(db: Session, match: MatchResult, decision: str) -> MatchR
 
 # ---------------- Applications ----------------
 
-def list_applications(db: Session, limit: int = 100, offset: int = 0) -> List[Application]:
+def list_applications(
+    db: Session, limit: int = 100, offset: int = 0, user_id=None
+) -> List[Application]:
+    query = db.query(Application)
+    if user_id is not None:
+        query = query.filter(Application.user_id == user_id)
     return (
-        db.query(Application)
+        query
         .order_by(Application.created_at.desc())
         .offset(offset)
         .limit(limit)
@@ -130,32 +137,49 @@ def list_scrape_runs(db: Session, limit: int = 20) -> List[ScrapeRun]:
 
 # ---------------- Stats ----------------
 
-def get_stats(db: Session) -> dict:
-    def count(model, **filters):
-        query = db.query(model)
-        for col, val in filters.items():
-            query = query.filter(getattr(model, col) == val)
+def get_stats(db: Session, user_id=None) -> dict:
+    """Dashboard stats, scoped to one user when user_id is given.
+
+    Per-user derivations: decision/approval state comes from match_results,
+    applied state from applications — job.status carries no user state.
+    """
+    match_q = db.query(MatchResult)
+    job_q = db.query(JobPosting)
+    app_q = db.query(Application)
+    if user_id is not None:
+        match_q = match_q.filter(MatchResult.user_id == user_id)
+        app_q = app_q.filter(Application.user_id == user_id)
+
+    matches = match_q.all()
+
+    def count(query):
         return query.count()
 
-    day_ago = utc_now() - timedelta(hours=24)
-    matches = db.query(MatchResult).all()
+    user_decisions = {
+        "approved": match_q.filter(MatchResult.decision == "approved").count(),
+        "rejected": match_q.filter(MatchResult.decision == "rejected").count(),
+    }
+
     return {
-        "jobs_total": count(JobPosting),
-        # Measured from the jobs table (not run reports) so it can never
-        # exceed jobs_total, even after country switches or cleanups.
-        "jobs_last_24h": db.query(JobPosting).filter(JobPosting.scraped_at >= day_ago).count(),
-        "jobs_new": count(JobPosting, status="new"),
-        "jobs_matched": count(JobPosting, status="matched"),
-        "jobs_approved": count(JobPosting, status="approved"),
-        "jobs_rejected": count(JobPosting, status="rejected"),
-        "jobs_dismissed": count(JobPosting, status="dismissed"),
-        "jobs_applied": count(JobPosting, status="applied"),
+        "jobs_total": count(job_q),
+        "jobs_last_24h": count(
+            job_q.filter(JobPosting.scraped_at >= utc_now() - timedelta(hours=24))
+        ),
+        "jobs_new": count(job_q.filter(JobPosting.status == "new")),
+        "jobs_matched": count(job_q.filter(JobPosting.status == "matched")),
+        "jobs_approved": user_decisions["approved"],
+        "jobs_rejected": user_decisions["rejected"],
+        "jobs_dismissed": count(job_q.filter(JobPosting.status == "dismissed")),
+        "jobs_applied": app_q.filter(Application.status.in_(["sent", "manual_pending"])).count(),
         "matches_total": len(matches),
         "matches_excellent": sum(1 for m in matches if m.tier == "excellent_match"),
         "matches_good": sum(1 for m in matches if m.tier == "good_match"),
         "matches_pending_decision": sum(1 for m in matches if m.decision is None),
-        "applications_total": count(Application),
-        "applications_sent": count(Application, status="sent"),
-        "applications_manual_pending": count(Application, status="manual_pending"),
-        "applications_failed": count(Application, status="failed"),
+        "applications_total": count(app_q),
+        "applications_sent": count(app_q.filter(Application.status == "sent")),
+        "applications_manual_pending": count(
+            app_q.filter(Application.status == "manual_pending")
+        ),
+        "applications_failed": count(app_q.filter(Application.status == "failed")),
     }
+
