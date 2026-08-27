@@ -3,7 +3,7 @@ Auth layer — fastapi-users v15 on SQLAlchemy (async adapter, per official
 docs: fastapi-users.github.io/fastapi-users/latest/configuration/databases/sqlalchemy/).
 
 The app's main engine is sync; auth runs on a second, async engine over the
-same database (asyncpg / aiosqlite — see core.database.async_database_url).
+same database (psycopg / aiosqlite — see core.database.async_database_url).
 
 Phase 0 scope: register + login (JWT bearer) + /users/me. Email verification
 and password-reset routers are intentionally not mounted yet — they require a

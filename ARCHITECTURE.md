@@ -82,7 +82,7 @@ technical one — make it consciously.
 Every vendor claim below was checked against the vendor's own documentation,
 not recalled. Seven findings change the plan; three confirm it.
 
-### F1 — Render has no outbound IPv6; Supabase direct connections are IPv6-only
+### F1 — Render has no outbound IPv6 — DECIDED 2026-08-27: Supavisor session mode (WO-12)
 
 Supabase's connection guide: direct connection (port 5432) is **"IPv6 by
 default; IPv4 with add-on"**, while both Supavisor modes are "IPv4-only on
@@ -108,7 +108,7 @@ them by default. Open Supabase issue #39227 reports asyncpg failing on
 connection timeouts on session mode under burst — with `statement_cache_size=0`,
 UUID statement names, `NullPool` and a compute upgrade all failing to fix it.
 
-**Fix: drop asyncpg entirely.** SQLAlchemy 2.0's `postgresql+psycopg://`
+**Fix: drop asyncpg entirely — DONE 2026-08-27 (WO-11).** SQLAlchemy 2.0's `postgresql+psycopg://`
 dialect serves both `create_engine` and `create_async_engine`, so one driver
 covers the sync app and the async auth layer. psycopg 3.3.4 is already pinned;
 asyncpg can be removed from the lockfile. This also collapses

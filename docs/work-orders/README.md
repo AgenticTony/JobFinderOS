@@ -59,10 +59,11 @@ bare "WO3" in either document until this is settled** — always qualify it as
 | **WO-14** | Hunt cadence + trial gating | P1 | — | Trial CAC $5.88 → $1.00 by capping *scoring* (not display) at 10/day. Keeps the Hunt button; makes repeat presses a free no-op. Also records the `run_matching` service-clamp gap |
 | **WO-13** | Billing + tax posture (Paddle as Merchant of Record) | P1 | WO-07 | Decided. UK has a **zero** VAT threshold for non-established sellers, so a two-country launch means two registrations from the first sale — an MoR removes both. ~54% margin, ~6–7 user break-even |
 
-**WO-06 and WO-08 are DONE (2026-08-27).** WO-06 fixed the target user's
-pool (country-aware gate + jobtech pagination — see ARCHITECTURE D1's
-resolution note). Next in the queue: **WO-11/WO-12** (the P0 deploy
-blockers), then WO-01 (fabrication harness) and WO-05 (observability).
+**WO-06, WO-08, WO-11 and WO-12 are DONE (2026-08-27).** The deploy
+blockers are cleared: one driver everywhere (psycopg — asyncpg dropped,
+F2) and the connection path decided (Supavisor session mode, F1).
+Next: **WO-01 (fabrication harness)** — blocks the first real user —
+then WO-05 (observability) and WO-04 (worker split).
 
 **WO-11 and WO-12 are new P0s from the 2026-08-27 stack audit** and block the
 entire deploy path. They are cheap (WO-11 is a driver swap on a stack that

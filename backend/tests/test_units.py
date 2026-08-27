@@ -1272,3 +1272,41 @@ class TestEEAFreeMovementBloc:
         )
         # in-country unchanged
         assert gate(_job("London, UK", remote=True), self.GB)
+
+
+class TestOneDriverEverywhere:
+    """WO-11 / ARCHITECTURE F2: asyncpg is documented to fail on BOTH
+    Supabase poolers (prepared statements). SQLAlchemy 2.0's psycopg
+    dialect serves create_engine AND create_async_engine, so the async
+    auth layer runs on psycopg too — one driver, no asyncpg."""
+
+    def test_async_url_never_uses_asyncpg(self):
+        from app.core.database import async_database_url
+
+        cases = {
+            "postgresql+psycopg://u:p@h:5432/db": "postgresql+psycopg://u:p@h:5432/db",
+            "postgresql://u:p@h:5432/db": "postgresql+psycopg://u:p@h:5432/db",
+        }
+        for url, want in cases.items():
+            got = async_database_url(url)
+            assert got == want, f"{url} -> {got}, want {want}"
+            assert "asyncpg" not in got, (
+                "asyncpg in the async engine URL — it fails on both "
+                "Supabase poolers (F2); both engines run on psycopg"
+            )
+
+    def test_sqlite_async_translation_unchanged(self):
+        from app.core.database import async_database_url
+
+        assert async_database_url("sqlite:///./x.db") == "sqlite+aiosqlite:///./x.db"
+
+    def test_asyncpg_absent_from_the_lockfile(self):
+        from pathlib import Path
+
+        lock = Path(__file__).resolve().parent.parent / "requirements.lock"
+        txt = Path(__file__).resolve().parent.parent / "requirements.txt"
+        for f in (lock, txt):
+            assert "asyncpg" not in f.read_text(), (
+                f"{f.name} still pins asyncpg — the driver that fails on "
+                "both Supabase poolers must not ship"
+            )

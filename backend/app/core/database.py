@@ -23,16 +23,19 @@ DATABASE_URL = _settings.DATABASE_URL
 
 
 def async_database_url(url: str) -> str:
-    """Translate the sync DATABASE_URL to its async driver counterpart.
+    """Resolve the DATABASE_URL for the async auth engine.
 
     fastapi-users' SQLAlchemy adapter is async-only (official docs), so the
-    auth layer runs on a second engine over the same database:
-    postgresql+psycopg:// -> postgresql+asyncpg://, sqlite -> sqlite+aiosqlite.
+    auth layer runs on a second engine over the same database. ONE driver
+    covers both engines (WO-11 / ARCHITECTURE F2): SQLAlchemy 2.0's
+    postgresql+psycopg:// dialect serves create_engine AND
+    create_async_engine. asyncpg is deliberately absent — it is documented
+    to fail on BOTH Supabase poolers (prepared statements), and nothing
+    deploys while the auth layer runs a driver that cannot reach the
+    production database. sqlite -> aiosqlite stays for local/tests.
     """
-    if url.startswith("postgresql+psycopg://"):
-        return url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
     if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
     if url.startswith("sqlite:///"):
         return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
     return url
@@ -87,10 +90,8 @@ def init_db():
 
     ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
     cfg = Config(str(ini))
-    cfg.set_main_option(
-        "sqlalchemy.url",
-        DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1),
-    )
+    # DATABASE_URL is already the sync psycopg URL — asyncpg is gone
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
 
     if DATABASE_URL.startswith("postgres"):
         command.upgrade(cfg, "head")

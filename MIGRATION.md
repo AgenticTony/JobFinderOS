@@ -85,7 +85,7 @@ exists somewhere the laptop cannot destroy.
 ### MIG-WO1 — Database: SQLite → Supabase Postgres (~0.5–1 day)
 
 Scope: provision the Supabase project (EU); `DATABASE_URL` to its
-connection string; alembic to head; data migration script for the live
+Supavisor SESSION-mode pooler URL (the decided path — WO-12); alembic to head; data migration script for the live
 rows (2 users, 2 profiles, 399 jobs, 243 matches, 4 drafts, 2
 applications — counts verified 2026-08-26); `ops/backup.sh` rewritten for
 Supabase (see the PITR note below; the sqlite3 `.backup` choreography
