@@ -1097,13 +1097,51 @@ class TestCountryRoutingGate:
         """"Europe, North America, Latin America" names hemispheres, not the
         US — an Europe-including remote listing is takeable for a Swede and
         must not be blocked via the bare word 'america'."""
-        from app.services.country_lexicon import location_country
+        from app.services.country_lexicon import location_countries
 
-        assert location_country("Europe, North America, Latin America") is None
-        assert location_country("Time zone: CET (+/- 3 hours)") is None
+        assert location_countries("Europe, North America, Latin America") == set()
+        assert location_countries("Time zone: CET (+/- 3 hours)") == set()
         # ...while actual US locations still resolve
-        assert location_country("North America · USA") == "US"
-        assert location_country("Remote · USA") == "US"
+        assert location_countries("North America · USA") == {"US"}
+        assert location_countries("Remote · USA") == {"US"}
+
+    def test_multicountry_listing_admits_any_listed_country(self):
+        """WO-06 review finding 1: a location enumerating several countries
+        collapsed to one longest-regex winner ("Sweden, Germany" -> DE) and
+        the gate blocked a job explicitly open in the user's country — the
+        exact harm the product exists to prevent. Membership beats ranking:
+        the gate blocks only when the matched set EXCLUDES the user's
+        country."""
+        from app.services.pipeline import passes_location_filter as gate
+
+        job = _job("Sweden, Germany", remote=True)
+        assert gate(job, self.SE), (
+            "a remote job explicitly listing Sweden must pass a Swedish user"
+        )
+        assert not gate(job, self.GB), (
+            "the same listing is foreign for a GB user — set excludes GB"
+        )
+        # The reviewer's city-vs-country case: Boston (US) AND Lincolnshire
+        # (UK) in one string — GB user keeps it, SE user loses it
+        both = _job("Boston, Lincolnshire, UK", remote=True)
+        assert gate(both, self.GB)
+        assert not gate(both, self.SE)
+
+    def test_dotted_us_forms_resolve(self):
+        """WO-06 review finding 2: 'u.s.'/'u.s.a.' ended in '.', so the
+        trailing \b could never fire at end-of-string or before a space —
+        "Remote, U.S." resolved to None and passed Swedish users."""
+        from app.services.country_lexicon import location_countries
+        from app.services.pipeline import passes_location_filter as gate
+
+        for form in ("Remote, U.S.", "U.S. remote", "u.s.", "U.S.A.",
+                     "Somewhere, U.S.A., Earth"):
+            assert location_countries(form) == {"US"}, (
+                f"{form!r} did not resolve to US — dotted forms must match"
+            )
+        assert not gate(_job("Remote, U.S.", remote=True), self.SE), (
+            "'Remote, U.S.' passed a Swedish user — the D1 symptom"
+        )
 
     def test_swedish_located_jobs_pass_for_se_user(self):
         from app.services.pipeline import passes_location_filter as gate
