@@ -12,8 +12,8 @@ from typing import Dict, List
 SHARED_REMOTE_SOURCES = ["remotive", "jobicy", "workingnomads", "arbeitnow"]
 
 SOURCE_PACKS: Dict[str, List[str]] = {
-    "SE": ["jobtech", "teamtailor", "careerjet", *SHARED_REMOTE_SOURCES],
-    "GB": ["reed", "adzuna", "careerjet", *SHARED_REMOTE_SOURCES],
+    "SE": ["jobtech", "careerjet", *SHARED_REMOTE_SOURCES],
+    "GB": ["reed", "careerjet", *SHARED_REMOTE_SOURCES],
 }
 
 

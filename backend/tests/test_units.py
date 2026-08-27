@@ -577,7 +577,11 @@ class TestRescorePayload:
         assert m.score == 62
         # Payload from the sample CLOSEST to the mean — never the legacy row
         assert m.reasoning == "prose from 70", "stale prose survived a re-score"
-        assert m.cover_note == "note from 70", "stale cover_note survived a re-score"
+        # WO-08: cover_note is no longer generated or written — the legacy
+        # value is frozen in place, untouched by a re-score
+        assert m.cover_note == "LEGACY COVER NOTE", (
+            "cover_note was written — nothing consumes it; a re-score must not refresh it"
+        )
         assert m.recommendation == "apply"
         assert m.confidence == "high"
         assert parse_json_list(m.matched_skills) == ["Python", "SQL"]
@@ -953,3 +957,52 @@ class TestTenancyLayer1:
             "service resolved identity itself instead of using the passed "
             "profile (Layer 1 regression)"
         )
+
+
+class TestStripDeadSurface:
+    """WO-08: cover_note was ~20% of the scoring bill and is rendered
+    nowhere; Adzuna is redundant garnish in the GB pack (Reed carries the
+    market — the scraper stays for the US/AU backbone); Teamtailor is dead
+    without TEAMTAILOR_SITES, which was never configured."""
+
+    def test_matching_prompt_has_no_cover_note(self):
+        """The prompt's cover_note instructions (VOICE exception + JSON
+        schema entry) are the ~20% of output tokens this WO removes."""
+        from app.services.ai_service import AIService
+
+        svc = AIService.__new__(AIService)
+        prompt = svc._build_matching_prompt()
+        assert "cover_note" not in prompt, (
+            "cover_note still in the scoring prompt — the unconsumed field "
+            "is still being generated (and paid for) on every match"
+        )
+
+    def test_match_response_schema_has_no_cover_note(self):
+        from app.schemas.match import MatchResponse
+
+        assert "cover_note" not in MatchResponse.model_fields, (
+            "cover_note still exposed by the API — nothing renders it"
+        )
+
+    def test_gb_pack_has_no_adzuna(self):
+        from app.services import source_packs
+
+        gb = source_packs.pack_for_country("GB")
+        assert "adzuna" not in gb, f"GB pack still scrapes Adzuna: {gb}"
+        assert "reed" in gb, "Reed carries the UK market — it must stay"
+
+    def test_adzuna_scraper_retained_for_expansion(self):
+        """Demote, don't delete: Adzuna is the US/AU backbone."""
+        from app.services.scrapers import SCRAPER_REGISTRY
+
+        assert "adzuna" in SCRAPER_REGISTRY
+
+    def test_teamtailor_fully_removed(self):
+        from app.services.scrapers import SCRAPER_REGISTRY
+
+        assert "teamtailor" not in SCRAPER_REGISTRY, (
+            "teamtailor still registered — dead code without TEAMTAILOR_SITES"
+        )
+        from app.services import source_packs
+
+        assert "teamtailor" not in source_packs.pack_for_country("SE")

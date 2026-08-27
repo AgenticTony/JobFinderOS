@@ -63,7 +63,7 @@ Evaluate this job for me and respond with ONLY valid JSON in the required format
             raw = service._complete(system_prompt, user_message)
             elapsed = time.time() - start
             parsed = service._parse_json(raw)
-            valid = all(k in parsed for k in ("score", "tier", "recommendation", "cover_note"))
+            valid = all(k in parsed for k in ("score", "tier", "recommendation"))
             results.append((model, elapsed, valid, parsed))
             print(
                 f"{model:<10} {elapsed:6.1f}s  valid_json={valid}  "

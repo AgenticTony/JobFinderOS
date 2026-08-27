@@ -35,7 +35,6 @@ export interface Match {
   missing_skills: string[];
   transferable_skills: string[];
   recommendation: Recommendation | null;
-  cover_note: string | null;
   confidence: string | null;
   decision: 'approved' | 'rejected' | null;
   decided_at: string | null;

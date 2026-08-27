@@ -24,7 +24,6 @@ class MatchResponse(BaseModel):
     missing_skills: List[str] = []
     transferable_skills: List[str] = []
     recommendation: Optional[str] = None  # apply, maybe, skip
-    cover_note: Optional[str] = None
     confidence: Optional[str] = None
     decision: Optional[str] = None
     decided_at: Optional[datetime] = None
@@ -43,7 +42,6 @@ class MatchResponse(BaseModel):
             missing_skills=parse_json_list(m.missing_skills),
             transferable_skills=parse_json_list(m.transferable_skills),
             recommendation=m.recommendation,
-            cover_note=m.cover_note,
             confidence=m.confidence,
             decision=m.decision,
             decided_at=m.decided_at,

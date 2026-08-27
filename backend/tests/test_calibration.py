@@ -32,7 +32,9 @@ from app.services.ai_service import AIService  # noqa: E402
 #: last calibrated. If the prompt text changes, matching_prompt_version()
 #: changes and this test fails — bump this constant DELIBERATELY, and
 #: re-score the backlog, because old scores are no longer comparable.
-CALIBRATED_PROMPT_VERSION = "m2-62c2452b"
+CALIBRATED_PROMPT_VERSION = "m2-57a0f692"  # WO-08: cover_note instructions removed
+# from the prompt (unconsumed field, ~20% of output tokens). Rubric MEANING
+# unchanged — MATCHING_PROMPT_MAJOR stays m2. Stale rows re-scored in WO-09.
 
 
 class TestPromptVersioning:

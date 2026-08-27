@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     SUPABASE_STORAGE_BUCKET: str = "cvs"
 
     # Scraping
-    SCRAPE_SOURCES: str = "arbeitnow,remotive,jobicy,workingnomads,jobtech,teamtailor"
+    SCRAPE_SOURCES: str = "arbeitnow,remotive,jobicy,workingnomads,jobtech"
     SCRAPE_TIMEOUT_SECONDS: int = 20
 
     # Sweden — JobTech / Platsbanken (Arbetsförmedlingen's open API).
@@ -94,9 +94,6 @@ class Settings(BaseSettings):
     JOBTECH_API_KEY: str = ""
     JOBTECH_QUERIES: str = ""
 
-    # Sweden — Teamtailor career sites ({slug}.teamtailor.com/jobs.json).
-    # Comma-separated slugs, e.g. "manpowerse,fortnoxab". Empty = source skipped.
-    TEAMTAILOR_SITES: str = ""
 
     # UK — Reed.co.uk jobs-search API (key = basic-auth username, empty password).
     # Keywords/location become per-user at onboarding; these are manual overrides.

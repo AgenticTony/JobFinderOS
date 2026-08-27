@@ -41,7 +41,7 @@ def resolve_samples(samples):
     """The scoring protocol's resolution step — SINGLE source of truth.
 
     Average the sample scores once; select the payload (reasoning,
-    recommendation, confidence, skills, cover_note) from the sample
+    recommendation, confidence, skills) from the sample
     CLOSEST to the final mean, because the prose must agree with the
     number the user sees.
 
@@ -283,7 +283,7 @@ def _run_matching_inner(
             # - Collect full result dicts (not just scores) from each sample
             # - Average scores once
             # - Select the PAYLOAD (reasoning, recommendation, confidence,
-            #   skills, cover_note) from the sample CLOSEST to the final
+            #   skills) from the sample CLOSEST to the final
             #   mean — prose must agree with the number the user sees
             # - Check keep-min on the final averaged value
             # - A dead-band sampling failure leaves the job 'new' for retry
@@ -325,7 +325,7 @@ def _run_matching_inner(
             # Average once; F1: the payload comes from the sample closest to
             # the mean — via resolve_samples, the shared protocol the
             # re-score script also calls. The prose, recommendation,
-            # confidence, skills and cover_note must agree with the
+            # confidence and skills must agree with the
             # displayed number — a score of 40 paired with
             # recommendation='skip' and reasoning='barely match' (from a
             # sample that scored 26) is incoherent and breaks MatchCard's
@@ -378,7 +378,6 @@ def _run_matching_inner(
                 missing_skills=dump_json_list(best_payload.get("missing_skills", [])),
                 transferable_skills=dump_json_list(best_payload.get("transferable_skills", [])),
                 recommendation=best_payload.get("recommendation"),
-                cover_note=best_payload.get("cover_note"),
                 confidence=best_payload.get("confidence"),
                 model_used=service.model,
                 processing_time_ms=elapsed_ms,

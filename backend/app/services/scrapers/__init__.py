@@ -10,7 +10,6 @@ from app.services.scrapers.jobicy import JobicyScraper
 from app.services.scrapers.jobtech import JobtechScraper
 from app.services.scrapers.reed import ReedScraper
 from app.services.scrapers.remotive import RemotiveScraper
-from app.services.scrapers.teamtailor import TeamtailorScraper
 from app.services.scrapers.workingnomads import WorkingNomadsScraper
 
 SCRAPER_REGISTRY: Dict[str, Type[BaseScraper]] = {
@@ -19,7 +18,6 @@ SCRAPER_REGISTRY: Dict[str, Type[BaseScraper]] = {
     "jobicy": JobicyScraper,
     "workingnomads": WorkingNomadsScraper,
     "jobtech": JobtechScraper,
-    "teamtailor": TeamtailorScraper,
     "reed": ReedScraper,
     "adzuna": AdzunaScraper,
     "careerjet": CareerjetScraper,

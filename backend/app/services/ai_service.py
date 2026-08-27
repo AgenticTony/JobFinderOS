@@ -133,7 +133,7 @@ Respond with ONLY valid JSON (no markdown):
 
         Returns:
             Dict with score, tier, reasoning, matched/missing skills,
-            recommendation (apply/maybe/skip), cover_note, confidence
+            recommendation (apply/maybe/skip), confidence
         """
         system_prompt = self._build_matching_prompt()
 
@@ -166,7 +166,6 @@ Evaluate this job for me and respond with ONLY valid JSON in the required format
             "missing_skills": parsed.get("missing_skills", []),
             "transferable_skills": parsed.get("transferable_skills", []),
             "recommendation": parsed.get("recommendation", "maybe"),
-            "cover_note": parsed.get("cover_note", ""),
             "confidence": parsed.get("confidence", "medium"),
         }
 
@@ -347,8 +346,6 @@ The person reading your output IS the job seeker — this is not a recruiter too
 - NEVER use third-person recruiter language such as "the candidate",
   "the applicant", or "their experience". Always "you/your".
 - Frame everything as: what YOU bring vs what THIS JOB asks for.
-- EXCEPTION — "cover_note": written in first person ("I...") because the job
-  seeker sends it to the employer.
 
 ═══════════════════════════════════════
 STEP 1 — EXTRACT JOB FACTS (before any scoring)
@@ -444,7 +441,6 @@ Respond with ONLY valid JSON (no markdown):
   "missing_skills": ["skill1"],
   "transferable_skills": ["skill1"],
   "recommendation": "apply|maybe|skip",
-  "cover_note": "Tailored application cover note, first person, sent to the employer",
   "confidence": "high|medium|low"
 }"""
 

@@ -65,7 +65,6 @@ def apply_rescore(match: MatchResult, samples: list, model: str) -> int:
     match.missing_skills = dump_json_list(best_payload.get("missing_skills", []))
     match.transferable_skills = dump_json_list(best_payload.get("transferable_skills", []))
     match.recommendation = best_payload.get("recommendation")
-    match.cover_note = best_payload.get("cover_note")
     match.confidence = best_payload.get("confidence")
     derive_dismissal(match, settings.MATCH_KEEP_MIN_SCORE)
     return averaged
