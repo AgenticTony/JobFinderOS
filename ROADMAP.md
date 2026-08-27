@@ -26,7 +26,17 @@ Pipeline: harvest → gate → store → match/score → decide → tailor → s
 - **Shared job pool + per-user matching.** Scrape once per country into a
   shared pool (dedupe is global); all personal gates apply at match time with
   per-user last-matched watermarks. Storage is trivial (~13KB/job; 50k jobs ≈
-  650MB). Rationale: per-user scraping dies on Adzuna free caps at ~3 users.
+  650MB). Rationale: the shared pool is correct on its own merits — job
+  postings are public facts, not user data, so storing one copy keeps
+  cross-board dedupe working and every user's view equally fresh.
+  CORRECTED 2026-08-26: the old rationale here read "per-user scraping dies
+  on Adzuna free caps at ~3 users." That was Adzuna-shaped and wrong as a
+  general claim — Adzuna has contributed ZERO rows to the live pool, and
+  Reed alone (2,000 req/hr) carries hundreds of daily UK hunters. The cap
+  matters only in markets where aggregators ARE the backbone (US/AU — see
+  International expansion), not in SE/UK. Shared FETCH (query-subscription)
+  is an efficiency win, not a scaling necessity; shared STORAGE is right
+  regardless.
 - **Stack (lean-beta first):** Cloudflare Pages (static frontend, free,
   commercial-OK — Vercel Hobby forbids commercial use) + Supabase free tier
   (500MB Postgres + 50k-MAU auth + 1GB CV storage — auth vendor included
@@ -34,6 +44,29 @@ Pipeline: harvest → gate → store → match/score → decide → tailor → s
   scheduler/scraper; free tiers sleep and kill the 06:30 hunt). GLM rides the
   founder's existing Z.ai yearly plan during beta; move to API billing when
   paying users arrive (~$0.30–1.20/user/mo).
+- **AI provider — DECIDED 2026-08-27: stay on GLM (Z.ai) for now.**
+  Z.ai is a Chinese provider and the matcher sends full CV text to it. That
+  is a third-country transfer of personal data under GDPR — but ONLY once
+  the data belongs to someone else. Today the system holds exactly one CV:
+  the founder's own. Own data, own choice, no controller obligations.
+  TRIGGER TO REVISIT — before the first CV that is not the founder's.
+  Not "at launch", not "when convenient": the obligation attaches the moment
+  a third party's CV enters the system, including a friendly beta tester.
+  At that point either (a) move EU users to an EU-resident model, or (b)
+  keep GLM with SCCs + a transfer impact assessment + sub-processor
+  disclosure in the privacy policy, and accept that some SE/UK users will
+  decline on principle.
+  Researched option (a): Mistral Large 3 on La Plateforme — EU-resident,
+  French company, and CHEAPER than GLM at this workload ($0.50/$1.50 vs
+  $0.60/$2.20 per M tokens; ~$4.71 vs ~$5.96 per user/month at the measured
+  2.06x sampling multiplier). Mistral Small 4 for triage + Large 3 for
+  keepers maps onto needs_another_sample() and lands near $2/user/month.
+  NOT YET VERIFIED: Swedish-language scoring quality. Before any swap, re-run
+  scratchpad/variance.py (within-job SD <= 8) and scale.py (paired same-run
+  vs GLM across the score range) — a provider change is a bigger calibration
+  event than a version bump, and the tier bands (80/50/30) plus
+  MATCH_KEEP_MIN_SCORE=25 are calibrated to GLM. Treat it like a prompt
+  change: version it, and never mix scales in one queue.
   Beta ≈ $7/mo. Growing (50–500) ≈ $25–45. 1k users ≈ $250–400 against
   ~£12k revenue. Vercel Pro + Neon is the comfort upgrade once revenue
   justifies it, not a prerequisite (Vercel has no first-party Postgres
@@ -121,8 +154,10 @@ migration verified on real Postgres 16) + fastapi-users v15 auth skeleton
 abstraction (local verified; Supabase REST env-gated — Vercel Blob rejected
 as undocumented) + GitHub Actions CI (lint, migrations, auth roundtrip,
 flow test, tsc, build). Remaining for Phase 0 completion at deploy time:
-create the Neon project (paste pooled URL into DATABASE_URL) and the
+create the Postgres project (paste the pooled URL into DATABASE_URL) and the
 Supabase project (URL + service key) — config-ready, no code changes.
+Which Postgres vendor is still open (see docs/MIGRATION.md); if it is
+Supabase, these collapse into ONE project rather than two.
 
 **Phase 1a-static — Public marketing site (safe before the schema work;
 touches no data model):** route split (/ vs /console), landing + pricing +

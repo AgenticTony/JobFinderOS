@@ -230,9 +230,23 @@ scrape (9 sources) → dedupe → per-user gates (location/language/freshness) �
 - [ ] Phase 1a-static: landing page (marketing, pricing, FAQ — no data model deps)
 - [ ] Phase 1c: signup UI, wizard entry from signup, console auth guard polish
 - [ ] Composio: connect Gmail (Settings page ready; needs platform API key)
-- [ ] Query-subscription model: designed in ROADMAP, build at >3 concurrent UK users
-- [ ] Adzuna commercial terms: ask about volume tiers + shared-pool ToS compatibility
+- [ ] Query-subscription model: designed in ROADMAP. NOT urgent — the old
+      ">3 concurrent UK users" trigger was Adzuna-shaped and wrong (Adzuna has
+      contributed zero rows; Reed carries the UK). Efficiency/UX win, build on
+      measured pressure.
+- [ ] Adzuna commercial terms: ask at US/AU expansion, not before. In SE/UK
+      Adzuna is redundant garnish; in US/AU the aggregators ARE the backbone
+      (Indeed's API died 2023; Seek has none and owns Jora). Same email should
+      settle the caching/redistribution ToS question that gates shared-fetch.
 - [ ] UK test user walkthrough (Profile → Edit setup → GB)
 - [ ] Teamtailor slugs, JobTech free key for production
-- [ ] Deploy: Neon (Postgres) + Render (worker) + Cloudflare Pages (frontend)
+- [ ] Deploy: Render (worker) + Cloudflare Pages (frontend) + Postgres.
+      POSTGRES VENDOR IS THE OPEN DECISION — see docs/MIGRATION.md.
+      ROADMAP "Target architecture (decided)" says Supabase free tier
+      (Postgres + 50k-MAU auth + 1GB storage, $0 at beta scale); this line
+      previously said Neon, contradicting it. Resolve the two before
+      deploying — the auth question mostly follows the Postgres one:
+      Supabase Postgres makes Supabase Auth nearly free; Neon makes it a
+      third vendor for one feature. RLS is available on BOTH and is not a
+      reason to pick either (it is a Postgres feature, not a Supabase one).
 - [ ] Playwright ATS drivers for structured portal applies (staged, human-confirmed)
