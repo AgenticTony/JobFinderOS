@@ -392,7 +392,13 @@ def unsupported_claims(source_cv: str, tailored_text: str,
                 findings.append(claim)
             continue
         if claim.kind == "technology":
-            if _normalise(claim.value) not in src:
+            # Same per-entry ground as extraction (review r3): a
+            # punctuated claim checked on the normalised source collapses
+            # to a substring ('c#' -> 'c') and everything is "supported".
+            if re.search(r"\W", claim.value):
+                if claim.value.casefold() not in src_raw:
+                    findings.append(claim)
+            elif _normalise(claim.value) not in src:
                 findings.append(claim)
             continue
         if claim.kind == "credential":

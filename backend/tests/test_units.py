@@ -1606,3 +1606,32 @@ class TestTechPatternProseSafety:
         # no phantom: a C# mention must not also emit c++
         assert extract_claims("Used C# daily.")[0:1] == [] or not any(
             c.value == "c++" for c in extract_claims("Used C# daily."))
+
+
+class TestTechSupportGround:
+    """WO-01 review r3: extraction moved punctuated entries to the raw
+    haystack, but the SUPPORT check still normalises the claim — 
+    _normalise('c#') = 'c', a substring of nearly any CV, so invented
+    C#/.NET/C++ claims were never reported (false-negative side of the
+    prose fix). The check needs the same per-entry ground."""
+
+    def test_invented_punctuated_tech_is_flagged(self):
+        from app.services.fabrication import unsupported_claims
+
+        cv = ("Anthony Foran. Casino Cosmopol, Malmö. Skills: Python, "
+              "SQL, network administration.")
+        for mention in ("I have 5 years of C# experience.",
+                        "I built services in .NET Core.",
+                        "I use C++ daily."):
+            flagged = [c.value for c in unsupported_claims(cv, mention)
+                       if c.kind == "technology"]
+            assert flagged, f"{mention!r} invented tech not reported"
+
+    def test_genuine_punctuated_tech_in_cv_not_flagged(self):
+        from app.services.fabrication import unsupported_claims
+
+        cv = "Skills: C#, .NET, Node.js, Python."
+        tailored = "Daily driver: C# and .NET services in Node.js."
+        flagged = [c.value for c in unsupported_claims(cv, tailored)
+                   if c.kind == "technology"]
+        assert flagged == [], f"raw-ground support false positive: {flagged}"
