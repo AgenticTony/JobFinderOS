@@ -241,12 +241,24 @@ def _extract_metrics(text: str) -> List[Claim]:
     return claims
 
 
+# Vocabulary normalised at COMPILE time: _normalise strips punctuation,
+# so entries like '.net', 'c#', 'node.js', 'ci/cd' could never match a
+# normalised haystack (the u.s.-lexicon dead-entry class). Spaces become
+# \s+ so multi-word entries match across normalisation whitespace.
+_TECH_PATTERNS = [
+    (re.compile(
+        rf"(?<!\w){re.escape(_normalise(t)).replace(re.escape(' '), r'\s+')}(?!\w)"),
+     t)
+    for t in _TECHNOLOGY_VOCABULARY
+]
+
+
 def _extract_technologies(text: str) -> List[Claim]:
     claims = []
     lowered = _normalise(text)
-    for tech in _TECHNOLOGY_VOCABULARY:
-        if re.search(rf"(?<!\w){re.escape(tech)}(?!\w)", lowered):
-            claims.append(Claim(kind="technology", value=tech,
+    for pattern, name in _TECH_PATTERNS:
+        if pattern.search(lowered):
+            claims.append(Claim(kind="technology", value=name,
                                 context="", tier="advisory"))
     return claims
 
@@ -255,7 +267,9 @@ def _dedupe(claims: List[Claim], _) -> List[Claim]:
     seen = set()
     out = []
     for c in claims:
-        key = (c.kind, _normalise(c.value))
+        # RAW casefold, not _normalise: 'c#' and 'c++' both normalise to
+        # 'c' and collapsed into one claim (found via the dead-entry fix)
+        key = (c.kind, c.value.casefold())
         if key not in seen:
             seen.add(key)
             out.append(c)
@@ -329,14 +343,40 @@ def unsupported_claims(source_cv: str, tailored_text: str,
 
     for claim in extract_claims(tailored_text or ""):
         value = _normalise(claim.value)
-        if any(a and a in value for a in allowed):
-            continue  # the addressee/company being applied to
+        if claim.kind != "organisation" and value in allowed:
+            continue  # exact allowed context (company/title), not substring
+        if claim.kind == "organisation":
+            # TOKEN-WISE subtraction (review finding): a substring match
+            # let 'Software Engineer, Acme Global Ltd' ride through on the
+            # allowed title 'software engineer'. Strip the allowed tokens;
+            # judge the remainder. Empty/generic remainder = pure context.
+            v_tokens = _strip_connectors(value.split())
+            for a in allowed:
+                a_tokens = _strip_connectors(a.split())
+                if a_tokens and all(t in v_tokens for t in a_tokens):
+                    v_tokens = [t for t in v_tokens if t not in a_tokens]
+            if not v_tokens or all(t in _GENERIC_TITLE_WORDS
+                                   for t in v_tokens):
+                continue
+            remainder = " ".join(v_tokens)
+            if _org_supported(claim, src) or _org_supported(claim, src_noc):
+                continue
+            if all(t in src_tokens for t in v_tokens):
+                continue
+            if remainder != value:
+                # the glue was context; the remainder is the real claim
+                findings.append(Claim(kind="organisation", value=remainder,
+                                      context=claim.context,
+                                      tier=_org_tier(v_tokens)))
+            else:
+                findings.append(claim)
+            continue
         if claim.kind == "metric":
             if not _metric_supported(claim, src_raw):
                 findings.append(claim)
             continue
         if claim.kind == "technology":
-            if claim.value not in src:
+            if _normalise(claim.value) not in src:
                 findings.append(claim)
             continue
         if claim.kind == "organisation":

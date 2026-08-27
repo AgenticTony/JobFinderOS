@@ -185,7 +185,7 @@ def create_draft_for_job(
             retries += 1
             correction = (
                 "Your previous output contained claims that cannot be traced "
-                "to the candidate's CV and may be fabrications: "
+                "to your CV and may be fabrications: "
                 + ", ".join(sorted({c.value.split("|")[0] for c in high}))
                 + ". Regenerate the documents WITHOUT these claims — every "
                 "employer, date, credential and metric must exist in the "

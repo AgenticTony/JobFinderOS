@@ -1529,3 +1529,49 @@ class TestFabricationLiveFPClasses:
         org = [f for f in unsupported_claims(src, tailored)
                if f.kind == "organisation"]
         assert org == [], [f.value for f in org]
+
+
+class TestAllowedNamesSubtraction:
+    """WO-01 review: allowed_names matched as SUBSTRINGS, so with
+    job.title in the list the standard CV line 'Title, Company — years'
+    glued into one run and the invented employer rode through on the
+    allowed title prefix (the exact inverse _org_supported guards
+    against — the allowed path bypassed it). Subtraction must be
+    token-wise: strip the allowed name's tokens, judge the REMAINDER."""
+
+    def test_glued_title_plus_fabricated_employer_is_caught(self):
+        from app.services.fabrication import split_tiers, unsupported_claims
+
+        src = "Casino Cosmopol, Malmö — Gaming Operations Manager."
+        tailored = "Software Engineer, Acme Global Ltd — 2019-2022."
+        findings = unsupported_claims(
+            src, tailored,
+            allowed_names=["Birger AB", "Software Engineer"])
+        high, _ = split_tiers(findings)
+        assert any("acme" in f.value.lower() for f in high), (
+            f"invented employer rode through on the allowed job title: "
+            f"{[(f.kind, f.value, f.tier) for f in findings]}"
+        )
+
+    def test_pure_title_run_still_allowed(self):
+        """The FP the follow-up fixed must stay fixed: a run that IS the
+        job title (plus generic glue) is application context."""
+        from app.services.fabrication import unsupported_claims
+
+        src = "Skills: Python."
+        tailored = "Applying for the Software Engineer role."
+        findings = unsupported_claims(
+            src, tailored, allowed_names=["Software Engineer"])
+        assert not any("software engineer" in f.value.lower()
+                       for f in findings)
+
+    def test_dead_technology_entries_now_match(self):
+        """WO-01 review: 7 vocabulary entries (.net, node.js, c#, ...)
+        could never match — _normalise strips their punctuation. Fixed by
+        normalising the vocabulary at compile time."""
+        from app.services.fabrication import extract_claims
+
+        text = "I have used .NET, Node.js, C#, C++, Next.js in production."
+        techs = {c.value for c in extract_claims(text) if c.kind == "technology"}
+        for expected in (".net", "node.js", "c#", "c++", "next.js"):
+            assert expected in techs, f"{expected} dead — punct stripped before match"

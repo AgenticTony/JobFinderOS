@@ -19,8 +19,25 @@
 >   glued skill runs across connector languages, country enumerations,
 >   phrase-glue — resolved by the corporate-marker/3+token tier rule:
 >   markerless 2-token org runs are advisory, never regenerated).
-> - Fabrication rate is now a measured number with a denominator, per
+"> - Fabrication rate is now a measured number with a denominator, per
 >   the WO's final criterion.
+>
+> **Review round 1 (same day) closed three findings, one critical:** the
+> job-title addition to allowed_names matched as a SUBSTRING, so the
+> standard 'Title, Company — years' CV line let a fabricated employer
+> ride through on its allowed title prefix — the live measurement above
+> ran through that hole, so its zero-high-FP result is optimistic and
+> the FN rate is unmeasured (re-measure before WO-02 conclusions).
+> Fixed with token-wise subtraction (strip the allowed tokens, judge the
+> remainder) + regression test. Also: 7 technology vocabulary entries
+> (.net, c#, node.js, ...) were unmatchable after normalisation —
+> compile-time-normalised patterns now; and the regeneration correction
+> said 'the candidate's CV', violating the second-person invariant at
+> the exact moment of rewrite — now 'your CV'.
+> **Stated limit (review):** the technology vocabulary is a fixed global
+> list, not CV-extracted as the WO specified — off-list tools (the
+> judge's LangChain/Lovable catches) are invisible to Layer A by
+> construction; the judge is the only guard for that class.
 
 ## Why this exists
 
