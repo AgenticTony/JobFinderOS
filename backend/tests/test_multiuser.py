@@ -262,7 +262,17 @@ class TestPerUserMatching:
     def test_same_job_matchable_by_two_users(self, db):
         """The UNIQUE(job_id) constraint is gone — the schema now allows the
         same job scored by two different users."""
+        from app.models import User as UserModel
+
         u1, u2 = uuid.uuid4(), uuid.uuid4()
+        # Postgres enforces match_results.user_id — the users must exist
+        db.add_all([
+            UserModel(id=u1, email=f"mu-{u1.hex[:8]}@test.example",
+                      hashed_password="test-only"),
+            UserModel(id=u2, email=f"mu-{u2.hex[:8]}@test.example",
+                      hashed_password="test-only"),
+        ])
+        db.flush()
         job = JobPosting(
             source="manual", source_id=uuid.uuid4().hex[:8],
             title="Dev", company="X", url=f"https://x/{uuid.uuid4().hex[:6]}",
@@ -390,7 +400,17 @@ class TestOutboundEmailBoundary:
 
         a_uid, b_uid = _uuid.uuid4(), _uuid.uuid4()
         # Alice registers first; Bob second (the old fallback resolved to
-        # whoever was newest, so Bob is the trap).
+        # whoever was newest, so Bob is the trap). Postgres enforces the
+        # profiles FK — the users rows must exist (SQLite never checked).
+        from app.models import User as UserModel
+
+        db.add_all([
+            UserModel(id=a_uid, email=f"alice-{a_uid.hex[:6]}@test.example",
+                      hashed_password="test-only"),
+            UserModel(id=b_uid, email=f"bob-{b_uid.hex[:6]}@test.example",
+                      hashed_password="test-only"),
+        ])
+        db.flush()
         a_profile = Profile(user_id=a_uid, is_active=1, full_name="Alice Anderson",
                              email="alice@example.com", cv_text="ALICE CV TEXT",
                              cv_file_name="alice-cv.pdf", cv_file_path=None)

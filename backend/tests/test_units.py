@@ -115,8 +115,19 @@ def db(_client):
 
 
 def _profile(db, user_id=None):
-    """A profile always belongs to a user now — tests must say which."""
-    p = Profile(is_active=1, user_id=user_id or uuid.uuid4(),
+    """A profile always belongs to a user now — tests must say which.
+
+    Postgres enforces the profiles.user_id FK; SQLite silently doesn't,
+    which is how this helper shipped without a users row at all. The user
+    is created here so both backends enforce the same integrity."""
+    from app.models import User
+
+    uid = user_id or uuid.uuid4()
+    if db.get(User, uid) is None:
+        db.add(User(id=uid, email=f"u-{uid.hex[:10]}@test.example",
+                    hashed_password="test-only-not-loginable"))
+        db.flush()
+    p = Profile(is_active=1, user_id=uid,
                 full_name="Test", cv_file_name="cv.pdf",
                 cv_text="developer python")
     db.add(p)

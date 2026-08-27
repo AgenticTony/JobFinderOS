@@ -241,7 +241,7 @@ scrape (9 sources) → dedupe → per-user gates (location/language/freshness) �
 - [ ] UK test user walkthrough (Profile → Edit setup → GB)
 - [ ] Teamtailor slugs, JobTech free key for production
 - [ ] Deploy: Render (worker) + Cloudflare Pages (frontend) + Postgres.
-      POSTGRES VENDOR IS THE OPEN DECISION — see docs/MIGRATION.md.
+      The Postgres/auth vendor decision is SETTLED (Supabase consolidation) — see MIGRATION.md (repo root); WO0 is the first action.
       ROADMAP "Target architecture (decided)" says Supabase free tier
       (Postgres + 50k-MAU auth + 1GB storage, $0 at beta scale); this line
       previously said Neon, contradicting it. Resolve the two before

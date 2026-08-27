@@ -10,8 +10,17 @@ on:
 
 jobs:
   backend:
-    name: Backend (lint, migrations, tests on Postgres)
+    name: Backend (lint, migrations, tests on ${{ matrix.database }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The suite runs on BOTH backends: SQLite is the local-dev default,
+        # Postgres is the production target. For weeks the job NAME said
+        # "tests on Postgres" while only the alembic/boot steps touched it —
+        # the pytest steps silently ran on SQLite (reviewer finding). A
+        # backend divergence must fail CI, not surface during WO1.
+        database: [sqlite, postgres]
     defaults:
       run:
         working-directory: backend
@@ -46,6 +55,7 @@ jobs:
         run: ruff check --select I,F app/ tests/ scripts/
 
       - name: Alembic migrations apply on real Postgres
+        if: matrix.database == 'postgres'
         env:
           DATABASE_URL: postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci
           DEBUG: "true"  # CI is dev-grade; production guards relaxed by design
@@ -64,6 +74,7 @@ jobs:
           EOF
 
       - name: App boots against Postgres (schema idempotent, auth mounts)
+        if: matrix.database == 'postgres'
         env:
           DATABASE_URL: postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci
           GLM_API_KEY: ""
@@ -85,12 +96,18 @@ jobs:
           "
 
       - name: Unit tests (gates, dedupe, language, state machines)
+        env:
+          TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci' || '' }}
         run: PYTHONPATH=. python -m pytest tests/test_units.py -q
 
       - name: Multi-user tests (isolation, IDOR, rate limits, GDPR)
+        env:
+          TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci' || '' }}
         run: PYTHONPATH=. python -m pytest tests/test_multiuser.py -q
 
-      - name: Flow test (mocked AI, SQLite)
+      - name: Flow test (mocked AI)
+        env:
+          TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci' || '' }}
         run: PYTHONPATH=. python tests/test_flow.py
 
   docker:

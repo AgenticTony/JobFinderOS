@@ -1,14 +1,19 @@
-# MIGRATION — Supabase consolidation (PROPOSED, not started)
+# MIGRATION — Supabase consolidation (DECIDED; not yet started)
 
-Status: **proposed**. Nothing in this document has been begun. The decision
-gate below must be answered first. This plan exists so the decision is made
-against a real scope and cost estimate, not vibes — and so that, if approved,
-it runs to the same standard as the rest of the repo: every work order ships
-with tests that have been seen to fail against the regression it guards.
+Status: **decided — go** (settled 2026-08-27). Reason: vendor consolidation
+for a solo operator and managed auth we never maintain — explicitly NOT
+for RLS (see the correction below; that backstop is available on any
+managed Postgres). Nothing has been started; WO0 is the first action.
+The decision gate is kept below as historical context so it isn't
+re-litigated, not as an open question.
+
+This plan runs to the same standard as the rest of the repo: every work
+order ships with tests that have been seen to fail against the regression
+it guards.
 
 ---
 
-## The decision gate
+## The decision gate (historical — resolved GO)
 
 Proceed with this migration **only if** at least one of these is true:
 
@@ -35,7 +40,7 @@ propagation — available on either vendor.
 
 Also resolved by this decision either way: the ROADMAP previously planned
 "Google OAuth later via Supabase" alongside fastapi-users — two auth
-systems. Whichever way the gate falls, that drift ends.
+systems. That drift ends here.
 
 ## Destination
 
@@ -60,22 +65,57 @@ Ordered so each step is independently verifiable and independently
 rollback-able. The user-UUID remap happens in WO2, **before** RLS lands in
 WO3 — never remap users under live RLS policies keyed to `sub`.
 
+### WO0 — Off-site backups (~30 min, HARD PRECONDITION)
+
+Every later work order assumes the data survives its own mistake; today
+that assumption rests on one drive — `ops/backup.sh` writes to
+`~/backups` on the same disk as the SQLite file it protects. This is the
+only item in the plan whose downside is unrecoverable, so it goes first:
+copy the current backup set off-machine (any of: another machine,
+encrypted cloud storage, an S3 bucket). Nothing else starts until a copy
+exists somewhere the laptop cannot destroy.
+
 ### WO1 — Database: SQLite → Supabase Postgres (~0.5–1 day)
 
 Scope: provision the Supabase project (EU); `DATABASE_URL` to its
 connection string; alembic to head; data migration script for the live
 rows (2 users, 2 profiles, 399 jobs, 243 matches, 4 drafts, 2
 applications — counts verified 2026-08-26); `ops/backup.sh` rewritten for
-Supabase (pg_dump + PITR note; the sqlite3 `.backup` choreography retires).
+Supabase (see the PITR note below; the sqlite3 `.backup` choreography
+retires).
 
-Tests/done: the full suite already runs green on Postgres 16 in CI — that
-is the de-risking fact for this WO. Done when local dev + tests run
-against the Supabase DB and a row-count + invariant diff against the
+**Alembic vs Supabase's schemas (scope + trap):** `env.py` sets
+`target_metadata = Base.metadata` with no `include_object` filter and no
+`version_table_schema`. Supabase Postgres ships `auth`, `storage` and
+`realtime` schemas; autogenerate against it diffs their tables as
+unknown and happily emits DROPs. WO1 adds an `include_object` filter
+restricting autogenerate to `public` and pins `version_table_schema`
+before the first `alembic revision --autogenerate` against Supabase.
+
+De-risking: the suite now runs on BOTH backends in CI (matrix,
+sqlite + postgres) — and making that true found real divergence: 22
+tests failed on Postgres because SQLite silently does not enforce
+foreign keys while the suite fabricated profiles and matches with
+user_ids that had no users row (fixed — the tests now create the user
+rows both backends demand). Backend divergence now fails CI instead of
+surfacing mid-WO1.
+
+Tests/done: full suite + flow green on both CI legs; local dev + tests
+run against the Supabase DB; a row-count + invariant diff against the
 pre-migration snapshot matches exactly (the re-score script's
 snapshot-then-verify discipline, applied here).
 
-Rollback: the SQLite file is untouched until WO2 commits; point
-`DATABASE_URL` back.
+Rollback: **clean only before the first post-cutover write** — the
+SQLite file is untouched by the migration itself, so pointing
+`DATABASE_URL` back is lossless until something writes to Supabase; one
+hunt on the new stack and a rollback silently discards it. With 2 users
+that is tolerable — after any post-cutover write, roll FORWARD, not back.
+
+**Supabase backup tier is a cost decision, not a footnote:** PITR is a
+paid (Pro) feature; the free tier gives daily backups only. Decide
+before WO1 whether paying users' CVs justify Pro from day one — this may
+move beta cost off $0 and belongs in the WO4 budget line, not discovered
+after the first support email.
 
 ### WO2 — Auth: fastapi-users → Supabase Auth (~1–1.5 days)
 
@@ -85,12 +125,32 @@ transaction with a pre-write snapshot; `users.py` shrinks to JWKS
 verification (~50 lines: fetch keys, verify RS256, read `sub`);
 `deps.get_authenticated_user` verifies + upserts the mirror row on first
 sight; delete the 3 auth routers, the async engine/`auth_engine`/the
-dual-database-URL machinery, **and the 96b4cd7 password-policy +
-auth-rate-limit code (Supabase provides both — this deletion is the
-"waste" the decision gate accepts)**; frontend login → supabase-js,
-interceptor → session refresh, logout via SDK; GDPR delete becomes
-dual-delete (local cascade + Supabase admin API) with the rate-limit
-memory purge kept.
+dual-database-URL machinery, and the auth-specific signup hardening from
+96b4cd7. Frontend login → supabase-js, interceptor → session refresh,
+logout via SDK; GDPR delete becomes dual-delete (local cascade + Supabase
+admin API) with the rate-limit memory purge kept.
+
+**Deletion is SURGICAL on the rate limiter:** only `login_rate_limit` /
+`register_rate_limit` (the two deps in `api/deps.py`) and their
+`auth_register`/`auth_login` bucket entries go. `core/ratelimit.py`
+STAYS — `enforce()` is the only ceiling on GLM spend and guards five
+AI-spending endpoints (match_run, draft_prepare, hunt, cv_upload,
+ai_suggest) that Supabase replaces none of.
+
+**AUTH_SECRET guard (deploy blocker):** `config.py`'s production guard
+refuses to construct Settings when `DEBUG=false` if `AUTH_SECRET` is
+weak. Once auth moves to Supabase that value is dead config — but the
+guard still fires and blocks the deploy. Retire the check, or repoint it
+at the Supabase JWT secret so the production guard keeps meaning
+something. Repointing is preferred.
+
+**UUID remap + constraints:** `profiles.user_id` is UNIQUE NOT NULL — a
+remap can transiently collide two rows inside the transaction. With 2
+users and random Supabase UUIDs the collision is theoretical, but write
+the discipline anyway: one transaction, `SET CONSTRAINTS ALL DEFERRED`
+(or an update order proven collision-free), verified by the same
+row-count diff as the data migration. This is the detail that stalls a
+migration at 11pm.
 
 Tests: **test-only JWKS** — a fixture keypair, the JWKS fetch monkeypatched,
 `_register`/`_auth_client` mint signed tokens. The hidden cost of this WO
@@ -148,6 +208,16 @@ frontend auth work set: verified on the wire, not claimed).
 6. **Frontend session shape changes** (refresh flow replaces the 7-day
    token) — the interceptor work from 71ba301 is redone in a new shape,
    browser-verified again before cutover.
+7. **Alembic autogenerate vs Supabase's schemas** — without an
+   `include_object` filter, `alembic revision --autogenerate` diffs
+   Supabase's `auth`/`storage`/`realtime` tables as unknown and emits
+   DROPs for them (WO1 scope).
+8. **SQLite never enforced the FKs** — the suite passed for weeks on
+   non-enforcement; the CI matrix now catches this class, and any new
+   test that fabricates rows without their parents will fail the
+   Postgres leg first.
+9. **AUTH_SECRET's production guard outlives its secret** — retire or
+   repoint it in WO2 or the deploy refuses to boot (WO2 scope).
 
 ## Estimate
 

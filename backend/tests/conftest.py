@@ -22,7 +22,11 @@ rather than merely unlikely.
 import os
 import pathlib
 
-TEST_DB = "sqlite:///./test_suite.db"
+# CI's Postgres leg injects TEST_DATABASE_URL (a THROWAWAY database — the
+# suite drop_all()s it). Locally, unset -> the SQLite scratch file. Never
+# point this at anything you want to keep; the guard below still refuses
+# to run if the engine binds to anything other than exactly this URL.
+TEST_DB = os.environ.get("TEST_DATABASE_URL") or "sqlite:///./test_suite.db"
 
 # Set BEFORE app.core.config / app.core.database are imported anywhere.
 os.environ["DATABASE_URL"] = TEST_DB
