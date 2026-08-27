@@ -55,6 +55,7 @@ bare "WO3" in either document until this is settled** — always qualify it as
 | **WO-02** | Tailoring quality validation | P2 | WO-01 | Needs the harness to measure against |
 | **WO-09** | Re-score the legacy backlog | P3 | WO-08 | Any prompt change forces it; ~$0.33 at corrected pricing |
 | **WO-10** | Mount email verification + password reset | P2 | — | Routers written, never mounted |
+| **WO-15** | Career-site discovery (self-expanding employer boards) | P2 | WO-06 | Replaces the deleted slug-scraper with a mechanism that finds employer career feeds from Platsbanken application_urls (verified 2026-08-27: 79% carry one, custom-domain /jobs.json probes 4/4). Direct-from-employer inventory competitors don't have; vendor-neutral (Teamtailor JSON Feed now, Greenhouse/Lever later). ToS gate before shipping |
 | **WO-14** | Hunt cadence + trial gating | P1 | — | Trial CAC $5.88 → $1.00 by capping *scoring* (not display) at 10/day. Keeps the Hunt button; makes repeat presses a free no-op. Also records the `run_matching` service-clamp gap |
 | **WO-13** | Billing + tax posture (Paddle as Merchant of Record) | P1 | WO-07 | Decided. UK has a **zero** VAT threshold for non-established sellers, so a two-country launch means two registrations from the first sale — an MoR removes both. ~54% margin, ~6–7 user break-even |
 
