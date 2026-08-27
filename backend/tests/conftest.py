@@ -46,8 +46,12 @@ def pytest_collection_modifyitems(session, config, items):
     test module has been imported and had its chance to interfere.
     """
     from app.core.database import DATABASE_URL as bound
+    from app.core.database import normalize_postgres_url
 
-    if bound != TEST_DB:
+    # Compare normalized-to-normalized: app.core.database normalizes its URL
+    # at import, so a bare-postgresql TEST_DATABASE_URL would otherwise
+    # false-refuse (bound +psycopg != TEST_DB bare) and block the suite.
+    if bound != normalize_postgres_url(TEST_DB):
         raise SystemExit(
             f"Refusing to run: the SQLAlchemy engine bound to {bound!r}, "
             f"not {TEST_DB!r}.\nThe suite calls drop_all() — against a real "

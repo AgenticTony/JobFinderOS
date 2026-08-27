@@ -13,7 +13,11 @@ config = context.config
 import os  # noqa: E402
 
 _url = os.getenv("DATABASE_URL", "sqlite:///./jobfinderos.db")
-_url = _url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+# ONE normalization path for every engine (WO-11 review): the app's
+# normalize_postgres_url fixes bare postgresql:// → psycopg2 (not
+# installed); the async-driver step-downs stay local to alembic.
+from app.core.database import normalize_postgres_url
+_url = normalize_postgres_url(_url)
 _url = _url.replace("sqlite+aiosqlite://", "sqlite://", 1)
 config.set_main_option("sqlalchemy.url", _url)
 

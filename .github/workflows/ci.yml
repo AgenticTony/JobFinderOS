@@ -64,7 +64,10 @@ jobs:
           python - <<'EOF'
           import os
           from sqlalchemy import create_engine, inspect
-          eng = create_engine(os.environ["DATABASE_URL"])
+          from app.core.database import normalize_postgres_url
+          # Every engine-construction path normalizes (WO-11 review): a bare
+          # postgresql:// here would resolve to psycopg2, which is not installed.
+          eng = create_engine(normalize_postgres_url(os.environ["DATABASE_URL"]))
           tables = set(inspect(eng).get_table_names())
           expected = {"profiles", "job_postings", "match_results", "application_drafts",
                       "applications", "scrape_runs", "users", "alembic_version"}
