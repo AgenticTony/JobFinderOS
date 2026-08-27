@@ -1061,14 +1061,17 @@ class TestCountryRoutingGate:
           "include_remote": True, "remote_only": False}
 
     def test_foreign_remote_jobs_blocked_for_se_user(self):
+        """NON-EEA foreign locations only — EEA neighbours pass for EEA
+        users under free movement (see TestEEAFreeMovementBloc, which
+        drove that policy decision red-first)."""
         from app.services.pipeline import passes_location_filter as gate
 
         for loc in ("USA", "Remote · USA", "New York, NY", "San Francisco",
-                    "Berlin, Germany", "London, UK", "Toronto, ON"):
+                    "London, UK", "Toronto, ON"):
             job = _job(location=loc, remote=True)
             assert not gate(job, self.SE), (
-                f"{loc!r} passed a Swedish user's gate — foreign-located jobs "
-                "are never takeable, even remote"
+                f"{loc!r} passed a Swedish user's gate — non-EEA-located jobs "
+                "need work authorization the user lacks, even remote"
             )
 
     def test_in_country_jobs_unchanged_for_gb_user(self):
@@ -1227,3 +1230,45 @@ class TestJobtechPagination:
         assert len(jobs) == jt.MAX_PAGES_PER_QUERY * 100, (
             f"cap not respected: {len(jobs)}"
         )
+
+
+class TestEEAFreeMovementBloc:
+    """WO-06 review follow-up: the gate blocked on a work-authorization
+    rationale that only holds for non-EEA states. A Malmö user CAN work
+    for a Danish employer (Öresund: ~20k daily commuters; EEA free
+    movement), so EEA-located sets pass for EEA users. Post-Brexit GB
+    has no free-movement bloc — its behaviour is unchanged."""
+
+    SE = {"country": "SE", "municipality": "Malmö", "region": "Skåne län",
+          "include_remote": True, "remote_only": False}
+    GB = {"country": "GB", "municipality": "Manchester", "region": "Greater Manchester",
+          "include_remote": True, "remote_only": False}
+
+    def test_se_user_keeps_eea_neighbour_remote_jobs(self):
+        from app.services.pipeline import passes_location_filter as gate
+
+        for loc in ("Copenhagen, Denmark", "Denmark", "Berlin, Germany",
+                    "Amsterdam, Netherlands", "Oslo, Norway"):
+            assert gate(_job(loc, remote=True), self.SE), (
+                f"{loc!r} blocked for an SE user — EEA free movement makes "
+                "neighbour-located remote jobs takeable (the Öresund case)"
+            )
+
+    def test_se_user_still_loses_true_work_authorization_blocks(self):
+        from app.services.pipeline import passes_location_filter as gate
+
+        for loc in ("USA", "Remote · USA", "Toronto, Canada", "Singapore"):
+            assert not gate(_job(loc, remote=True), self.SE), (
+                f"{loc!r} passed an SE user — non-EEA locations need work "
+                "authorization the user doesn't have"
+            )
+
+    def test_gb_user_has_no_bloc_post_brexit(self):
+        from app.services.pipeline import passes_location_filter as gate
+
+        assert not gate(_job("Berlin, Germany", remote=True), self.GB), (
+            "GB users have no EEA free movement — foreign EEA locations stay "
+            "blocked for them (post-Brexit right-to-work reality)"
+        )
+        # in-country unchanged
+        assert gate(_job("London, UK", remote=True), self.GB)

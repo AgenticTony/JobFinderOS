@@ -22,7 +22,7 @@ from app.core.timeutil import utc_now
 from app.models import JobPosting, MatchResult, Profile, ScrapeRun
 from app.schemas.common import dump_json_list, parse_json_list
 from app.services import matcher_service, source_packs
-from app.services.country_lexicon import location_countries
+from app.services.country_lexicon import blocked_for_user, location_countries
 from app.services.language_filter import passes_language_filter
 from app.services.scrapers import SCRAPER_REGISTRY, NormalizedJob
 
@@ -78,8 +78,7 @@ def passes_location_filter(job: NormalizedJob, ctx: Dict) -> bool:
     # the user's country ("Sweden, Germany") passes no matter what else
     # it names; unresolvable locations ("Remote", empty) resolve to an
     # empty set and fall through to the remote-opt-in rule unchanged.
-    countries = location_countries(job.location)
-    if countries and ctx.get("country") and ctx["country"] not in countries:
+    if blocked_for_user(location_countries(job.location), ctx.get("country")):
         return False
 
     # Outside the area (or no location text): only for remote-opted users

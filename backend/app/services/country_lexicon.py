@@ -2,9 +2,16 @@
 
 WO-06 / D1: the gate had no country dimension, so remote jobs located in
 the USA passed Swedish include_remote users — a pool of USA 73 vs Malmö
-11 for a Malmö user. A job whose location resolves ONLY to foreign
-countries is not takeable (US remote jobs need US work authorization),
-regardless of the remote flag.
+11 for a Malmö user.
+
+The blocking RATIONALE is free movement, deliberately (review follow-up
+2026-08-27): a location set is foreign when the user cannot lawfully
+work in any of the named countries. Non-EEA locations (US, CA, IN, ...)
+need work authorization the user lacks. EEA states form a free-movement
+bloc: an EEA user can work in ANY EEA country, so a listing naming any
+EEA country passes for them — Malmö and Copenhagen are one labour
+market (~20k daily Öresund commuters). Post-Brexit GB has no bloc:
+foreign means foreign for GB users.
 
 Design constraints, deliberately:
 - MEMBERSHIP, not ranking: a multi-country location ("Sweden, Germany",
@@ -28,7 +35,7 @@ Design constraints, deliberately:
 """
 
 import re
-from typing import Set
+from typing import Optional, Set
 
 # term (lowercase) -> ISO country code
 _TERMS = {
@@ -73,7 +80,7 @@ _COMPILED = [
 _MULTI_REGION = re.compile(r"\b(north|south|latin|central)\s+america\b")
 
 
-def location_countries(location: str) -> Set[str]:
+def location_countries(location: Optional[str]) -> Set[str]:
     """Resolve a free-text location to the SET of ISO country codes named.
 
     An empty set means 'unresolvable / global' — the caller keeps its
@@ -86,3 +93,31 @@ def location_countries(location: str) -> Set[str]:
         return set()
     hay = _MULTI_REGION.sub(" ", location.lower())
     return {country for pattern, country in _COMPILED if pattern.search(hay)}
+
+
+# The EEA free-movement bloc (EU 27 + IS, LI, NO). Post-Brexit GB is
+# deliberately absent: UK residents have no EEA right to work.
+_EEA = frozenset({
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
+    "DE", "GR", "HU", "IS", "IE", "IT", "LV", "LI", "LT", "LU",
+    "MT", "NL", "NO", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+})
+
+
+def blocked_for_user(countries: Set[str], home: Optional[str]) -> bool:
+    """The gate's country policy in one place: is this location set
+    foreign for a user whose home country is `home`?
+
+    - empty set (unresolvable/global) -> never blocked
+    - set contains home -> never blocked (membership)
+    - home is EEA and the set contains ANY EEA country -> not blocked
+      (free movement: a Malmö user can work for a Danish employer)
+    - otherwise -> blocked (work authorization the user lacks)
+    """
+    if not countries or not home:
+        return False
+    if home in countries:
+        return False
+    if home in _EEA and (countries & _EEA):
+        return False
+    return True
