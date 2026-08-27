@@ -210,6 +210,75 @@ Done: `https://` custom domain, health/ready probes, one real signup +
 login + hunt exercised end-to-end in the browser (the standard the
 frontend auth work set: verified on the wire, not claimed).
 
+### WO5 — AI inference residency + AI Act posture (decision-gated; runs alongside WO4)
+
+Why: CVs are high-stakes personal data leaving the EEA on every match —
+Z.ai's DPA (verified 2026-08-27) processes API data "generally from
+Singapore", names no SCCs, and never mentions GDPR. No adequacy decision
+covers Singapore or the corporate group's home jurisdiction. CVs also
+routinely carry incidental Article 9 special-category data (trade-union
+roles, disability accommodations, religious schools, health-shaped
+employment gaps), which raises the transfer stakes above ordinary
+category. And independent of law: "your CV goes to a Chinese AI company"
+is a one-screenshot trust problem for a product serving people in a
+stressful economic position.
+
+**The option that would dissolve this does not exist today (verified
+2026-08-27).** Mistral hosts Z.ai's GLM-5.2 ("hosted by Mistral, served
+without Mistral modifications" — model card; public preview) and Mistral
+Regional Endpoints run on Mistral-managed GPU infrastructure in EU/EFTA
+data centers. But a live `models.list` check against all three endpoints
+(global, api.eu, api.us) with our own key returns NO GLM model anywhere:
+the hosting is restricted-preview and NOT regionalized. The residency
+guarantee does not currently extend to the GLM family. This is a vendor
+rollout dependency, not a shipping option — so it gets a monitor, not a
+plan.
+
+- **Interim posture (now → GLM-regional-or-equivalent):** stay on Z.ai
+  direct under a documented wrapper — their API DPA (controller/processor
+  terms), push Z.ai to commit to SCCs in writing, a written TIA, and
+  **pseudonymisation as DEFENCE-IN-DEPTH ONLY** (strip names/contacts
+  server-side before the call, reinsert after). Per Recital 26 this does
+  NOT change the Chapter V position: a CV minus the name is still a
+  near-unique fingerprint (employer + dates + title + city re-identifies
+  trivially), and it helps the matching call more than the tailoring
+  call, which needs the full CV by definition. Do not present it as a
+  transfer remedy.
+- **Monitor (one curl, weekly, ops checklist):** `GET api.eu.mistral.ai/
+  v1/models` — the moment a GLM model appears, the migration trigger
+  fires. Alternatives to watch the same way: EU-hosted GLM from Nebius /
+  Scaleway / EUrouter (each needs its own DPA diligence).
+- **Migration trigger + gates (all must pass):** (1) GLM family served
+  on an EU-resident endpoint; (2) quality bake-off passes — NOTE the
+  re-calibration cost priced into this gate: a model change means a new
+  matching_prompt_version, re-measured score variance (the dead-band
+  [13,25) and keep-min were derived from SD 5.5 measured on glm-5.1),
+  tier bands revisited, and a backlog re-score (the rescore_backlog.py
+  --prompt-version tooling already exists for exactly this); (3) verified
+  per-token pricing at the EU endpoint. Known so far (verified
+  2026-08-27): GLM-5.2 via Mistral lists $1.40/$0.14-cached/$4.40 with a
+  1.1x regional surcharge — input/output identical to Z.ai direct and
+  cache CHEAPER ($0.14 vs Z.ai's $0.26), so a 99%-cache-hit workload may
+  net out cheaper EU-resident than China-routed. Confirm with recorded
+  per-call usage, not arithmetic. Mistral's own models remain
+  quality-disqualified regardless of residency (large scored 45-58 on
+  jobs GLM scored 18-22 — a different judgment, not compression).
+- **AI Act items (live law since 2026-08-02):** JobFinderOS is NOT
+  Annex III high-risk — point 4 covers employer-side recruitment/
+  selection; we evaluate jobs, not candidates. But: an "AI-assisted"
+  disclosure line in the UI (Art 50(1)); machine-readable marking on
+  generated PDFs (Art 50(2)) — cheap as PDF metadata either way, since
+  the tailored CV is grounded in the user's real CV; no manipulative
+  monetisation toward job seekers (Art 5(1)(b) — unemployment is
+  textbook "specific social or economic situation"); and the
+  **employer-facing scope boundary**: any surface where employers see
+  matched candidates flips classification to high-risk. That line
+  belongs in PRD.md's scope boundaries as a hard product rule (PRD.md is
+  mid-write by the other session — carry it there when it lands).
+- **Gate before the first paying user:** one professional legal hour
+  covering the Chapter V transfer stack and the Art 50(2) marking
+  exemption. Cheap against 4%-of-turnover exposure.
+
 ## Traps (each is a line item, not a footnote)
 
 1. **JWT propagation is the whole value of WO3.** A service-role key
