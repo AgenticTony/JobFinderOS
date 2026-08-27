@@ -223,19 +223,39 @@ category. And independent of law: "your CV goes to a Chinese AI company"
 is a one-screenshot trust problem for a product serving people in a
 stressful economic position.
 
-**The option that would dissolve this exists — but is TIER-GATED, not
-absent (verified 2026-08-27, corrected same day).** Mistral hosts Z.ai's
-GLM-5.2 ("hosted by Mistral, served without Mistral modifications" —
-model card) on Mistral-managed GPU infrastructure with EU/EFTA regional
-endpoints. `models.list` on all three endpoints (HTTP 200 verified)
-shows no GLM — but a direct chat-completions probe returns **HTTP 403
-`tier_not_allowed`** (not 404) for `zai-glm-5-2` / `glm-5.2` on BOTH
-`api.mistral.ai` AND `api.eu.mistral.ai`: the model IDs are recognized
-and plausibly deployed EU-regionally, gated behind a higher La
-Plateforme subscription tier. Tier-gated models do not appear in
-`models.list` — so the list check alone can under-report availability
-(a silent-failure trap caught when re-verifying with status codes plus
-a direct probe).
+**Hosting verified in-region — NOT a proxy (2026-08-27).** Three
+independent confirmations that Mistral serves the MIT weights itself:
+(1) the announcement (11 Aug 2026): "inference and the associated
+processing take place in the selected region"; open models run "on the
+same infrastructure, regional controls, and service commitments as
+Mistral models"; (2) GLM-5.2 is a first-class catalogue entry, licence
+Open — the MIT weights are what make hosting possible at all; (3) the
+decisive one: **Z.ai is absent from Mistral's sub-processor list**, as
+is any China- or Singapore-based entity. The EU-region inference path
+is Mistral Compute (France), CoreWeave (EEA), Azure (Sweden/Norway).
+Google appears only for the US API endpoint — **the EU endpoint must be
+selected explicitly** or the residency guarantee does not apply.
+
+**Blocker: TIER-GATED (verified 2026-08-27).** `models.list` on all
+three endpoints (HTTP 200) shows no GLM — but a direct one-token probe
+returns **HTTP 403 `tier_not_allowed`** (not 404) for `zai-glm-5-2` on
+BOTH `api.mistral.ai` AND `api.eu.mistral.ai`: the model exists, is
+recognized, and is gated behind a higher La Plateforme tier. Tier-gated
+models do not appear in `models.list` — the list check alone
+under-reports availability (silent-failure trap; caught by re-verifying
+with status codes plus a direct probe).
+
+**DPA comparison (verified 2026-08-27):** Mistral's DPA is a materially
+better posture than Z.ai's — customer is controller, Mistral is
+processor, API data is not used for training absent opt-in or explicit
+feedback, SCCs Module 4 are named for restricted transfers, 30-day
+deletion after termination. Z.ai's DPA never names GDPR or SCCs.
+
+Re-calibration reminder unchanged: 5.2 is not the model everything was
+tuned against — new matching_prompt_version, re-measured SD, tier
+bands, backlog re-score (see the gates below). Incidental: Mistral runs
+Sentry in the EEA — match the region when OUR observability lands
+(WO4), for the same residency logic.
 
 - **Interim posture (now → GLM-regional-or-equivalent):** stay on Z.ai
   direct under a documented wrapper — their API DPA (controller/processor

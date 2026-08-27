@@ -56,17 +56,46 @@ Pipeline: harvest → gate → store → match/score → decide → tailor → s
   keep GLM with SCCs + a transfer impact assessment + sub-processor
   disclosure in the privacy policy, and accept that some SE/UK users will
   decline on principle.
-  Researched option (a): Mistral Large 3 on La Plateforme — EU-resident,
-  French company, and CHEAPER than GLM at this workload ($0.50/$1.50 vs
-  $0.60/$2.20 per M tokens; ~$4.71 vs ~$5.96 per user/month at the measured
-  2.06x sampling multiplier). Mistral Small 4 for triage + Large 3 for
-  keepers maps onto needs_another_sample() and lands near $2/user/month.
-  NOT YET VERIFIED: Swedish-language scoring quality. Before any swap, re-run
-  scratchpad/variance.py (within-job SD <= 8) and scale.py (paired same-run
-  vs GLM across the score range) — a provider change is a bigger calibration
-  event than a version bump, and the tier bands (80/50/30) plus
-  MATCH_KEEP_MIN_SCORE=25 are calibrated to GLM. Treat it like a prompt
-  change: version it, and never mix scales in one queue.
+  Researched option (a) — CORRECTED to verified prices/facts 2026-08-27
+  (the original passage was priced on a generation of list prices that no
+  longer exists: GLM at $0.60/$2.20):
+  - Verified pricing: GLM-5.1 via Z.ai $1.40 in / $0.26 cached / $4.40 out
+    (docs.z.ai). GLM-5.2 via Mistral $1.40 / $0.14 cached / $4.40, with a
+    1.1x regional surcharge on the EU endpoint — a 99%-cache-hit production
+    workload may net CHEAPER EU-resident than China-routed (cache $0.154
+    effective vs $0.26). Confirm from recorded per-call usage, not arithmetic.
+  - Mistral's OWN models are quality-disqualified, now decisively: Large
+    kept 16/16 jobs including ones GLM scored 8, 10 and 12 (re-cost run,
+    2026-08-27). That is not range compression; it is a different judgment.
+  - Two-tier mistral triage: REVERSED on cost at verified prices (22%
+    cheaper in the interleaved test) but STILL REJECTED on quality — it
+    buys a 22% saving for a queue 2.5x larger filled with jobs the
+    calibrated model rejects. The original '100% recall' was a meaningless
+    metric (Small forwarded 62%, Large keeps everything it is handed); the
+    correct metric is precision at the keep line / queue inflation.
+    Production note: GLM's test cache was 81% because the run interleaved
+    three providers; sequential production runs hit 99%, so real GLM cost
+    is lower than the comparison showed.
+  - The EU-resident GLM path is real, not a proxy: Mistral hosts the MIT
+    weights on its own EU/EEA infrastructure (announcement, 11 Aug 2026);
+    the sub-processor list contains NO Z.ai and no China/Singapore entity
+    — EU inference path is Mistral Compute (France), CoreWeave (EEA),
+    Azure (Sweden/Norway). MUST select the EU endpoint explicitly (Google
+    is listed for the US endpoint). BLOCKER: tier-gated — 403
+    tier_not_allowed on our key (probe, 2026-08-27); identify the
+    unlocking tier and cost. Mistral's DPA names SCCs Module 4, no
+    training on API data by default, 30-day post-termination deletion —
+    a materially better posture than Z.ai's DPA, which never names GDPR
+    or SCCs.
+  - NOT YET VERIFIED: Swedish-language scoring quality of GLM-5.2, and
+    5.2 is NOT the model everything was tuned against. Before any swap,
+    re-run scratchpad/variance.py (within-job SD <= 8) and scale.py
+    (paired same-run vs GLM across the score range) — a provider change
+    is a bigger calibration event than a version bump, and the tier bands
+    (80/50/30) plus MATCH_KEEP_MIN_SCORE=25 are calibrated to GLM-5.1.
+    Treat it like a prompt change: version it (rescore_backlog.py
+    --prompt-version exists for the backlog), and never mix scales in
+    one queue.
   Beta ≈ $7/mo. Growing (50–500) ≈ $25–45. 1k users ≈ $250–400 against
   ~£12k revenue. Vercel Pro + Neon is the comfort upgrade once revenue
   justifies it, not a prerequisite (Vercel has no first-party Postgres
