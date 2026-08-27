@@ -757,3 +757,18 @@ class TestCostDoSClamp:
         _auth_client(client, email)
         r = client.post("/api/v1/pipeline/run", json={"max_matches": 100000})
         assert r.status_code == 422, f"{r.status_code}: {r.text[:200]}"
+
+    def test_pipeline_route_rejects_unknown_source(self, client, db):
+        """Client-supplied source names are registry-validated at the
+        boundary: a removed scraper (teamtailor post-WO-08) or typo gets
+        a 422 naming the valid sources — not a silently dropped source
+        or a failed ScrapeRun per hunt."""
+        email = f"src-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        r = client.post("/api/v1/pipeline/run",
+                        json={"sources": ["jobtech", "teamtailor"]})
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:200]}"
+        assert "teamtailor" in r.text and "jobtech" in r.text, (
+            f"error should name the unknown source and the valid ones: {r.text[:200]}"
+        )

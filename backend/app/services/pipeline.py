@@ -207,7 +207,10 @@ def _select_sources(ctx: Optional[Dict], sources: Optional[List[str]]) -> List[s
     skipped this filter; found in review 2026-08-27.
     """
     if sources:
-        return sources
+        # Belt to the schema's boundary validation: internal callers
+        # (scheduler, tests) aren't schema-checked, so explicit lists
+        # filter too — the docstring's 'every branch' is literally true
+        return [s for s in sources if s in SCRAPER_REGISTRY]
     if ctx:
         requested = [
             s for s in source_packs.pack_for_country(ctx["country"])

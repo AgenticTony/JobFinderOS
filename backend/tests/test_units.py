@@ -1039,7 +1039,10 @@ class TestGlobalSourceBranchFilter:
         selected = pl._select_sources(ctx=ctx, sources=None)
         assert "reed" in selected and "adzuna" not in selected
 
-    def test_explicit_sources_pass_through(self):
+    def test_explicit_sources_filter_stale_names_too(self):
+        """The docstring says EVERY branch filters — including explicit
+        lists from internal callers (the API schema validates its own)."""
         from app.services import pipeline as pl
 
         assert pl._select_sources(ctx=None, sources=["jobtech"]) == ["jobtech"]
+        assert pl._select_sources(ctx=None, sources=["jobtech", "teamtailor"]) == ["jobtech"]
