@@ -197,6 +197,32 @@ def _job_exists(db: Session, nj: NormalizedJob) -> bool:
 # We flush each posting immediately to make same-run dedup work.
 
 
+def _select_sources(ctx: Optional[Dict], sources: Optional[List[str]]) -> List[str]:
+    """Which scrapers a hunt runs — the SINGLE source of truth.
+
+    Every branch filters through SCRAPER_REGISTRY so a stale config name
+    (a scraper removed while .env still lists it) is a clean skip, not a
+    failed ScrapeRun on every hunt. The global-allow-list branch — the
+    one every pre-onboarding user (the trial funnel) takes — originally
+    skipped this filter; found in review 2026-08-27.
+    """
+    if sources:
+        return sources
+    if ctx:
+        requested = [
+            s for s in source_packs.pack_for_country(ctx["country"])
+            if s in SCRAPER_REGISTRY
+        ]
+        # Worldwide remote boards are pointless for a strictly-local
+        # user — don't even spend the requests
+        if not ctx.get("include_remote"):
+            requested = [s for s in requested if s not in source_packs.SHARED_REMOTE_SOURCES]
+            if not requested:
+                logger.info("Strictly-local user — remote boards skipped")
+        return requested
+    return [s for s in settings.get_scrape_sources() if s in SCRAPER_REGISTRY]
+
+
 def run_pipeline(
     sources: Optional[List[str]] = None,
     match: bool = True,
@@ -213,18 +239,7 @@ def run_pipeline(
     try:
         ctx = build_scrape_context(db, user_id=user_id)
         # Per-user pack when onboarded; explicit request or global allow-list otherwise
-        if sources:
-            requested = sources
-        elif ctx:
-            requested = [s for s in source_packs.pack_for_country(ctx["country"]) if s in SCRAPER_REGISTRY]
-            # Worldwide remote boards are pointless for a strictly-local
-            # user — don't even spend the requests
-            if not ctx.get("include_remote"):
-                requested = [s for s in requested if s not in source_packs.SHARED_REMOTE_SOURCES]
-                if not requested:
-                    logger.info("Strictly-local user — remote boards skipped")
-        else:
-            requested = settings.get_scrape_sources()
+        requested = _select_sources(ctx, sources)
         scrape_summaries = []
         for source in requested:
             run = scrape_source(db, source, ctx)

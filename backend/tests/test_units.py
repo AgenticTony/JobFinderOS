@@ -1006,3 +1006,40 @@ class TestStripDeadSurface:
         from app.services import source_packs
 
         assert "teamtailor" not in source_packs.pack_for_country("SE")
+
+
+class TestGlobalSourceBranchFilter:
+    """WO-08 review: the global-allow-list branch (pre-onboarding users —
+    the trial funnel) skipped the SCRAPER_REGISTRY filter the pack branch
+    applies, so any stale name in SCRAPE_SOURCES wrote a failed ScrapeRun
+    on every hunt instead of a clean skip. The test drives the PRODUCTION
+    selector (_select_sources) — a test-side copy of the filter would
+    only guard itself."""
+
+    def test_global_branch_filters_stale_source_names(self, db, monkeypatch):
+        from app.services import pipeline as pl
+
+        class _StubSettings:
+            @staticmethod
+            def get_scrape_sources():
+                return ["jobtech", "teamtailor", "bogus-future-remnant"]
+
+        monkeypatch.setattr(pl, "settings", _StubSettings)
+        # No ctx (no onboarded profile) -> the global-allow-list branch
+        selected = pl._select_sources(ctx=None, sources=None)
+        assert selected == ["jobtech"], (
+            f"global branch selected {selected} — stale names must be "
+            "filtered before scrape_source, never written as failed runs"
+        )
+
+    def test_pack_branch_still_filters_and_respects_local(self):
+        from app.services import pipeline as pl
+
+        ctx = {"country": "GB", "include_remote": False}
+        selected = pl._select_sources(ctx=ctx, sources=None)
+        assert "reed" in selected and "adzuna" not in selected
+
+    def test_explicit_sources_pass_through(self):
+        from app.services import pipeline as pl
+
+        assert pl._select_sources(ctx=None, sources=["jobtech"]) == ["jobtech"]

@@ -26,7 +26,7 @@ it applies for you.
                                            └──────────────┘   └───────────────┘   └─────────────┘
 ```
 
-1. **Scrape** — free public job APIs (no keys needed): JobTech/Platsbanken (SE), Reed + Adzuna + Careerjet (GB), Teamtailor, Arbeitnow, Remotive, Jobicy, Working Nomads
+1. **Scrape** — free public job APIs (no keys needed): JobTech/Platsbanken (SE), Reed + Careerjet (GB), Arbeitnow, Remotive, Jobicy, Working Nomads
 2. **Match** — every new job is scored against your CV (0-100) with tier, matched/missing/transferable
    skills and an *apply / maybe / skip* recommendation (talks directly to you: "Your tech stack…")
 3. **Approve** — you approve/reject each recommendation (nothing happens without you)

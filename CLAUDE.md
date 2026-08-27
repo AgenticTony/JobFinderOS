@@ -238,7 +238,7 @@ scrape (9 sources) → dedupe → per-user gates (location/language/freshness) �
       (Indeed's API died 2023; Seek has none and owns Jora). Same email should
       settle the caching/redistribution ToS question that gates shared-fetch.
 - [ ] UK test user walkthrough (Profile → Edit setup → GB)
-- [ ] Teamtailor slugs, JobTech free key for production
+- [ ] JobTech free key for production
 - [ ] Deploy: Render (worker) + Cloudflare Pages (frontend) + Postgres.
       The Postgres/auth vendor decision is SETTLED (Supabase consolidation) — see MIGRATION.md (repo root); MIG-WO0 is the first action.
       (Historical: this line and ROADMAP briefly disagreed on Neon vs
