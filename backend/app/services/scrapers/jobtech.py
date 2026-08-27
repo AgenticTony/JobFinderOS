@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 API_URL = "https://jobsearch.api.jobtechdev.se/search"
 PER_QUERY_LIMIT = 100  # API max page size
+# WO-06: the official whole-market API is the highest-precision source
+# (75% keeper rate vs 13% for the remote aggregators) — walk offset
+# pages per query instead of taking only page one.
+MAX_PAGES_PER_QUERY = 3
 
 
 def _parse_dt(raw: Optional[str]) -> Optional[datetime]:
@@ -60,25 +64,34 @@ class JobtechScraper(BaseScraper):
 
         queries = self._queries(context)
         for query in queries:
-            try:
-                response = httpx.get(
-                    API_URL,
-                    params={"q": query, "limit": PER_QUERY_LIMIT},
-                    headers=headers,
-                    timeout=settings.SCRAPE_TIMEOUT_SECONDS,
-                    follow_redirects=True,
-                )
-                response.raise_for_status()
-                data = response.json()
-            except Exception as e:
-                logger.warning("[jobtech] query '%s' failed: %s", query, e)
-                continue
+            for page in range(MAX_PAGES_PER_QUERY):
+                offset = page * PER_QUERY_LIMIT
+                try:
+                    response = httpx.get(
+                        API_URL,
+                        params={"q": query, "limit": PER_QUERY_LIMIT,
+                                "offset": offset},
+                        headers=headers,
+                        timeout=settings.SCRAPE_TIMEOUT_SECONDS,
+                        follow_redirects=True,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                except Exception as e:
+                    logger.warning(
+                        "[jobtech] query '%s' page %d failed: %s", query, page, e
+                    )
+                    break
 
-            for hit in data.get("hits", []):
-                job = self._normalize(hit)
-                if job and job.source_id not in seen:
-                    seen.add(job.source_id)
-                    jobs.append(job)
+                hits = data.get("hits", [])
+                for hit in hits:
+                    job = self._normalize(hit)
+                    if job and job.source_id not in seen:
+                        seen.add(job.source_id)
+                        jobs.append(job)
+
+                if len(hits) < PER_QUERY_LIMIT:
+                    break  # short page = end of results for this query
 
         logger.info("[jobtech] fetched %d jobs from %d queries", len(jobs), len(queries))
         return jobs

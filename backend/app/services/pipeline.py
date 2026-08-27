@@ -22,6 +22,7 @@ from app.core.timeutil import utc_now
 from app.models import JobPosting, MatchResult, Profile, ScrapeRun
 from app.schemas.common import dump_json_list, parse_json_list
 from app.services import matcher_service, source_packs
+from app.services.country_lexicon import location_country
 from app.services.language_filter import passes_language_filter
 from app.services.scrapers import SCRAPER_REGISTRY, NormalizedJob
 
@@ -70,6 +71,15 @@ def passes_location_filter(job: NormalizedJob, ctx: Dict) -> bool:
     terms = [t.lower() for t in (ctx.get("municipality"), ctx.get("region")) if t]
     if terms and job.location and any(term in job.location.lower() for term in terms):
         return True
+
+    # COUNTRY ROUTING (WO-06 / D1): a job whose location resolves to a
+    # foreign country is not takeable — remote in the US still needs US
+    # work authorization — so it never passes, regardless of remote flag.
+    # Unresolvable locations ("Remote", "Anywhere", empty) resolve to None
+    # and fall through to the remote-opt-in rule unchanged.
+    job_country = location_country(job.location)
+    if job_country and ctx.get("country") and job_country != ctx["country"]:
+        return False
 
     # Outside the area (or no location text): only for remote-opted users
     return bool(ctx.get("include_remote")) and bool(job.remote)

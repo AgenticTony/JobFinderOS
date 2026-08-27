@@ -254,7 +254,7 @@ Carried forward from CLAUDE.md; these are load-bearing and enforced in tests.
 
 Ranked by product impact, not by effort.
 
-**D1 — No country routing in sourcing (severity: highest).**
+**D1 — No country routing in sourcing — FIXED 2026-08-27 (WO-06).**
 Every enabled source is queried for every user regardless of country. A Malmö
 user queries Reed (a UK board) with `locationName=Malmö` and gets zero rows;
 a UK user would query the Swedish government API with "London". The pool that
@@ -277,7 +277,17 @@ Measured on the live pool (399 postings, one SE user in Malmö):
 the Swedish government source that should dominate for a Swedish user
 contributed 38 rows. **Scoring quality is downstream of pool quality — no
 amount of model tuning fixes a pool that does not contain the right jobs.**
-This is the top-priority fix. See WO-06.
+This was the top-priority fix. **Resolution (WO-06):** the location gate
+gained a country dimension (`country_lexicon.location_country` —
+word-boundary, block-only, multi-region-aware): a job whose location
+resolves to a foreign country never passes, regardless of remote flag,
+and the gate runs at scrape time so foreign rows are never stored.
+Verified against the live pool: the exact D1 buckets (jobicy USA ×69,
+Berlin ×12, UK ×10, Poland ×8, Munich ×6) are now blocked while
+Malmö/Stockholm and genuinely-global locations keep prior behaviour.
+Jobtech (75% keeper rate) also paginates — offset pages per query,
+short-page stop, 3-page cap — so the highest-precision source is no
+longer volume-starved.
 
 **D2 — Fabrication invariant is unenforced.** Every test touching tailoring
 mocks `tailor_application`. WO-01.

@@ -1046,3 +1046,146 @@ class TestGlobalSourceBranchFilter:
 
         assert pl._select_sources(ctx=None, sources=["jobtech"]) == ["jobtech"]
         assert pl._select_sources(ctx=None, sources=["jobtech", "teamtailor"]) == ["jobtech"]
+
+
+class TestCountryRoutingGate:
+    """WO-06 / D1: the location gate had no country dimension — a remote
+    job located in the USA passed a Swedish include_remote user, whose
+    pool became USA 73 vs Malmö 11. A job located in a FOREIGN country is
+    blocked regardless of remote flag; global/unresolvable locations keep
+    the remote-opt-in behaviour."""
+
+    SE = {"country": "SE", "municipality": "Malmö", "region": "Skåne län",
+          "include_remote": True, "remote_only": False}
+    GB = {"country": "GB", "municipality": "Manchester", "region": "Greater Manchester",
+          "include_remote": True, "remote_only": False}
+
+    def test_foreign_remote_jobs_blocked_for_se_user(self):
+        from app.services.pipeline import passes_location_filter as gate
+
+        for loc in ("USA", "Remote · USA", "New York, NY", "San Francisco",
+                    "Berlin, Germany", "London, UK", "Toronto, ON"):
+            job = _job(location=loc, remote=True)
+            assert not gate(job, self.SE), (
+                f"{loc!r} passed a Swedish user's gate — foreign-located jobs "
+                "are never takeable, even remote"
+            )
+
+    def test_in_country_jobs_unchanged_for_gb_user(self):
+        from app.services.pipeline import passes_location_filter as gate
+
+        assert gate(_job("London, UK", remote=True), self.GB), (
+            "in-country remote job blocked for a GB user — country routing "
+            "must be user-country-relative, not absolute"
+        )
+
+    def test_global_and_local_locations_keep_current_behaviour(self):
+        from app.services.pipeline import passes_location_filter as gate
+
+        # Malmö local passes as always (local terms path)
+        assert gate(_job("Malmö, Skåne län", remote=False), self.SE)
+        # Unresolvable/global remote: passes for include_remote users, as today
+        assert gate(_job("Remote job", remote=True), self.SE)
+        assert gate(_job("Remote", remote=True), self.SE)
+        assert gate(_job(None, remote=True), self.SE)
+        # ...and still blocked for strictly-local users, as today
+        strict = dict(self.SE, include_remote=False)
+        assert not gate(_job("Remote job", remote=True), strict)
+        assert not gate(_job("USA", remote=True), strict)
+
+    def test_multi_region_listings_stay_global(self):
+        """"Europe, North America, Latin America" names hemispheres, not the
+        US — an Europe-including remote listing is takeable for a Swede and
+        must not be blocked via the bare word 'america'."""
+        from app.services.country_lexicon import location_country
+
+        assert location_country("Europe, North America, Latin America") is None
+        assert location_country("Time zone: CET (+/- 3 hours)") is None
+        # ...while actual US locations still resolve
+        assert location_country("North America · USA") == "US"
+        assert location_country("Remote · USA") == "US"
+
+    def test_swedish_located_jobs_pass_for_se_user(self):
+        from app.services.pipeline import passes_location_filter as gate
+
+        for loc in ("Stockholm", "Göteborg", "Malmö", "Sverige"):
+            assert gate(_job(loc, remote=True), self.SE), (
+                f"{loc!r} is in-country for an SE user — must not be blocked"
+            )
+
+    def test_foreign_pool_never_stored(self, db, monkeypatch):
+        """The gate runs inside scrape_source BEFORE storage — foreign rows
+        must never reach job_postings."""
+        from app.services import pipeline as pl
+        from app.services.scrapers.base import NormalizedJob
+
+        class _Stub:
+            @staticmethod
+            def is_configured(ctx):
+                return True
+
+            @staticmethod
+            def fetch(ctx):
+                return [
+                    NormalizedJob(source="stub", source_id="1", title="US remote",
+                                  company="X", url="https://x/1", remote=True,
+                                  location="Remote · USA"),
+                    NormalizedJob(source="stub", source_id="2", title="Malmö",
+                                  company="Y", url="https://x/2", remote=False,
+                                  location="Malmö, Skåne län"),
+                ]
+
+        monkeypatch.setitem(pl.SCRAPER_REGISTRY, "stub", _Stub)
+        pl.scrape_source(db, "stub", ctx=self.SE)
+        stored = db.query(JobPosting).filter(JobPosting.source == "stub").all()
+        assert [j.title for j in stored] == ["Malmö"], (
+            f"pool stored {[j.title for j in stored]} — foreign-located jobs "
+            "must be gated before storage, not after"
+        )
+
+
+class TestJobtechPagination:
+    """WO-06 / D1: the 75%-keeper-rate source fetched one page per query.
+    Pagination walks offset up to a cap and stops on a short page."""
+
+    def test_multiple_pages_fetched_until_short_page(self, monkeypatch):
+        import app.services.scrapers.jobtech as jt
+
+        pages = [
+            {"hits": [{"id": str(i), "headline": f"j{i}", "removed": False} for i in range(100)]},
+            {"hits": [{"id": f"b{i}", "headline": f"j{i}", "removed": False} for i in range(100)]},
+            {"hits": [{"id": f"c{i}", "headline": f"j{i}", "removed": False} for i in range(37)]},
+        ]
+        calls = []
+
+        def fake_get(url, params=None, **kw):
+            calls.append(params)
+            return type("R", (), {
+                "raise_for_status": lambda s: None,
+                "json": staticmethod(lambda s=None: pages[min(params["offset"] // 100, 2)]),
+            })()
+
+        monkeypatch.setattr(jt.httpx, "get", fake_get)
+        scraper = jt.JobtechScraper()
+        jobs = scraper.fetch({"queries": ["dev"], "country": "SE"})
+        assert len(jobs) == 237, f"expected 100+100+37=237 unique jobs, got {len(jobs)}"
+        assert [c["offset"] for c in calls] == [0, 100, 200], (
+            f"pagination did not walk offset: {[c.get('offset') for c in calls]}"
+        )
+
+    def test_single_full_page_stops_at_cap(self, monkeypatch):
+        import app.services.scrapers.jobtech as jt
+
+        def fake_get(url, params=None, **kw):
+            return type("R", (), {
+                "raise_for_status": lambda s: None,
+                "json": staticmethod(lambda s=None: {
+                    "hits": [{"id": str(params["offset"] + i), "headline": "j",
+                              "removed": False} for i in range(100)]}),
+            })()
+
+        monkeypatch.setattr(jt.httpx, "get", fake_get)
+        jobs = jt.JobtechScraper().fetch({"queries": ["dev"]})
+        assert len(jobs) == jt.MAX_PAGES_PER_QUERY * 100, (
+            f"cap not respected: {len(jobs)}"
+        )
