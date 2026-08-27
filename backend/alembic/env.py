@@ -13,10 +13,13 @@ config = context.config
 import os  # noqa: E402
 
 _url = os.getenv("DATABASE_URL", "sqlite:///./jobfinderos.db")
-# ONE normalization path for every engine (WO-11 review): the app's
-# normalize_postgres_url fixes bare postgresql:// → psycopg2 (not
-# installed); the async-driver step-downs stay local to alembic.
-from app.core.database import normalize_postgres_url
+# ONE normalization path for every engine (WO-11 review), imported from
+# the dependency-free module: importing app.core.database here would
+# construct Settings()/engines — a migration step carrying only
+# DATABASE_URL (pre-deploy command, init container) must not need full
+# app config. Only the sqlite step-down stays local to alembic.
+from app.core.dburl import normalize_postgres_url
+
 _url = normalize_postgres_url(_url)
 _url = _url.replace("sqlite+aiosqlite://", "sqlite://", 1)
 config.set_main_option("sqlalchemy.url", _url)
@@ -28,7 +31,7 @@ if config.config_file_name is not None:
 
 # JobFinderOS models — importing the package registers every table
 from app import models  # noqa: E402, F401
-from app.core.database import Base  # noqa: E402
+from app.core.orm import Base  # noqa: E402
 
 target_metadata = Base.metadata
 

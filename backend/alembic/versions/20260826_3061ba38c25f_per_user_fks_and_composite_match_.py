@@ -11,9 +11,9 @@ it portable to SQLite (alembic docs: alembic.sqlalchemy.org/en/latest/batch.html
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '3061ba38c25f'

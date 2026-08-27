@@ -4,7 +4,7 @@ ScrapeRun model for JobFinderOS — audit trail for scraper executions.
 
 from sqlalchemy import Column, DateTime, Integer, String, Text
 
-from app.core.database import Base
+from app.core.orm import Base
 from app.core.timeutil import utc_now
 
 

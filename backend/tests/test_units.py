@@ -1348,3 +1348,42 @@ class TestSyncEngineDriverSafety:
                 f"{url} resolved to driver {eng.dialect.driver!r} — only "
                 "psycopg (3) is installed"
             )
+
+
+class TestDependencyFreeMigrations:
+    """WO-11 review round 2: alembic's env.py imported app.core.database,
+    which instantiates Settings() at module scope — so 'alembic upgrade
+    head' with only DATABASE_URL (the migration-container shape: Render
+    pre-deploy, k8s init container, one-off docker run) died on the
+    AUTH_SECRET production guard before touching the database. CI could
+    never see it: the alembic step sets DEBUG=true by design. The fix:
+    the URL normalizer and ORM Base live in dependency-free modules the
+    migration runner can import without any app config."""
+
+    def test_asyncpg_stepdown_covered_by_the_one_normalizer(self):
+        """A pre-WO-11 DATABASE_URL still carrying +asyncpg must step
+        down to psycopg — the defence env.py used to have locally and
+        my refactor deleted while the comment claimed it stayed."""
+        from app.core.dburl import normalize_postgres_url
+
+        assert normalize_postgres_url(
+            "postgresql+asyncpg://u:p@h:5432/db"
+        ) == "postgresql+psycopg://u:p@h:5432/db"
+
+    def test_dburl_and_orm_import_no_app_config(self):
+        """The property CI can't exercise in-process: importing the
+        migration-runner modules must not construct Settings or engines.
+        Checked in a fresh subprocess where sys.modules starts clean."""
+        import subprocess
+        import sys
+
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; import app.core.dburl, app.core.orm; "
+             "assert 'app.core.config' not in sys.modules, 'config loaded'; "
+             "assert 'app.core.database' not in sys.modules, 'database loaded'"],
+            capture_output=True, text=True,
+        )
+        assert r.returncode == 0, (
+            f"dependency-free modules pull app config:\n{r.stderr[-400:]}"
+        )

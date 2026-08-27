@@ -9,7 +9,7 @@ per-user rows to this table (user_id FKs).
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from sqlalchemy import Column, DateTime, String
 
-from app.core.database import Base
+from app.core.orm import Base
 from app.core.timeutil import utc_now
 
 

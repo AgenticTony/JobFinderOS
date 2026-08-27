@@ -8,7 +8,7 @@ is created and executed via email (Resend/SMTP) or queued for browser/manual app
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import relationship
 
-from app.core.database import Base
+from app.core.orm import Base
 from app.core.timeutil import utc_now
 
 

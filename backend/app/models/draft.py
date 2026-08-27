@@ -9,7 +9,7 @@ only then is the application submitted.
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import relationship
 
-from app.core.database import Base
+from app.core.orm import Base
 from app.core.timeutil import utc_now
 
 
