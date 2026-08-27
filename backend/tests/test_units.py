@@ -1635,3 +1635,57 @@ class TestTechSupportGround:
         flagged = [c.value for c in unsupported_claims(cv, tailored)
                    if c.kind == "technology"]
         assert flagged == [], f"raw-ground support false positive: {flagged}"
+
+
+class TestTechVerificationTolerance:
+    """WO-01 review r4: extraction and verification have OPPOSITE
+    tolerance requirements — extraction strict (bare 'c' in prose must
+    not match), verification lenient (a human CV's formatting is
+    arbitrary: 'Node JS' must support a tailored 'Node.js'). One ground
+    oscillated for four rounds; separator-tolerant verification ends it."""
+
+    def test_cv_spelling_variance_supports_tailored_form(self):
+        from app.services.fabrication import unsupported_claims
+
+        cases = [
+            ("Skills: CI / CD, Jenkins.", "I run CI/CD pipelines."),
+            ("CI-CD automation experience.", "I run CI/CD pipelines."),
+            ("Skills: Node JS, React.", "I build with Node.js."),
+            ("scikit learn, pandas.", "I use scikit-learn."),
+            ("Google-Cloud, Docker.", "I deploy on Google Cloud."),
+        ]
+        for cv, tailored in cases:
+            flagged = [c.value for c in unsupported_claims(cv, tailored)
+                       if c.kind == "technology"]
+            assert flagged == [], (
+                f"CV {cv!r} failed to support tailored {tailored!r}: {flagged}"
+            )
+
+    def test_invented_punctuated_tech_still_flagged(self):
+        from app.services.fabrication import unsupported_claims
+
+        cv = "Skills: Python, SQL, network administration."
+        for mention in ("C# experience", ".NET Core services", "C++ daily"):
+            flagged = [c.value for c in unsupported_claims(cv, mention)
+                       if c.kind == "technology"]
+            assert flagged, f"invented {mention!r} no longer reported"
+
+    def test_asp_net_extraction(self):
+        """r4 carry-over: leading (?<!\\w) blocked '.net' inside 'ASP.NET'
+        — an invented ASP.NET claim extracted nothing at all."""
+        from app.services.fabrication import extract_claims, unsupported_claims
+
+        techs = [c.value for c in
+                 extract_claims("Built on ASP.NET Core and ASP.NET MVC")
+                 if c.kind == "technology"]
+        assert ".net" in techs, f"ASP.NET invisible: {techs}"
+        # invented ASP.NET against a CV without it -> flagged
+        flagged = [c.value for c in
+                   unsupported_claims("Skills: Python.",
+                                      "Built on ASP.NET Core")
+                   if c.kind == "technology"]
+        assert ".net" in flagged
+        # genuine ASP.NET in the CV -> supported
+        assert not [c for c in unsupported_claims("Skills: ASP.NET MVC.",
+                                                  "Built on ASP.NET Core")
+                    if c.kind == "technology"]

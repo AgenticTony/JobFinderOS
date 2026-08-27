@@ -255,8 +255,12 @@ def _extract_metrics(text: str) -> List[Claim]:
 def _tech_pattern(entry: str):
     raw = entry.casefold()
     if re.search(r"\W", entry):
+        # r4: no leading guard when the entry STARTS with punctuation —
+        # '.net' must match inside 'ASP.NET' (preceded by a word char);
+        # the trailing (?!\w) still refuses '.network'
+        lead = "" if re.match(r"\W", entry) else r"(?<!\w)"
         pattern = re.compile(
-            rf"(?<!\w){re.escape(raw).replace(re.escape(' '), r'\s+')}(?!\w)")
+            rf"{lead}{re.escape(raw).replace(re.escape(' '), r'\s+')}(?!\w)")
         haystack = "raw"
     else:
         pattern = re.compile(
@@ -392,11 +396,21 @@ def unsupported_claims(source_cv: str, tailored_text: str,
                 findings.append(claim)
             continue
         if claim.kind == "technology":
-            # Same per-entry ground as extraction (review r3): a
-            # punctuated claim checked on the normalised source collapses
-            # to a substring ('c#' -> 'c') and everything is "supported".
+            # r4: verification is LENIENT where extraction is STRICT.
+            # Extraction needs the raw ground (bare 'c' in prose must not
+            # match); verification reads a human CV whose formatting is
+            # arbitrary ('Node JS' must support a tailored 'Node.js') —
+            # so punctuated entries verify by their word tokens joined
+            # with a separator-tolerant gap. Single-word-token entries
+            # (c#, c++) have no gap to flex: exact raw, else a lone 'c'
+            # would support them.
             if re.search(r"\W", claim.value):
-                if claim.value.casefold() not in src_raw:
+                tokens = re.findall(r"\w+", claim.value)
+                if len(tokens) >= 2:
+                    verify = re.compile(r"\W*".join(map(re.escape, tokens)))
+                    if not verify.search(src_raw):
+                        findings.append(claim)
+                elif claim.value.casefold() not in src_raw:
                     findings.append(claim)
             elif _normalise(claim.value) not in src:
                 findings.append(claim)
