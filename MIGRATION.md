@@ -223,16 +223,19 @@ category. And independent of law: "your CV goes to a Chinese AI company"
 is a one-screenshot trust problem for a product serving people in a
 stressful economic position.
 
-**The option that would dissolve this does not exist today (verified
-2026-08-27).** Mistral hosts Z.ai's GLM-5.2 ("hosted by Mistral, served
-without Mistral modifications" — model card; public preview) and Mistral
-Regional Endpoints run on Mistral-managed GPU infrastructure in EU/EFTA
-data centers. But a live `models.list` check against all three endpoints
-(global, api.eu, api.us) with our own key returns NO GLM model anywhere:
-the hosting is restricted-preview and NOT regionalized. The residency
-guarantee does not currently extend to the GLM family. This is a vendor
-rollout dependency, not a shipping option — so it gets a monitor, not a
-plan.
+**The option that would dissolve this exists — but is TIER-GATED, not
+absent (verified 2026-08-27, corrected same day).** Mistral hosts Z.ai's
+GLM-5.2 ("hosted by Mistral, served without Mistral modifications" —
+model card) on Mistral-managed GPU infrastructure with EU/EFTA regional
+endpoints. `models.list` on all three endpoints (HTTP 200 verified)
+shows no GLM — but a direct chat-completions probe returns **HTTP 403
+`tier_not_allowed`** (not 404) for `zai-glm-5-2` / `glm-5.2` on BOTH
+`api.mistral.ai` AND `api.eu.mistral.ai`: the model IDs are recognized
+and plausibly deployed EU-regionally, gated behind a higher La
+Plateforme subscription tier. Tier-gated models do not appear in
+`models.list` — so the list check alone can under-report availability
+(a silent-failure trap caught when re-verifying with status codes plus
+a direct probe).
 
 - **Interim posture (now → GLM-regional-or-equivalent):** stay on Z.ai
   direct under a documented wrapper — their API DPA (controller/processor
@@ -244,10 +247,15 @@ plan.
   trivially), and it helps the matching call more than the tailoring
   call, which needs the full CV by definition. Do not present it as a
   transfer remedy.
-- **Monitor (one curl, weekly, ops checklist):** `GET api.eu.mistral.ai/
-  v1/models` — the moment a GLM model appears, the migration trigger
-  fires. Alternatives to watch the same way: EU-hosted GLM from Nebius /
-  Scaleway / EUrouter (each needs its own DPA diligence).
+- **Unlock path + monitor:** (a) establish which La Plateforme tier
+  unlocks third-party hosted models and its cost/commitment (console or
+  docs — currently unknown); (b) once unlocked, CONFIRM the EU endpoint
+  serves GLM and on what terms; (c) monitor via a DIRECT one-token
+  probe (`POST /v1/chat/completions`, model `zai-glm-5-2`) against
+  `api.eu.mistral.ai`, watching for the 403 to turn 200 — NOT via
+  `models.list`, which is blind to tier-gated models. Alternatives to
+  watch the same way: EU-hosted GLM from Nebius / Scaleway / EUrouter
+  (each needs its own DPA diligence).
 - **Migration trigger + gates (all must pass):** (1) GLM family served
   on an EU-resident endpoint; (2) quality bake-off passes — NOTE the
   re-calibration cost priced into this gate: a model change means a new
