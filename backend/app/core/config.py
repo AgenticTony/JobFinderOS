@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     # Set GLM_THINKING=enabled for deeper (much slower) reasoning.
     GLM_API_KEY: str = ""
     GLM_BASE_URL: str = "https://api.z.ai/api/coding/paas/v4"
+    # Mistral — the EU-resident inference path (MIGRATION.md MIG-WO5).
+    # Mistral's OWN models were rejected for matching (they keep nearly
+    # everything: mistral-large scored 45-58 on jobs glm-5.1 scored 18-22).
+    # This config is NOT for those models — it is pre-positioned for routing
+    # GLM through Mistral's EU regional endpoint, which is verified non-proxy
+    # (Z.ai is absent from Mistral's sub-processor list) but currently
+    # tier-gated. Set MISTRAL_BASE_URL to https://api.eu.mistral.ai/v1 when
+    # that unlocks — the default global endpoint is NOT region-pinned.
+    #
+    # Declared here because Settings forbids extra inputs: an undeclared key
+    # in .env stops the app importing at ALL — the running process survives
+    # on its old config while every new process (launchd restart, pytest,
+    # scripts, deploy) fails.
+    MISTRAL_API_KEY: str = ""
+    MISTRAL_BASE_URL: str = "https://api.mistral.ai/v1"
     GLM_MODEL: str = "glm-5.1"
     GLM_THINKING: str = "disabled"  # disabled | enabled
 
