@@ -1,0 +1,6 @@
+{
+  "note": "A faithful tailored output. Zero findings is the HARD direction: a checker that flags everything trivially passes the fabricated case.",
+  "source_cv": "Erik Lindberg\n\nPROFESSIONAL SUMMARY\nBackend developer with 8 years building Python services.\n\nWORK EXPERIENCE\nSoftware Engineer, Svenska Spel, Stockholm — 2019 to 2023\n- Built payment services in Python and FastAPI handling 12% of national transactions\n- Reduced deployment time by 30%\n\nJunior Developer, Tietoevry, Malmö — 2016 to 2019\n- Maintained PostgreSQL databases and REST APIs\n\nEDUCATION\nMSc Computer Science, Lunds Universitet, 2015\n\nSKILLS\nPython, FastAPI, PostgreSQL, REST, Docker, Linux",
+  "tailored": "Erik Lindberg\n\nPROFESSIONAL SUMMARY\nBackend developer with 8 years building Python services, now focused on reliability at scale.\n\nWORK EXPERIENCE\nSoftware Engineer, Svenska Spel, Stockholm — 2019 to 2023\n- Built payment services in Python and FastAPI handling 12% of national transactions\n- Reduced deployment time by 30% while improving reliability\n\nJunior Developer, Tietoevry, Malmö — 2016 to 2019\n- Maintained PostgreSQL databases and REST APIs\n\nEDUCATION\nMSc Computer Science, Lunds Universitet, 2015\n\nSKILLS\nPython, FastAPI, PostgreSQL, REST, Docker, Linux",
+  "expected_findings": []
+}

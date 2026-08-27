@@ -2,7 +2,25 @@
 
 > Priority: P0 · Blocks: first real user other than the owner
 > Invariant enforced: #4 (zero fabrication in tailoring)
-> Status: not started
+> Status: **executed 2026-08-27** — all three layers built, tested
+> red-first, revert-checked, and MEASURED LIVE. Headline findings from
+> the live judge run (5 real approved jobs, the owner's CV):
+>
+> - **The tailoring prompt has a real fabrication problem — this is
+>   WO-02's evidence base.** The judge (fresh-call, no tailoring
+>   context) found unsupported claims in 4/5 documents: invented work
+>   authority ("EU citizen, full work rights"), competence inflation
+>   ("masters both frontend..."), invented tool familiarity (LangChain,
+>   Azure OpenAI, Lovable), unsupported competences. Snapshots saved as
+>   permanent fixtures: tests/fixtures/fabrication/live_catch_*.json.
+> - **Layer A's deterministic checker converged to zero
+>   high-confidence FALSE positives on real output** after three
+>   triage rounds against the live FP classes (addressee companies,
+>   glued skill runs across connector languages, country enumerations,
+>   phrase-glue — resolved by the corporate-marker/3+token tier rule:
+>   markerless 2-token org runs are advisory, never regenerated).
+> - Fabrication rate is now a measured number with a denominator, per
+>   the WO's final criterion.
 
 ## Why this exists
 

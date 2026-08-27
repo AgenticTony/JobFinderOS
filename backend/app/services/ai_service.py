@@ -178,6 +178,7 @@ Evaluate this job for me and respond with ONLY valid JSON in the required format
         profile_context: str,
         cv_text: str,
         job_description: str,
+        correction: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Build the tailored application package for one approved job:
@@ -236,6 +237,10 @@ Respond with ONLY valid JSON (no markdown):
 
 Prepare my tailored application package.
 """
+        if correction:
+            # Fabrication-guard regeneration instruction (WO-01 Layer C):
+            # the named untraceable claims, so the retry targets the defect
+            user_message += f"\n\n--- CORRECTION ---\n{correction}"
 
         raw = self._complete(system_prompt, user_message)
         parsed = self._parse_json(raw)

@@ -24,6 +24,12 @@ class DraftResponse(BaseModel):
     changes_summary: List[str] = []
     status: str  # drafting | ready | submitted | failed
     error: Optional[str] = None
+    # WO-01 fabrication guard: ADVISORY findings for the review UI
+    # (technology-class; high-confidence ones never reach here — they
+    # drove regeneration or a block before the draft went ready)
+    fabrication_findings: List[dict] = []
+    fabrication_retries: int = 0
+    fabrication_blocked: bool = False
     created_at: datetime
     updated_at: datetime
     job: Optional[dict] = None
@@ -42,6 +48,9 @@ class DraftResponse(BaseModel):
             changes_summary=parse_json_list(d.changes_summary),
             status=d.status,
             error=d.error,
+            fabrication_findings=parse_json_list(getattr(d, "fabrication_findings", None), default=[]) or [],
+            fabrication_retries=getattr(d, "fabrication_retries", 0) or 0,
+            fabrication_blocked=bool(getattr(d, "fabrication_blocked", False)),
             created_at=d.created_at,
             updated_at=d.updated_at,
             job=JobResponse.from_orm_job(d.job).model_dump() if d.job else None,

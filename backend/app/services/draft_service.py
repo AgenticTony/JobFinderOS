@@ -28,6 +28,11 @@ from app.services.matcher_service import _job_text
 
 logger = logging.getLogger(__name__)
 
+# WO-01 Layer C: after this many regeneration attempts a surviving
+# high-confidence finding is the model REPEATEDLY asserting something
+# the CV does not support — block, don't retry again.
+MAX_FABRICATION_RETRIES = 2
+
 DRAFT_DIR = "uploads/drafts"
 
 
@@ -102,22 +107,94 @@ def create_draft_for_job(
     db.commit()
 
     try:
-        result = get_ai_service().tailor_application(
-            profile_context=build_profile_context(profile),
-            cv_text=profile.cv_text,
-            job_description=_job_text(job),
+        # FABRICATION GUARD (WO-01 Layer C): every tailored output is
+        # checked against the source CV before anything reaches the
+        # review screen. High-confidence findings REGENERATE (never strip
+        # — a silently mutilated document is worse than a blocked one),
+        # up to MAX_FABRICATION_RETRIES; a survivor BLOCKS the draft and
+        # names the untraceable claim. Advisory findings persist for the
+        # review UI and never auto-act.
+        from app.services.fabrication import (
+            findings_as_json,
+            split_tiers,
+            unsupported_claims,
         )
-        draft.cover_letter = result["cover_letter"]
-        draft.tailored_cv = result["tailored_cv"]
-        from app.schemas.common import dump_json_list
 
-        draft.changes_summary = dump_json_list(result["changes_summary"])
-        draft.status = "ready"
-        db.add(draft)
-        db.commit()
-        db.refresh(draft)
-        logger.info("Draft %s prepared for job %s", draft.id, job.id)
-        return draft
+        correction: Optional[str] = None
+        retries = 0
+        while True:
+            kwargs = {}
+            if correction:
+                kwargs["correction"] = correction
+            result = get_ai_service().tailor_application(
+                profile_context=build_profile_context(profile),
+                cv_text=profile.cv_text,
+                job_description=_job_text(job),
+                **kwargs,
+            )
+            draft.cover_letter = result["cover_letter"]
+            draft.tailored_cv = result["tailored_cv"]
+            from app.schemas.common import dump_json_list
+
+            draft.changes_summary = dump_json_list(result["changes_summary"])
+
+            findings = unsupported_claims(
+                profile.cv_text,
+                f"{result.get('cover_letter', '')}\n{result.get('tailored_cv', '')}",
+                allowed_names=[job.company] if job.company else None,
+            )
+            high, advisory = split_tiers(findings)
+
+            if not high:
+                from app.schemas.common import dump_json_list as _dumps
+
+                draft.fabrication_findings = _dumps(findings_as_json(advisory))
+                draft.fabrication_retries = retries
+                draft.fabrication_blocked = False
+                draft.status = "ready"
+                db.add(draft)
+                db.commit()
+                db.refresh(draft)
+                logger.info(
+                    "Draft %s prepared for job %s (fabrication retries=%d, "
+                    "advisory=%d)", draft.id, job.id, retries, len(advisory),
+                )
+                return draft
+
+            if retries >= MAX_FABRICATION_RETRIES:
+                draft.fabrication_findings = None  # blocked — nothing to review
+                draft.fabrication_retries = retries
+                draft.fabrication_blocked = True
+                draft.status = "failed"
+                named = ", ".join(
+                    sorted({c.value.split("|")[0] for c in high})
+                )
+                draft.error = (
+                    "Blocked by the fabrication guard: the tailored document "
+                    f"repeatedly asserts claims your CV does not support "
+                    f"({named}). Edit your CV to include them, or regenerate."
+                )
+                db.add(draft)
+                db.commit()
+                logger.warning(
+                    "Draft %s BLOCKED after %d retries: %s",
+                    draft.id, retries, named,
+                )
+                return draft
+
+            retries += 1
+            correction = (
+                "Your previous output contained claims that cannot be traced "
+                "to the candidate's CV and may be fabrications: "
+                + ", ".join(sorted({c.value.split("|")[0] for c in high}))
+                + ". Regenerate the documents WITHOUT these claims — every "
+                "employer, date, credential and metric must exist in the "
+                "original CV."
+            )
+            logger.info(
+                "Draft %s: %d high-confidence fabrication findings — "
+                "regenerating (attempt %d)", draft.id, len(high), retries,
+            )
     except Exception as e:  # noqa: BLE001 — surface the failure on the draft row
         db.rollback()
         draft.status = "failed"

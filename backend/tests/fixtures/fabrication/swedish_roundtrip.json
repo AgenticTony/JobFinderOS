@@ -1,0 +1,6 @@
+{
+  "note": "The translation trap: an English CV tailored to a Swedish posting produces Swedish prose. Translation-invariant atoms (Svenska Spel, Tietoevry, Lunds Universitet, 2019, Python, PostgreSQL, 12%) must survive with ZERO organisation/technology false positives. Diacritics preserved (Malmö).",
+  "source_cv": "Erik Lindberg\n\nWORK EXPERIENCE\nSoftware Engineer, Svenska Spel, Stockholm — 2019 to 2023\n- Built payment services in Python and FastAPI\n\nJunior Developer, Tietoevry, Malmö — 2016 to 2019\n- Maintained PostgreSQL databases\n\nEDUCATION\nMSc Computer Science, Lunds Universitet, 2015\n\nSKILLS\nPython, FastAPI, PostgreSQL, Docker",
+  "tailored": "Erik Lindberg\n\nARBETSERFARENHET\nMjukvaruingenjör, Svenska Spel, Stockholm — 2019 till 2023\n- Byggde betaltjänster i Python och FastAPI\n\nJuniorutvecklare, Tietoevry, Malmö — 2016 till 2019\n- Underhöll PostgreSQL-databaser\n\nUTBILDNING\nMasterexamen i datavetenskap, Lunds Universitet, 2015\n\nKUNSKAPER\nPython, FastAPI, PostgreSQL, Docker",
+  "expected_findings": []
+}

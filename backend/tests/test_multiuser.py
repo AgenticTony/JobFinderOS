@@ -772,3 +772,133 @@ class TestCostDoSClamp:
         assert "teamtailor" in r.text and "jobtech" in r.text, (
             f"error should name the unknown source and the valid ones: {r.text[:200]}"
         )
+
+
+class TestFabricationGuardLayerC:
+    """WO-01 Layer C: the runtime control. High-confidence findings drive
+    REGENERATION (never strip — a mutilated document the user cannot see
+    was altered is worse), up to 2 retries; a survivor BLOCKS the draft
+    and names the untraceable claim. Advisory findings persist for the
+    review UI. Drives the PRODUCTION service with a scripted tailor."""
+
+    @staticmethod
+    def _seed(client, db):
+        email = f"fab-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = ("Erik Lindberg. Software Engineer, Svenska Spel, Stockholm "
+                     "2019 to 2023. Built payment services in Python. MSc "
+                     "Computer Science, Lunds Universitet 2015.")
+        db.commit()
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         description="A Python role.")
+        db.add(job)
+        db.flush()
+        db.add(MatchResult(user_id=uid, job_id=job.id, score=61,
+                           tier="good_match", decision="approved"))
+        db.commit()
+        return uid, job
+
+    @staticmethod
+    def _script_tailor(monkeypatch, outputs):
+        """outputs: list of dicts consumed in order (regeneration pulls
+        the next). Mirrors the fake-tailor pattern the route tests use."""
+        from app.services import draft_service
+        from app.services.ai_service import AIService
+
+        calls = {"n": 0}
+
+        def fake_tailor(self, profile_context, cv_text, job_description,
+                        correction=None):
+            i = min(calls["n"], len(outputs) - 1)
+            calls["n"] += 1
+            return dict(outputs[i])
+
+        fake = AIService.__new__(AIService)
+        fake.model = "glm-test"
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "tailor_application", fake_tailor)
+        return calls
+
+    CLEAN = {"cover_letter": "Dear Acme, I built payment services in Python "
+             "at Svenska Spel 2019 to 2023.",
+             "tailored_cv": "Erik Lindberg. Software Engineer, Svenska Spel, "
+             "Stockholm 2019 to 2023. Python. MSc Computer Science, Lunds "
+             "Universitet 2015.",
+             "changes_summary": ["refocused"]}
+    FABRICATED = {"cover_letter": "AWS Certified Solutions Architect.",
+                  "tailored_cv": "Erik Lindberg. Kubernetes. AWS Certified "
+                  "Solutions Architect. Acme Global Ltd 2017.",
+                  "changes_summary": ["refocused"]}
+
+    def test_clean_draft_ready_zero_findings(self, client, db, monkeypatch):
+        from app.services.draft_service import create_draft_for_job
+
+        uid, job = self._seed(client, db)
+        calls = self._script_tailor(monkeypatch, [self.CLEAN])
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "ready", d.error
+        assert calls["n"] == 1, "clean output must not trigger regeneration"
+        import json
+        assert json.loads(d.fabrication_findings or "[]") == []
+        assert d.fabrication_blocked is False
+
+    def test_fabrication_triggers_regeneration_then_succeeds(self, client, db, monkeypatch):
+        from app.services.draft_service import create_draft_for_job
+
+        uid, job = self._seed(client, db)
+        calls = self._script_tailor(
+            monkeypatch, [self.FABRICATED, self.FABRICATED, self.CLEAN])
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "ready", d.error
+        assert calls["n"] == 3, (
+            f"expected fabricated, fabricated, clean = 3 tailor calls, "
+            f"got {calls['n']} — the retry loop is not running"
+        )
+        assert d.fabrication_retries == 2
+        assert d.fabrication_blocked is False
+
+    def test_surviving_fabrication_blocks_and_names_the_claim(self, client, db, monkeypatch):
+        """After 2 retries the finding is not a heuristic firing once —
+        it is the model repeatedly asserting something the CV does not
+        support. The send must be blocked and the claim named."""
+        from app.services.draft_service import create_draft_for_job
+
+        uid, job = self._seed(client, db)
+        self._script_tailor(monkeypatch, [self.FABRICATED])
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed", (
+            f"a finding surviving 2 retries must block, got {d.status}"
+        )
+        assert d.fabrication_blocked is True
+        assert d.fabrication_retries == 2
+        assert "certified" in (d.error or "").lower(), (
+            f"the block must NAME the untraceable claim: {d.error!r}"
+        )
+
+    def test_advisory_technology_flags_but_never_blocks(self, client, db, monkeypatch):
+        """'Azure' vs 'Microsoft Azure' class false positives: flag for
+        the review UI, never auto-act."""
+        from app.services.draft_service import create_draft_for_job
+
+        advisory = dict(self.CLEAN,
+                        tailored_cv=self.CLEAN["tailored_cv"] + " Azure.")
+        uid, job = self._seed(client, db)
+        calls = self._script_tailor(monkeypatch, [advisory])
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "ready", (
+            "advisory findings must never block or regenerate"
+        )
+        assert calls["n"] == 1
+        import json
+        findings = json.loads(d.fabrication_findings or "[]")
+        assert any(f["kind"] == "technology" and f["tier"] == "advisory"
+                   for f in findings), findings

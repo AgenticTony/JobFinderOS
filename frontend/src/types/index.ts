@@ -67,6 +67,11 @@ export interface ApplicationDraft {
   changes_summary: string[];
   status: 'drafting' | 'ready' | 'submitted' | 'failed';
   error: string | null;
+  // WO-01 fabrication guard: advisory (technology-class) findings for the
+  // review UI; high-confidence ones drove regeneration or a block instead
+  fabrication_findings: { kind: string; value: string; context: string; tier: string }[];
+  fabrication_retries: number;
+  fabrication_blocked: boolean;
   created_at: string;
   updated_at: string;
   job: Job | null;

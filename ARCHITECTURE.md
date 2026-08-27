@@ -289,8 +289,14 @@ Jobtech (75% keeper rate) also paginates — offset pages per query,
 short-page stop, 3-page cap — so the highest-precision source is no
 longer volume-starved.
 
-**D2 — Fabrication invariant is unenforced.** Every test touching tailoring
-mocks `tailor_application`. WO-01.
+**D2 — Fabrication invariant is unenforced — FIXED 2026-08-27 (WO-01).**
+Three layers: the deterministic checker (translation-invariant atoms,
+tiered by false-positive class), the opt-in LLM judge
+(RUN_FABRICATION=1), and the runtime guard (regenerate up to 2, then
+block and name the claim; advisory findings render in the review UI).
+The first live measurement found real fabrications in 4/5 tailored
+documents — the prompt-side fix is WO-02's, with the snapshots as
+evidence.
 
 **D3 — In-process scheduler blocks horizontal scaling.** WO-04.
 

@@ -1387,3 +1387,145 @@ class TestDependencyFreeMigrations:
         assert r.returncode == 0, (
             f"dependency-free modules pull app config:\n{r.stderr[-400:]}"
         )
+
+
+class TestFabricationGuard:
+    """WO-01 Layer A: the deterministic checker, driven from the
+    PRODUCTION module (a shadow copy is how rescore_backlog diverged
+    from the matcher three times). Fixtures live in
+    tests/fixtures/fabrication/."""
+
+    @staticmethod
+    def _fixture(name):
+        import json
+        from pathlib import Path
+
+        path = (Path(__file__).resolve().parent / "fixtures" / "fabrication"
+                / f"{name}.json")
+        return json.loads(path.read_text())
+
+    def test_clean_tailoring_has_zero_findings(self):
+        """The false-positive guard, and the harder direction: a checker
+        that flags everything trivially passes the fabricated case."""
+        from app.services.fabrication import unsupported_claims
+
+        fx = self._fixture("clean")
+        findings = unsupported_claims(fx["source_cv"], fx["tailored"])
+        assert findings == [], (
+            f"clean tailored output flagged {[f.value for f in findings]} — "
+            "false positives on a faithful document are the failure mode "
+            "that would block legitimate drafts"
+        )
+
+    def test_each_planted_defect_is_named(self):
+        """All five planted strings must be NAMED — five unrelated false
+        positives must fail."""
+        from app.services.fabrication import unsupported_claims
+
+        fx = self._fixture("fabricated")
+        findings = unsupported_claims(fx["source_cv"], fx["tailored"])
+        by_kind = {}
+        for f in findings:
+            by_kind.setdefault(f.kind, []).append(f.value.lower())
+
+        for expected in fx["expected_findings"]:
+            kind = expected["kind"]
+            assert kind in by_kind, (
+                f"planted {kind} defect not detected at all; got kinds {sorted(by_kind)}"
+            )
+            if "value" in expected:
+                assert any(expected["value"] in v for v in by_kind[kind]), (
+                    f"planted {kind} {expected['value']!r} not named; "
+                    f"got {by_kind[kind]}"
+                )
+            else:
+                assert any(expected["value_contains"] in v for v in by_kind[kind]), (
+                    f"planted {kind} containing {expected['value_contains']!r} "
+                    f"not named; got {by_kind[kind]}"
+                )
+
+    def test_swedish_translation_round_trip(self):
+        """The translation trap: Swedish prose, English CV. Org/tech atoms
+        survive translation and must NOT false-positive; diacritics
+        (Malmö) preserved through normalisation."""
+        from app.services.fabrication import unsupported_claims
+
+        fx = self._fixture("swedish_roundtrip")
+        findings = unsupported_claims(fx["source_cv"], fx["tailored"])
+        org_tech = [f for f in findings
+                    if f.kind in ("organisation", "technology")]
+        assert org_tech == [], (
+            f"translation-invariant atoms flagged across languages: "
+            f"{[(f.kind, f.value) for f in org_tech]}"
+        )
+        assert findings == [], (
+            f"unexpected findings on faithful translation: "
+            f"{[(f.kind, f.value) for f in findings]}"
+        )
+
+    def test_shifted_year_and_inflated_metric_detection(self):
+        """The two subtle defects: a shifted year closes an employment
+        gap; an inflated metric inflates an achievement. Numeric-core
+        matching must catch 40% vs 12% (not just string absence)."""
+        from app.services.fabrication import unsupported_claims
+
+        src = "Worked at Svenska Spel 2019 to 2023, improved conversion by 12%."
+        tailored = "Worked at Svenska Spel 2017 to 2023, improved conversion by 40%."
+        findings = unsupported_claims(src, tailored)
+        values = " ".join(f.value.lower() for f in findings)
+        assert "2017" in values, "shifted year not caught"
+        assert "40" in values, "inflated percentage not caught (12% -> 40%)"
+        assert "2019" not in values and "12" not in values.split("40")[0], (
+            "supported atoms falsely flagged"
+        )
+
+    def test_claim_carries_sentence_context(self):
+        """The review UI shows WHERE the unverified claim appears."""
+        from app.services.fabrication import unsupported_claims
+
+        src = "Skills: Python"
+        tailored = "Certified Kubernetes administrator with Python skills."
+        findings = unsupported_claims(src, tailored)
+        with_ctx = [f for f in findings if f.kind in ("credential", "technology")
+                    and f.context]
+        assert with_ctx, "high-confidence findings must carry sentence context"
+
+
+class TestFabricationLiveFPClasses:
+    """Regression fixtures from the first LIVE judge run (2026-08-27,
+    3/5 docs flagged): the real false-positive classes the checker
+    shipped with, each now named."""
+
+    def test_addressee_company_is_context_not_fabrication(self):
+        from app.services.fabrication import unsupported_claims
+
+        src = "Erik Lindberg. Skills: Python."
+        tailored = "Hej Birger AB,\n\nJag har arbetat med Python."
+        findings = unsupported_claims(src, tailored, allowed_names=["Birger AB"])
+        assert not any("birger" in f.value.lower() for f in findings), (
+            "the employer being applied to is legitimate context, not a "
+            "career claim"
+        )
+
+    def test_glued_skill_runs_survive_connector_differences(self):
+        """Swedish CV: 'TypeScript och React'; tailored: 'TypeScript React'.
+        Both glued-pair orders and the connector-free form must pass."""
+        from app.services.fabrication import unsupported_claims
+
+        src = ("Skills: TypeScript och React, REST API:er och PostgreSQL, "
+               "SQL databases.")
+        tailored = "TypeScript React and REST APIs PostgreSQL. Databases SQL."
+        org_findings = [f for f in unsupported_claims(src, tailored)
+                         if f.kind == "organisation"]
+        assert org_findings == [], (
+            f"glued skill runs flagged: {[(f.value) for f in org_findings]}"
+        )
+
+    def test_swedish_salutation_breaks_organisation_runs(self):
+        from app.services.fabrication import unsupported_claims
+
+        src = "Erik. Skills: Python."
+        tailored = "Hej Sogeti,\n\nMed vänliga hälsningar, Erik"
+        org = [f for f in unsupported_claims(src, tailored)
+               if f.kind == "organisation"]
+        assert org == [], [f.value for f in org]

@@ -6,7 +6,16 @@ and cover letter to the approved job, the user reviews and edits both, and
 only then is the application submitted.
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    Uuid,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.orm import Base
@@ -31,6 +40,14 @@ class ApplicationDraft(Base):
     # Lifecycle: drafting -> ready -> submitted | failed (retryable)
     status = Column(String(20), default="drafting", nullable=False)
     error = Column(Text, nullable=True)
+
+    # WO-01 fabrication guard: Layer A findings at draft creation, plus
+    # retry/block counts so the fabrication rate is a measured number
+    # (advisory findings render in the review UI; high-confidence ones
+    # drove regeneration before these were recorded)
+    fabrication_findings = Column(Text, nullable=True)  # JSON list
+    fabrication_retries = Column(Integer, default=0, nullable=False)
+    fabrication_blocked = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)

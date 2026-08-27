@@ -1117,6 +1117,26 @@ function DraftCard({
                 <p className="text-sm text-bad">{draft.error}</p>
               )}
 
+              {/* WO-01 fabrication guard: advisory findings (technology-class
+                  check) — flagged for REVIEW, never auto-acted on */}
+              {draft.status === 'ready' && (draft.fabrication_findings?.length ?? 0) > 0 && (
+                <div className="rounded-lg border border-signal/30 bg-signal/5 p-3">
+                  <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-signal">
+                    Verify before sending — tech not found in your CV
+                  </p>
+                  <ul className="space-y-1">
+                    {draft.fabrication_findings.map((f, i) => (
+                      <li key={i} className="text-sm text-mid">
+                        • <span className="font-medium text-hi">{f.value}</span>
+                        {f.context ? (
+                          <span className="text-low"> — “{f.context.slice(0, 120)}”</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {/* What the AI changed */}
               {draft.status === 'ready' && draft.changes_summary.length > 0 && (
                 <div className="rounded-lg border border-line bg-ink/60 p-3">

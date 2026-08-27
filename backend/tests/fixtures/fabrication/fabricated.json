@@ -1,0 +1,12 @@
+{
+  "note": "The same document with five planted defects. The test asserts EACH planted string is NAMED in the findings — five unrelated false positives must fail.",
+  "source_cv": "Erik Lindberg\n\nPROFESSIONAL SUMMARY\nBackend developer with 8 years building Python services.\n\nWORK EXPERIENCE\nSoftware Engineer, Svenska Spel, Stockholm — 2019 to 2023\n- Built payment services in Python and FastAPI handling 12% of national transactions\n- Reduced deployment time by 30%\n\nJunior Developer, Tietoevry, Malmö — 2016 to 2019\n- Maintained PostgreSQL databases and REST APIs\n\nEDUCATION\nMSc Computer Science, Lunds Universitet, 2015\n\nSKILLS\nPython, FastAPI, PostgreSQL, REST, Docker, Linux",
+  "tailored": "Erik Lindberg\n\nPROFESSIONAL SUMMARY\nBackend developer with 8 years building distributed systems, AWS Certified Solutions Architect.\n\nWORK EXPERIENCE\nSoftware Engineer, Acme Global Ltd, Stockholm — 2017 to 2023\n- Built payment services in Python and FastAPI handling 40% of national transactions\n- Reduced deployment time by 30% while orchestrating Kubernetes clusters\n\nJunior Developer, Tietoevry, Malmö — 2016 to 2019\n- Maintained PostgreSQL databases and REST APIs\n\nEDUCATION\nMSc Computer Science, Lunds Universitet, 2015\n\nSKILLS\nPython, FastAPI, PostgreSQL, REST, Docker, Linux",
+  "expected_findings": [
+    {"kind": "credential", "value_contains": "certified"},
+    {"kind": "organisation", "value_contains": "acme global"},
+    {"kind": "year", "value": "2017"},
+    {"kind": "metric", "value_contains": "40"},
+    {"kind": "technology", "value": "kubernetes"}
+  ]
+}
