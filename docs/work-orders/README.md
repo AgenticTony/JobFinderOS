@@ -21,11 +21,10 @@ and is *referenced* from the other.
 | `README.md` | how to run it locally | everything else |
 | `MIGRATION.md` | *retire on WO-03 completion* — absorbed into WO-03 | |
 
-## ⚠ Numbering collision — resolve before either series grows
+## Numbering collision — RESOLVED 2026-08-27
 
-`MIGRATION.md` numbers its Supabase sequence **WO0–WO5**. This directory numbers
-its queue **WO-01–WO-13**. They are different work items with near-identical
-names, and they already conflict in meaning:
+`MIGRATION.md` now prefixes its Supabase sequence **MIG-WO0…MIG-WO5**; this
+directory keeps **WO-01–WO-14**. Historical record of the collision:
 
 | name | in MIGRATION.md | in this directory |
 |---|---|---|
@@ -59,8 +58,9 @@ bare "WO3" in either document until this is settled** — always qualify it as
 | **WO-14** | Hunt cadence + trial gating | P1 | — | Trial CAC $5.88 → $1.00 by capping *scoring* (not display) at 10/day. Keeps the Hunt button; makes repeat presses a free no-op. Also records the `run_matching` service-clamp gap |
 | **WO-13** | Billing + tax posture (Paddle as Merchant of Record) | P1 | WO-07 | Decided. UK has a **zero** VAT threshold for non-established sellers, so a two-country launch means two registrations from the first sale — an MoR removes both. ~54% margin, ~6–7 user break-even |
 
-**Start with WO-08, then WO-06.** WO-08 is an hour and makes everything after
-it smaller. WO-06 is the one the user would notice tomorrow.
+**WO-08 is DONE (executed 2026-08-27, commit 99e50f5). Start with WO-06** —
+country routing, the one a real Malmö user would notice tomorrow. WO-09 (the
+backlog re-score WO-08's prompt change triggered) is now unblocked and cheap.
 
 **WO-11 and WO-12 are new P0s from the 2026-08-27 stack audit** and block the
 entire deploy path. They are cheap (WO-11 is a driver swap on a stack that

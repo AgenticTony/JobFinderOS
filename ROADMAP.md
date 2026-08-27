@@ -371,13 +371,12 @@ Platsbanken. Verify actual coverage on a real US CV before pricing the market.
 
 (verified 2026-08-26 23:20 — check before trusting)
 
-> **Auth/vendor decision pending:** `MIGRATION.md` proposes the Supabase
-> consolidation (Postgres + auth + RLS + API/worker split) with a decision
-> gate, 4 work orders, and an honest 3–4 day estimate. Nothing started —
-> resolve the gate before deployment.
+> **Auth/vendor decision SETTLED (2026-08-27):** `MIGRATION.md` records
+> the Supabase consolidation as DECIDED — sequence MIG-WO0…MIG-WO5
+> (numbered distinctly from this queue's WO-01…WO-14; WO-03 here absorbs
+> MIGRATION.md when it runs). Nothing started yet.
 
 - Composio unconnected (needs platform key); email applies via Resend/browser
-- teamtailor scraper without TEAMTAILOR_SITES configured
 - 2 rows still on `legacy-unversioned` (transient API errors during the
   re-score; both junk, scores 8 and 18) — the rest of the queue is uniform
   on m2-62c2452b with score AND prose from the same sampling run

@@ -141,9 +141,8 @@ scrape (9 sources) → dedupe → per-user gates (location/language/freshness) �
 | jobtech (Platsbanken) | SE | none (key optional) | Government open data, effectively uncapped |
 | reed | GB | basic-auth key | 2,000 req/hr — effectively unlimited |
 | careerjet | SE+GB | key + declared IP + Referer | 1,000 req/hr |
-| adzuna | GB | app_id + key | BEST-EFFORT: non-blocking token-bucket pacer; supplementary to Reed |
+| adzuna | (none — module retained) | app_id + key | Demoted from the GB pack (WO-08: Reed carries the UK). Retained for the US/AU expansion backbone |
 | arbeitnow, remotive, jobicy, workingnomads | shared | none | Public feeds |
-| teamtailor | SE | none (needs slugs) | UNCONFIGURED |
 
 ## Multi-user architecture (Phase 1b, COMPLETE)
 
@@ -242,10 +241,9 @@ scrape (9 sources) → dedupe → per-user gates (location/language/freshness) �
 - [ ] Teamtailor slugs, JobTech free key for production
 - [ ] Deploy: Render (worker) + Cloudflare Pages (frontend) + Postgres.
       The Postgres/auth vendor decision is SETTLED (Supabase consolidation) — see MIGRATION.md (repo root); MIG-WO0 is the first action.
-      ROADMAP "Target architecture (decided)" says Supabase free tier
-      (Postgres + 50k-MAU auth + 1GB storage, $0 at beta scale); this line
-      previously said Neon, contradicting it. Resolve the two before
-      deploying — the auth question mostly follows the Postgres one:
+      (Historical: this line and ROADMAP briefly disagreed on Neon vs
+      Supabase — resolved in favour of Supabase, see MIGRATION.md. The
+      auth question follows the Postgres one:)
       Supabase Postgres makes Supabase Auth nearly free; Neon makes it a
       third vendor for one feature. RLS is available on BOTH and is not a
       reason to pick either (it is a Postgres feature, not a Supabase one).
