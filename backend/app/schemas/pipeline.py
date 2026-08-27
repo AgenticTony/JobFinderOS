@@ -2,15 +2,23 @@
 
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.schemas.match import MatchWithJobResponse
 
 
 class PipelineRunRequest(BaseModel):
     sources: Optional[List[str]] = None  # default: all enabled sources
     match: bool = True  # run AI matching after scraping
-    max_matches: Optional[int] = None  # cap AI calls this run
+    # Server-clamped: this caps AI calls per run, and the rate limiter
+    # buckets RUNS (12/hour), not spend — an unbounded client value is a
+    # cost-DoS vector (POST {"max_matches": 100000} twelve times an hour
+    # from one authenticated account). The ceiling is the server's
+    # MAX_JOBS_PER_MATCH_RUN, not anything the client sends.
+    max_matches: Optional[int] = Field(
+        None, ge=1, le=settings.MAX_JOBS_PER_MATCH_RUN
+    )
 
 
 class ScrapeSummary(BaseModel):

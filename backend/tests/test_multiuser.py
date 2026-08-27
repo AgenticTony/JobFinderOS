@@ -725,3 +725,35 @@ class TestSignupHardening:
         assert 429 in codes, (
             f"8 registration attempts on one address and no 429 ever fired: {codes}"
         )
+
+
+class TestCostDoSClamp:
+    """max_matches is client-controlled and caps AI calls per run; the
+    rate limiter buckets RUNS, not spend. An unbounded value is a
+    cost-DoS vector from one authenticated account (found in review,
+    2026-08-27; the schema shipped without an upper bound)."""
+
+    def test_max_matches_above_server_cap_is_rejected(self, client, db):
+        from pydantic import ValidationError
+
+        from app.core.config import settings
+        from app.schemas.pipeline import PipelineRunRequest
+
+        cap = settings.MAX_JOBS_PER_MATCH_RUN
+        # A hostile payload must die at the schema, before any route code
+        with pytest.raises(ValidationError):
+            PipelineRunRequest(max_matches=100_000)
+        with pytest.raises(ValidationError):
+            PipelineRunRequest(max_matches=cap + 1)
+        # Legitimate values still pass — the cap must not break real use
+        ok = PipelineRunRequest(max_matches=cap)
+        assert ok.max_matches == cap
+        assert PipelineRunRequest().max_matches is None
+
+    def test_pipeline_route_rejects_hostile_payload(self, client, db):
+        """Through the HTTP boundary: 422 before anything runs."""
+        email = f"clamp-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        r = client.post("/api/v1/pipeline/run", json={"max_matches": 100000})
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:200]}"

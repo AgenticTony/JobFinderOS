@@ -3,13 +3,20 @@
 Status: **decided — go** (settled 2026-08-27). Reason: vendor consolidation
 for a solo operator and managed auth we never maintain — explicitly NOT
 for RLS (see the correction below; that backstop is available on any
-managed Postgres). Nothing has been started; WO0 is the first action.
+managed Postgres). Nothing has been started; MIG-WO0 is the first action.
 The decision gate is kept below as historical context so it isn't
 re-litigated, not as an open question.
 
 This plan runs to the same standard as the rest of the repo: every work
 order ships with tests that have been seen to fail against the regression
 it guards.
+
+> **Numbering:** this file's sequence is prefixed MIG-WO0…MIG-WO5
+> (resolved 2026-08-27). The execution queue in `docs/work-orders/`
+> numbers its items WO-01…WO-13 — different items, same neighborhood.
+> `WO-03` there is the Supabase Postgres migration and absorbs this
+> file's whole sequence when it completes; MIG-WO references are only
+> used inside this document.
 
 ---
 
@@ -62,10 +69,10 @@ point at the local mirror, not Supabase's schema).
 ## Work orders
 
 Ordered so each step is independently verifiable and independently
-rollback-able. The user-UUID remap happens in WO2, **before** RLS lands in
-WO3 — never remap users under live RLS policies keyed to `sub`.
+rollback-able. The user-UUID remap happens in MIG-WO2, **before** RLS lands in
+MIG-WO3 — never remap users under live RLS policies keyed to `sub`.
 
-### WO0 — Off-site backups (~30 min, HARD PRECONDITION)
+### MIG-WO0 — Off-site backups (~30 min, HARD PRECONDITION)
 
 Every later work order assumes the data survives its own mistake; today
 that assumption rests on one drive — `ops/backup.sh` writes to
@@ -75,7 +82,7 @@ copy the current backup set off-machine (any of: another machine,
 encrypted cloud storage, an S3 bucket). Nothing else starts until a copy
 exists somewhere the laptop cannot destroy.
 
-### WO1 — Database: SQLite → Supabase Postgres (~0.5–1 day)
+### MIG-WO1 — Database: SQLite → Supabase Postgres (~0.5–1 day)
 
 Scope: provision the Supabase project (EU); `DATABASE_URL` to its
 connection string; alembic to head; data migration script for the live
@@ -88,7 +95,7 @@ retires).
 `target_metadata = Base.metadata` with no `include_object` filter and no
 `version_table_schema`. Supabase Postgres ships `auth`, `storage` and
 `realtime` schemas; autogenerate against it diffs their tables as
-unknown and happily emits DROPs. WO1 adds an `include_object` filter
+unknown and happily emits DROPs. MIG-WO1 adds an `include_object` filter
 restricting autogenerate to `public` and pins `version_table_schema`
 before the first `alembic revision --autogenerate` against Supabase.
 
@@ -98,7 +105,7 @@ tests failed on Postgres because SQLite silently does not enforce
 foreign keys while the suite fabricated profiles and matches with
 user_ids that had no users row (fixed — the tests now create the user
 rows both backends demand). Backend divergence now fails CI instead of
-surfacing mid-WO1.
+surfacing mid-MIG-WO1.
 
 Tests/done: full suite + flow green on both CI legs; local dev + tests
 run against the Supabase DB; a row-count + invariant diff against the
@@ -115,12 +122,12 @@ that is tolerable — after any post-cutover write, roll FORWARD, not back.
 the Free plan has NO automatic backups at all (self-serve `db dump` is
 the documented answer); Pro adds daily backups with 7-day retention;
 PITR is a separate paid ADD-ON even on Pro (~$100/mo at 7-day retention,
-and enabling it replaces daily backups). Decide before WO1 whether
+and enabling it replaces daily backups). Decide before MIG-WO1 whether
 paying users' CVs justify Pro + the PITR add-on from day one — this
-moves beta cost well off $0 and belongs in the WO4 budget line, not
+moves beta cost well off $0 and belongs in the MIG-WO4 budget line, not
 discovered after the first support email.
 
-### WO2 — Auth: fastapi-users → Supabase Auth (~1–1.5 days)
+### MIG-WO2 — Auth: fastapi-users → Supabase Auth (~1–1.5 days)
 
 Scope: create the 2 real users in Supabase (real passwords, verified
 addresses); remap the 4 FK columns to the new Supabase UUIDs in one
@@ -172,9 +179,9 @@ above the boundary: `TestLayer1Routes`, `TestOutboundEmailBoundary`, and
 the two-tenant route test pass unchanged, on minted tokens.
 
 Rollback: fastapi-users code is deleted only after the new flow is green;
-keep it on a branch until WO3 ships.
+keep it on a branch until MIG-WO3 ships.
 
-### WO3 — RLS + JWT propagation (~1 day)
+### MIG-WO3 — RLS + JWT propagation (~1 day)
 
 Scope: per-request propagation middleware on every request-scoped
 transaction (SQLAlchemy event listener), using the DOCUMENTED direct-
@@ -195,9 +202,9 @@ jobs (scheduler, pipeline) prove they run on the worker factory and never
 see RLS errors.
 
 Rollback: RLS policies are additive; `ENABLE ROW LEVEL SECURITY` off
-restores WO2 behaviour instantly.
+restores MIG-WO2 behaviour instantly.
 
-### WO4 — Deploy on the final stack (~0.5–1 day)
+### MIG-WO4 — Deploy on the final stack (~0.5–1 day)
 
 Scope: Render web service + worker (the API/worker split this plan bakes
 in: matching/pipeline out of the request threadpool, Postgres-backed job
@@ -210,7 +217,7 @@ Done: `https://` custom domain, health/ready probes, one real signup +
 login + hunt exercised end-to-end in the browser (the standard the
 frontend auth work set: verified on the wire, not claimed).
 
-### WO5 — AI inference residency + AI Act posture (decision-gated; runs alongside WO4)
+### MIG-WO5 — AI inference residency + AI Act posture (decision-gated; runs alongside MIG-WO4)
 
 Why: CVs are high-stakes personal data leaving the EEA on every match —
 Z.ai's DPA (verified 2026-08-27) processes API data "generally from
@@ -255,7 +262,7 @@ Re-calibration reminder unchanged: 5.2 is not the model everything was
 tuned against — new matching_prompt_version, re-measured SD, tier
 bands, backlog re-score (see the gates below). Incidental: Mistral runs
 Sentry in the EEA — match the region when OUR observability lands
-(WO4), for the same residency logic.
+(MIG-WO4), for the same residency logic.
 
 - **Interim posture (now → GLM-regional-or-equivalent):** stay on Z.ai
   direct under a documented wrapper — their API DPA (controller/processor
@@ -327,15 +334,15 @@ Sentry in the EEA — match the region when OUR observability lands
 
 ## Traps (each is a line item, not a footnote)
 
-1. **JWT propagation is the whole value of WO3.** A service-role key
+1. **JWT propagation is the whole value of MIG-WO3.** A service-role key
    bypasses RLS entirely; skipping propagation means paying the migration
    cost for auth convenience only.
-2. **Never remap user UUIDs under live RLS** — hence WO2 before WO3.
+2. **Never remap user UUIDs under live RLS** — hence MIG-WO2 before MIG-WO3.
 3. **GDPR is dual-delete** — local cascade alone stops being erasure the
    day auth moves.
 4. **Background jobs have no user JWT** — the two-session story must be
-   designed (WO3), not discovered in production.
-5. **Test JWKS infra is real work** (WO2's hidden cost) — CI cannot reach
+   designed (MIG-WO3), not discovered in production.
+5. **Test JWKS infra is real work** (MIG-WO2's hidden cost) — CI cannot reach
    Supabase.
 6. **Frontend session shape changes** (refresh flow replaces the 7-day
    token) — the interceptor work from 71ba301 is redone in a new shape,
@@ -343,18 +350,18 @@ Sentry in the EEA — match the region when OUR observability lands
 7. **Alembic autogenerate vs Supabase's schemas** — without an
    `include_object` filter, `alembic revision --autogenerate` diffs
    Supabase's `auth`/`storage`/`realtime` tables as unknown and emits
-   DROPs for them (WO1 scope).
+   DROPs for them (MIG-WO1 scope).
 8. **SQLite never enforced the FKs** — the suite passed for weeks on
    non-enforcement; the CI matrix now catches this class, and any new
    test that fabricates rows without their parents will fail the
    Postgres leg first.
 9. **AUTH_SECRET's production guard outlives its secret** — retire or
-   repoint it in WO2 or the deploy refuses to boot (WO2 scope).
+   repoint it in MIG-WO2 or the deploy refuses to boot (MIG-WO2 scope).
 
 ## Estimate
 
 **3–4 working days** at this repo's standard (tests-first, revert-checked,
 boundary-crossing), not the 1.5–2 days of the original sketch — the delta
-is WO2's test infrastructure, the frontend session rework, and dual-delete.
+is MIG-WO2's test infrastructure, the frontend session rework, and dual-delete.
 Sequencing rule: this lands **before deployment and before real users** —
 deploy once, on the final stack.
