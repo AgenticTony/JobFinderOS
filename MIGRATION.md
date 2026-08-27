@@ -111,11 +111,14 @@ SQLite file is untouched by the migration itself, so pointing
 hunt on the new stack and a rollback silently discards it. With 2 users
 that is tolerable — after any post-cutover write, roll FORWARD, not back.
 
-**Supabase backup tier is a cost decision, not a footnote:** PITR is a
-paid (Pro) feature; the free tier gives daily backups only. Decide
-before WO1 whether paying users' CVs justify Pro from day one — this may
-move beta cost off $0 and belongs in the WO4 budget line, not discovered
-after the first support email.
+**Supabase backup tiers (verified against official docs 2026-08-27):**
+the Free plan has NO automatic backups at all (self-serve `db dump` is
+the documented answer); Pro adds daily backups with 7-day retention;
+PITR is a separate paid ADD-ON even on Pro (~$100/mo at 7-day retention,
+and enabling it replaces daily backups). Decide before WO1 whether
+paying users' CVs justify Pro + the PITR add-on from day one — this
+moves beta cost well off $0 and belongs in the WO4 budget line, not
+discovered after the first support email.
 
 ### WO2 — Auth: fastapi-users → Supabase Auth (~1–1.5 days)
 
@@ -152,6 +155,16 @@ the discipline anyway: one transaction, `SET CONSTRAINTS ALL DEFERRED`
 row-count diff as the data migration. This is the detail that stalls a
 migration at 11pm.
 
+Doc-verified facts this WO relies on (checked 2026-08-27): new Supabase
+projects default to asymmetric RS256 signing keys with a public JWKS
+endpoint (`/auth/v1/.well-known/jwks.json`) — the JWKS-verification
+design is correct for a project created today; `auth.admin.deleteUser`
+defaults to a HARD delete (`shouldSoftDelete=false`), which is exactly
+what GDPR erasure wants; leaked-password (HIBP) protection is Pro-plan-
+only, and auth rate limits are largely per-IP (with `Sb-Forwarded-For`
+available if auth traffic ever proxies through our backend instead of
+the browser talking to Supabase directly).
+
 Tests: **test-only JWKS** — a fixture keypair, the JWKS fetch monkeypatched,
 `_register`/`_auth_client` mint signed tokens. The hidden cost of this WO
 is exactly this infrastructure; budget it. The proof the swap is invisible
@@ -163,10 +176,14 @@ keep it on a branch until WO3 ships.
 
 ### WO3 — RLS + JWT propagation (~1 day)
 
-Scope: per-request propagation middleware — `SET LOCAL
-request.jwt.claims` on every request-scoped transaction (SQLAlchemy event
-listener); RLS policies on profiles, match_results, application_drafts,
-applications keyed to `auth.uid()`; the **two-session story made
+Scope: per-request propagation middleware on every request-scoped
+transaction (SQLAlchemy event listener), using the DOCUMENTED direct-
+connection pattern — `SET LOCAL role authenticated` + `SET LOCAL
+request.jwt.claim.sub = <uuid>` (per Supabase's RLS guide); policies on
+profiles, match_results, application_drafts, applications keyed to
+`auth.uid()` with the `auth.uid() IS NOT NULL AND ...` guard (a NULL
+identity silently filters everything, which is fail-closed and correct,
+but must be deliberate); the **two-session story made
 explicit**: request sessions propagate the JWT (RLS enforced), worker/
 scheduler sessions run service-role (RLS not enforced) as two named
 session factories — the discipline point, now structural and documented.
