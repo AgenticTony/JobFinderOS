@@ -115,7 +115,8 @@ def test_real_tailoring_produces_zero_unsupported_claims():
         # Layer A on real output — its live false-positive rate matters
         # as much as the judge's verdict
         findings = unsupported_claims(
-            cv_text, tailored, allowed_names=[job["company"]])
+            cv_text, tailored,
+            allowed_names=[job["company"], job["title"]])
         high, advisory = split_tiers(findings)
         layer_a_high_total += len(high)
 

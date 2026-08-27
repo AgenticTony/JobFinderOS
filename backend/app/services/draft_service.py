@@ -141,7 +141,7 @@ def create_draft_for_job(
             findings = unsupported_claims(
                 profile.cv_text,
                 f"{result.get('cover_letter', '')}\n{result.get('tailored_cv', '')}",
-                allowed_names=[job.company] if job.company else None,
+                allowed_names=[n for n in (job.company, job.title) if n],
             )
             high, advisory = split_tiers(findings)
 
