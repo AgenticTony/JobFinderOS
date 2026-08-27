@@ -303,6 +303,24 @@ Sentry in the EEA — match the region when OUR observability lands
   matched candidates flips classification to high-risk. That line
   belongs in PRD.md's scope boundaries as a hard product rule (PRD.md is
   mid-write by the other session — carry it there when it lands).
+- **Official regional-inference spec (verified 2026-08-27, docs page):
+  implementation is SDK `server="eu"` (mistral SDK >= 2.70) or base URL
+  `api.eu.mistral.ai`; regional feature limits are function-calling-only,
+  no Agents/Batch/Files — our workload is plain chat completions, fully
+  compatible. Control plane (keys, billing, analytics) is NOT regional —
+  acceptable: it carries no user CV data.
+- **Residency audit trail is a documented requirement, and it is the same
+  table as the cost recording:** Mistral's docs prescribe logging the
+  endpoint hostname, model ID, timestamp, and response request-id per
+  regional request (and the target base URL if proxied). Build ONE
+  per-call table — tokens, cost, endpoint hostname, model, request-id,
+  timestamp — and it serves cost accounting, the 1.9x-class price-drift
+  detection, AND the residency audit trail. Two recommendations, one
+  schema.
+- **Zero data retention is a SEPARATE control from regional inference**
+  (retention of request/response content after processing, vs where
+  processing runs). The unlock-path checklist grows one item: evaluate
+  Mistral's ZDR terms (and any tier gating) alongside the regional tier.
 - **Gate before the first paying user:** one professional legal hour
   covering the Chapter V transfer stack and the Art 50(2) marking
   exemption. Cheap against 4%-of-turnover exposure.
