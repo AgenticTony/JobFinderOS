@@ -22,6 +22,22 @@ from app.core.config import settings as _settings
 DATABASE_URL = _settings.DATABASE_URL
 
 
+def normalize_postgres_url(url: str) -> str:
+    """Postgres URLs arrive in three shapes: postgres:// (Render/Heroku
+    convention), bare postgresql:// (by habit), postgresql+psycopg://
+    (explicit). SQLAlchemy resolves bare postgresql:// to the psycopg2
+    dialect — and psycopg2 is NOT installed (psycopg 3 is the one driver,
+    WO-11). Everything normalizes to +psycopg so the SYNC engine can
+    actually connect; this is the same protection async_database_url
+    gives the auth engine.
+    """
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
 def async_database_url(url: str) -> str:
     """Resolve the DATABASE_URL for the async auth engine.
 
@@ -40,9 +56,9 @@ def async_database_url(url: str) -> str:
         return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
     return url
 
-# Render/Heroku-style URLs use postgres:// — SQLAlchemy needs postgresql://
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+# Render/Heroku-style and bare-postgresql URLs normalize to the ONE
+# installed driver (psycopg 3) — see normalize_postgres_url
+DATABASE_URL = normalize_postgres_url(DATABASE_URL)
 
 logger.info("Database URL configured: %s", DATABASE_URL.split("@")[-1])
 

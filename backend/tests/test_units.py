@@ -1310,3 +1310,41 @@ class TestOneDriverEverywhere:
                 f"{f.name} still pins asyncpg — the driver that fails on "
                 "both Supabase poolers must not ship"
             )
+
+
+class TestSyncEngineDriverSafety:
+    """WO-11 review: bare postgresql:// resolves to the psycopg2 dialect
+    in SQLAlchemy 2.0 — psycopg2 is NOT installed. The async engine was
+    protected by async_database_url; the sync engine took DATABASE_URL
+    verbatim, so a Render/Heroku-style URL crashed at first connection
+    with ModuleNotFoundError: psycopg2. Normalization now lives in one
+    pure function used at config time."""
+
+    def test_every_postgres_shape_normalizes_to_psycopg(self):
+        from app.core.database import normalize_postgres_url
+
+        cases = {
+            "postgres://u:p@h:5432/db": "postgresql+psycopg://u:p@h:5432/db",
+            "postgresql://u:p@h:5432/db": "postgresql+psycopg://u:p@h:5432/db",
+            "postgresql+psycopg://u:p@h:5432/db": "postgresql+psycopg://u:p@h:5432/db",
+            "sqlite:///./x.db": "sqlite:///./x.db",
+        }
+        for url, want in cases.items():
+            assert normalize_postgres_url(url) == want, f"{url} -> {normalize_postgres_url(url)!r}"
+
+    def test_normalized_urls_resolve_to_the_installed_driver(self):
+        """Dialect-level proof, no connection: every accepted Postgres
+        shape must build an engine whose driver is psycopg — never the
+        uninstalled psycopg2."""
+        from sqlalchemy import create_engine
+
+        from app.core.database import normalize_postgres_url
+
+        for url in ("postgres://u:p@h:5432/db",
+                    "postgresql://u:p@h:5432/db",
+                    "postgresql+psycopg://u:p@h:5432/db"):
+            eng = create_engine(normalize_postgres_url(url))
+            assert eng.dialect.driver == "psycopg", (
+                f"{url} resolved to driver {eng.dialect.driver!r} — only "
+                "psycopg (3) is installed"
+            )
