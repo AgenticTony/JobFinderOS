@@ -245,19 +245,35 @@ def _extract_metrics(text: str) -> List[Claim]:
 # so entries like '.net', 'c#', 'node.js', 'ci/cd' could never match a
 # normalised haystack (the u.s.-lexicon dead-entry class). Spaces become
 # \s+ so multi-word entries match across normalisation whitespace.
-_TECH_PATTERNS = [
-    (re.compile(
-        rf"(?<!\w){re.escape(_normalise(t)).replace(re.escape(' '), r'\s+')}(?!\w)"),
-     t)
-    for t in _TECHNOLOGY_VOCABULARY
-]
+# Two haystacks, chosen per entry (review round 2: normalising the
+# vocabulary made c#/c++/.net REACHABLE but also made them match bare
+# 'c'/'net' in ordinary prose — "Grades: A, B, C" flagged C++). Entries
+# carrying punctuation match against the RAW casefolded text, where
+# 'c#' is still 'c#' and '.net' is still '.net'; plain entries match the
+# normalised haystack as before. Same lesson as the u.s. lexicon:
+# punctuation-bearing tokens need their own ground.
+def _tech_pattern(entry: str):
+    raw = entry.casefold()
+    if re.search(r"\W", entry):
+        pattern = re.compile(
+            rf"(?<!\w){re.escape(raw).replace(re.escape(' '), r'\s+')}(?!\w)")
+        haystack = "raw"
+    else:
+        pattern = re.compile(
+            rf"(?<!\w){re.escape(_normalise(entry)).replace(re.escape(' '), r'\s+')}(?!\w)")
+        haystack = "norm"
+    return pattern, haystack
+
+
+_TECH_PATTERNS = [(*_tech_pattern(t), t) for t in _TECHNOLOGY_VOCABULARY]
 
 
 def _extract_technologies(text: str) -> List[Claim]:
     claims = []
-    lowered = _normalise(text)
-    for pattern, name in _TECH_PATTERNS:
-        if pattern.search(lowered):
+    norm = _normalise(text)
+    raw = " ".join(text.casefold().split())
+    for pattern, haystack, name in _TECH_PATTERNS:
+        if pattern.search(raw if haystack == "raw" else norm):
             claims.append(Claim(kind="technology", value=name,
                                 context="", tier="advisory"))
     return claims
@@ -378,17 +394,6 @@ def unsupported_claims(source_cv: str, tailored_text: str,
         if claim.kind == "technology":
             if _normalise(claim.value) not in src:
                 findings.append(claim)
-            continue
-        if claim.kind == "organisation":
-            if _org_supported(claim, src) or _org_supported(claim, src_noc):
-                continue
-            tokens = _strip_connectors(value.split())
-            # Glued skill/title runs: every token present in the source
-            # somewhere ("Databases SQL" over a CV listing SQL and
-            # databases) — order-free containment kills the FP class
-            if tokens and all(t in src_tokens for t in tokens):
-                continue
-            findings.append(claim)
             continue
         if claim.kind == "credential":
             if not _credential_supported(claim, src):

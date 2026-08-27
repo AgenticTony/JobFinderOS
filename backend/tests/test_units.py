@@ -1575,3 +1575,34 @@ class TestAllowedNamesSubtraction:
         techs = {c.value for c in extract_claims(text) if c.kind == "technology"}
         for expected in (".net", "node.js", "c#", "c++", "next.js"):
             assert expected in techs, f"{expected} dead — punct stripped before match"
+
+
+class TestTechPatternProseSafety:
+    """WO-01 review round 2: normalising the vocabulary made c#/c++/.net
+    reachable but ALSO made them match bare 'c' and 'net' in ordinary
+    prose ("Grades: A, B, C" flagged C++). Punctuated entries must match
+    against the RAW casefolded text, where their punctuation still
+    exists — the banner's credibility depends on not crying wolf."""
+
+    def test_ordinary_prose_produces_no_tech_claims(self):
+        from app.services.fabrication import extract_claims
+
+        for text in ("Grades: A, B, C in my final year.",
+                     "I improved net revenue and reduced churn.",
+                     "Vitamin C and a safety net were mentioned.",
+                     "The CI pipeline rests until Friday."):
+            techs = [c.value for c in extract_claims(text)
+                     if c.kind == "technology"]
+            assert techs == [], f"{text!r} flagged {techs} — prose noise"
+
+    def test_genuine_punctuated_mentions_still_match_without_phantoms(self):
+        from app.services.fabrication import extract_claims
+
+        techs = {c.value for c in
+                 extract_claims("Used C# daily, built .NET and Node.js, "
+                                "CI/CD, scikit-learn, C++ services.")
+                 if c.kind == "technology"}
+        assert {"c#", ".net", "node.js", "ci/cd", "scikit-learn", "c++"} <= techs
+        # no phantom: a C# mention must not also emit c++
+        assert extract_claims("Used C# daily.")[0:1] == [] or not any(
+            c.value == "c++" for c in extract_claims("Used C# daily."))
