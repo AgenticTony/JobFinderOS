@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import { Familjen_Grotesk, Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 
 const geistSans = Geist({
@@ -12,10 +12,15 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 });
 
+const familjen = Familjen_Grotesk({
+  variable: '--font-familjen',
+  subsets: ['latin'],
+});
+
 export const metadata: Metadata = {
   title: 'JobFinderOS',
   description:
-    'Your job hunting operating system — scrape, match against your CV, approve, apply. Built on the TalentHive engine.',
+    'Hourly hunts across Platsbanken and Reed, every ad scored against your CV. Applications you approve, drafts that never invent facts.',
 };
 
 export default function RootLayout({
@@ -24,7 +29,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`dark ${geistSans.variable} ${geistMono.variable}`}>
+    <html
+      lang="en"
+      className={`dark ${geistSans.variable} ${geistMono.variable} ${familjen.variable}`}
+    >
       {/* suppressHydrationWarning: browser extensions (e.g. the one adding
           cz-shortcut-listen) inject attributes into <body> before React
           hydrates, causing spurious mismatch warnings. This suppresses

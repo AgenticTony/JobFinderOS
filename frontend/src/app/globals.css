@@ -23,6 +23,13 @@
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  /* Landing: Swedish grotesk for display, bone paper ground for the
+     daylight half of the page. The console stays ink. */
+  --font-display: var(--font-familjen), var(--font-geist-sans), ui-sans-serif,
+    sans-serif;
+  --color-paper: #f4f3ef;
+  --color-paper-deep: #ebe9e1;
+  --color-paper-line: #dcd9cf;
 }
 
 :root {
@@ -88,4 +95,40 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---- Landing page ---- */
+
+/* Radar sweep: one slow amber rotation, the hunt made visible. */
+@keyframes radar-sweep {
+  to {
+    transform: rotate(1turn);
+  }
+}
+.radar-sweep {
+  animation: radar-sweep 16s linear infinite;
+}
+
+/* Hero entrance: a single orchestrated rise, then stillness. */
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.landing-rise {
+  animation: landing-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.landing-rise-1 {
+  animation-delay: 0.06s;
+}
+.landing-rise-2 {
+  animation-delay: 0.16s;
+}
+.landing-rise-3 {
+  animation-delay: 0.26s;
 }
