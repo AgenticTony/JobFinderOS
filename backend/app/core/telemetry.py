@@ -41,9 +41,16 @@ def scrub_pii(event, hint=None):
     crumbs = event.get("breadcrumbs")
     if isinstance(crumbs, list):
         for c in crumbs:
-            if isinstance(c, dict) and "message" in c:
+            if not isinstance(c, dict):
+                continue
+            if "message" in c:
                 c["message"] = _redact(c["message"]) if isinstance(c["message"], dict) \
                     else "[redacted message]"
+            # DATA is the field integrations actually populate
+            # (logging.py:378 puts every log record's extra here) — it
+            # bypassed name-redaction AND the truncation cap until now
+            if isinstance(c.get("data"), dict):
+                c["data"] = _redact(c["data"])
 
     def _redact_frames(frames):
         for f in frames or []:
@@ -84,6 +91,10 @@ def init_sentry() -> None:
 
     sentry_sdk.init(
         dsn=dsn,
+        # COLLECTION-POINT fix (review r2): frame locals carry CV text
+        # under arbitrary names (user_message, raw, result_text…) — name
+        # redaction cannot enumerate them. Never collect them at all.
+        include_local_variables=False,
         # EU region: create the project on sentry.io's EU data residency
         # (de.sentry.io / eu endpoints) — same posture as the AI residency
         # decision. The DSN encodes the region.

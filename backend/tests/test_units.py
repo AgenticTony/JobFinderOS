@@ -1931,3 +1931,45 @@ class TestScrubRealisticEvent:
         flat = str(out)
         for leaked in ("Anthony Foran", "x@y.se", "+4670000000"):
             assert leaked not in flat, f"identity field {leaked!r} left the machine"
+
+
+class TestScrubCollectionPoint:
+    """Reviewer round 2: allow-listing key names cannot cover frame
+    locals (arbitrary, unbounded names: user_message, raw, result_text…)
+    and breadcrumb DATA is the field integrations actually populate
+    (logging.py:378). The fix is at the collection point."""
+
+    def test_frame_locals_never_collected(self):
+        """include_local_variables=False must be set — the SDK default
+        (True) ships 2KB CV fragments under arbitrary variable names,
+        on the error path (the judge's fail-closed ValueError fires on
+        exactly the documents most worth protecting)."""
+        import inspect
+
+        import app.core.telemetry as telemetry
+
+        src = inspect.getsource(telemetry.init_sentry)
+        assert "include_local_variables=False" in src, (
+            "frame locals still collected — name-level redaction cannot "
+            "cover arbitrary variable names; close it at collection"
+        )
+
+    def test_breadcrumb_data_scrubbed(self):
+        from app.core.telemetry import scrub_pii
+
+        event = {"breadcrumbs": [
+            {"category": "httpx",
+             "message": "POST /api",
+             "data": {"payload": "CV: " + "x" * 5000,
+                      "cv_text": "SECRET",
+                      "safe": "ok"}}],
+            "extra": {}}
+        out = scrub_pii(event)
+        crumb = out["breadcrumbs"][0]
+        assert crumb["message"] == "[redacted message]"
+        assert crumb["data"]["cv_text"] == "[redacted]"
+        assert crumb["data"]["safe"] == "ok"
+        assert len(str(crumb["data"]["payload"])) < 2100, (
+            f"breadcrumb data bypassed even the truncation cap: "
+            f"{len(str(crumb['data']['payload']))} chars"
+        )
