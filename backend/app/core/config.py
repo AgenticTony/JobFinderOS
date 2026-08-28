@@ -144,7 +144,9 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _production_guards(self) -> "Settings":
         """Fail fast on insecure production config (never serve on the
-        committed AUTH_SECRET; never reflect-echo CORS by accident)."""
+        committed AUTH_SECRET; never reflect-echo CORS by accident). Both
+        the API and the worker run this at import — BEFORE anything binds
+        a port or claims a lock — so every guard here is process-wide."""
         import logging
 
         if not self.DEBUG:
@@ -153,6 +155,21 @@ class Settings(BaseSettings):
                     "AUTH_SECRET must be set to a strong random value "
                     '(>=32 chars) when DEBUG=false — generate with '
                     'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+                )
+            # r5: the cron's empty-DATABASE_URL incident, API variant —
+            # WORSE. An unset/SQLite URL boots fine, /health answers
+            # SELECT 1 with 200, the deploy goes healthy, and signups land
+            # in an EPHEMERAL container file (gone on the next deploy). A
+            # missing sync:false secret after service recreation produces
+            # exactly this shape; refuse it at import in BOTH processes.
+            if not self.DATABASE_URL.startswith("postgres"):
+                raise ValueError(
+                    "DATABASE_URL must be Postgres when DEBUG=false (got "
+                    f"{self.DATABASE_URL!r}) — an unset URL silently "
+                    "defaults to SQLite and accepts traffic into an "
+                    "ephemeral file. This is the recreated-service/"
+                    "missing-secret failure mode: fail at boot, not after "
+                    "users sign up."
                 )
             if "*" in self.get_cors_origins():
                 raise ValueError("CORS_ORIGINS=* is not allowed when DEBUG=false")

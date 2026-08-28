@@ -2296,38 +2296,24 @@ class TestWorkerOnceMode:
 
 class TestWorkerProductionPostgresGuard:
     """WO-07 live incident: the recreated frankfurt cron ran 'successfully'
-    in 13s against container-local SQLite — its sync:false DATABASE_URL
-    was empty on the new service (sync prompts only happen at INITIAL
-    blueprint creation). A production hunt must REFUSE to run without
-    Postgres instead of silently doing nothing."""
+    in 13s against container-local SQLite. The guard now lives in
+    Settings._production_guards (see TestProductionPostgresGuard — keyed on
+    DEBUG=false, run at import in BOTH processes). r5 removed this
+    worker-local ENVIRONMENT-keyed version: a second, independently-toggled
+    switch for the same property is a gap, not defense in depth. These
+    tests pin that the worker itself stays switch-free: --once with sqlite
+    runs (dev shape) because Settings already refused the bad config."""
 
-    def test_once_refuses_sqlite_in_production(self, monkeypatch):
+    def test_once_runs_on_sqlite_in_dev(self, monkeypatch):
         from app.services import worker
 
-        monkeypatch.setattr(worker.settings, "ENVIRONMENT", "production")
-        monkeypatch.setattr(worker.settings, "DATABASE_URL",
-                            "sqlite:///./jobfinderos.db")
         called = []
         monkeypatch.setattr(worker, "run_scheduled_hunt",
-                            lambda: called.append(1))
-        monkeypatch.setattr(worker, "init_db", lambda: None)
-
-        rc = worker.main(["--once"])
-
-        assert rc == 1, "must refuse (exit 1), not 'succeed' silently"
-        assert called == [], "run_scheduled_hunt must never fire"
-
-    def test_once_runs_with_postgres_in_production(self, monkeypatch):
-        from app.services import worker
-
-        monkeypatch.setattr(worker.settings, "ENVIRONMENT", "production")
-        monkeypatch.setattr(worker.settings, "DATABASE_URL",
-                            "postgresql+psycopg://u:p@h/db")
-        monkeypatch.setattr(worker, "run_scheduled_hunt",
-                            lambda: {"status": "ran"})
+                            lambda: called.append(1) or {"status": "ran"})
         monkeypatch.setattr(worker, "init_db", lambda: None)
 
         assert worker.main(["--once"]) == 0
+        assert called == [1]
 
 
 class TestCORSProductionGuard:
@@ -2339,6 +2325,7 @@ class TestCORSProductionGuard:
     def _settings_kwargs(self):
         return {"DEBUG": False,
                 "AUTH_SECRET": "x" * 48,
+                "DATABASE_URL": "postgresql+psycopg://u:p@h/db",
                 "CORS_ORIGINS": ""}
 
     def test_empty_cors_rejected_in_production(self):
@@ -2362,3 +2349,43 @@ class TestCORSProductionGuard:
                         "CORS_ORIGINS": "https://jobfinderos.pages.dev,http://localhost:3000"})
         assert s.get_cors_origins() == ["https://jobfinderos.pages.dev",
                                         "http://localhost:3000"]
+
+
+class TestProductionPostgresGuard:
+    """Review r5: the cron's empty-DATABASE_URL incident, API variant —
+    WORSE. Boot creates ephemeral SQLite, /health answers SELECT 1 with
+    200, Render marks the deploy healthy, users sign up into a file that
+    vanishes on the next deploy. The guard belongs in _production_guards
+    (both processes run it at import, before anything binds a port), not
+    on the worker where the failure was merely cheapest."""
+
+    def test_sqlite_rejected_when_debug_false(self):
+        import pytest
+
+        from app.core.config import Settings
+        with pytest.raises(ValueError):
+            Settings(DEBUG=False, AUTH_SECRET="x" * 48,
+                     CORS_ORIGINS="https://jobfinderos.pages.dev",
+                     DATABASE_URL="sqlite:///./jobfinderos.db")
+
+    def test_default_sqlite_rejected_when_debug_false(self):
+        """The dangerous default: DATABASE_URL left UNSET resolves to the
+        sqlite default — the exact recreation-incident shape."""
+        import pytest
+
+        from app.core.config import Settings
+        with pytest.raises(ValueError):
+            Settings(DEBUG=False, AUTH_SECRET="x" * 48,
+                     CORS_ORIGINS="https://jobfinderos.pages.dev")
+
+    def test_postgres_passes_when_debug_false(self):
+        from app.core.config import Settings
+        s = Settings(DEBUG=False, AUTH_SECRET="x" * 48,
+                     CORS_ORIGINS="https://jobfinderos.pages.dev",
+                     DATABASE_URL="postgresql+psycopg://u:p@h/db")
+        assert s.DATABASE_URL.startswith("postgresql")
+
+    def test_sqlite_still_fine_in_dev(self):
+        from app.core.config import Settings
+        s = Settings(DEBUG=True, DATABASE_URL="sqlite:///./jobfinderos.db")
+        assert s.DATABASE_URL.startswith("sqlite")
