@@ -57,7 +57,10 @@ class Settings(BaseSettings):
     MAX_JOBS_PER_MATCH_RUN: int = 25
     # WO-02: emergency cost lever — 'off' skips the per-draft
     # fabrication judge (Layer A still guards). Default: on.
-    FABRICATION_JUDGE: str = "on"  # glm-4.6 no-thinking: ~5-10s per job
+    FABRICATION_JUDGE: str = "on"
+    # WO-05: empty = telemetry off (no-op init)
+    SENTRY_DSN: str = ""
+    ENVIRONMENT: str = "development"  # glm-4.6 no-thinking: ~5-10s per job
     MATCH_KEEP_MIN_SCORE: int = 25  # below this a match never enters the queue
     # Dead-band floor. Scores in [DEADBAND, KEEP_MIN) are re-scored once and
     # AVERAGED before the keep/dismiss call. 50 pooled samples put real noise

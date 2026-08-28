@@ -22,6 +22,7 @@ from app.api.v1 import account, applications, jobs, matches, pipeline, profiles
 from app.api.v1 import settings as settings_api
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.telemetry import init_sentry
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging (TalentHive pattern)
@@ -44,6 +45,8 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     yield
     stop_scheduler()
+
+init_sentry()  # no-op without SENTRY_DSN (WO-05 / F7)
 
 app = FastAPI(lifespan=lifespan,
     title=settings.APP_NAME,

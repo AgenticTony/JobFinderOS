@@ -1,5 +1,6 @@
 """SQLAlchemy models for JobFinderOS."""
 
+from app.models.ai_usage import AIUsage  # noqa: F401 — registered on Base
 from app.models.application import Application
 from app.models.draft import ApplicationDraft
 from app.models.job import JobPosting

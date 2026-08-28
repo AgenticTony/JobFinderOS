@@ -98,3 +98,44 @@ fi
 find "$BACKUP_DIR" -maxdepth 1 -name "db-*.db" -mtime +$KEEP_DAYS -delete 2>/dev/null || true
 DB_COUNT=$(find "$BACKUP_DIR" -maxdepth 1 -name "db-*.db" | wc -l | tr -d ' ')
 echo "$(date -Iseconds) rotation complete: $DB_COUNT db backups retained (keeping $KEEP_DAYS days)"
+
+# --- MIG-WO0: OFF-SITE copy (the only unrecoverable-risk item) ---
+# The whole script above writes to a directory on the SAME DISK as the
+# data it protects. This step replicates the backup set OFF-MACHINE.
+#
+# OFFSITE_BACKUP_TARGET (env): an rsync-compatible destination —
+#   another machine:  user@host:/srv/jobfinderos-backups
+#   cloud via rclone: rclone:remote:bucket  (set OFFSITE_CMD=rclone)
+#   encrypted:        wrap with gpg --encrypt per-file before sending
+#
+# VERIFIES the copy landed (file count match) and exits NON-ZERO on
+# failure — an off-site copy that silently didn't happen is the same
+# as not having one.
+OFFSITE_BACKUP_TARGET="${OFFSITE_BACKUP_TARGET:-}"
+if [ -n "$OFFSITE_BACKUP_TARGET" ]; then
+    SYNC_CMD="${OFFSITE_CMD:-rsync}"
+    SRC_COUNT=$(find "$BACKUP_DIR" -type f | wc -l | tr -d ' ')
+    if [ "$SYNC_CMD" = "rsync" ]; then
+        rsync -a --delete "$BACKUP_DIR/" "$OFFSITE_BACKUP_TARGET/"
+    else
+        $SYNC_CMD copy "$BACKUP_DIR" "$OFFSITE_BACKUP_TARGET" --transferred 50 2>/dev/null \
+            || $SYNC_CMD sync "$BACKUP_DIR" "$OFFSITE_BACKUP_TARGET"
+    fi
+    if [ $? -ne 0 ]; then
+        echo "$(date -Iseconds) OFFSITE FAILED: sync error" >&2
+        exit 1
+    fi
+    # verification: count files at the destination (rsync local/ssh only)
+    case "$OFFSITE_BACKUP_TARGET" in
+        *:*) DST_COUNT=$(ssh "${OFFSITE_BACKUP_TARGET%%:*}" \
+                "find '${OFFSITE_BACKUP_TARGET#*:}' -type f | wc -l" 2>/dev/null | tr -d ' ') ;;
+        *)  DST_COUNT=$(find "$OFFSITE_BACKUP_TARGET" -type f 2>/dev/null | wc -l | tr -d ' ') ;;
+    esac
+    if [ "$DST_COUNT" != "$SRC_COUNT" ]; then
+        echo "$(date -Iseconds) OFFSITE VERIFY FAILED: src=$SRC_COUNT dst=$DST_COUNT" >&2
+        exit 1
+    fi
+    echo "$(date -Iseconds) off-site OK: $SRC_COUNT files at $OFFSITE_BACKUP_TARGET"
+else
+    echo "$(date -Iseconds) WARNING: OFFSITE_BACKUP_TARGET not set — backups exist on ONE disk only (MIG-WO0 incomplete)" >&2
+fi

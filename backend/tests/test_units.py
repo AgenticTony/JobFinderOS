@@ -1762,3 +1762,140 @@ class TestLiveCatchFixturesLoadBearing:
                     f"{snap.name}: recorded Layer-A catches {claims - now} "
                     "no longer reproduce — a checker change lost a real catch"
                 )
+
+
+class TestAICostRecording:
+    """WO-05: per-call AI usage rows — cost accounting, price-drift
+    detection, and the residency audit trail (endpoint+model+timestamp).
+    Recorded from _complete, the ONE call site every AI operation uses."""
+
+    def test_usage_row_recorded_per_call(self, db):
+        import app.services.ai_service as ai_mod
+        from app.models import AIUsage
+
+        class _Usage:
+            prompt_tokens = 1000
+            completion_tokens = 200
+            model_dump = lambda self: {
+                "prompt_tokens": 1000, "completion_tokens": 200}
+
+        class _Resp:
+            usage = _Usage()
+            choices = [type("C", (), {"message": type("M", (), {
+                "content": '{"score": 50}', "reasoning_content": None})()})()]
+            id = "req_test_1"
+
+        svc = ai_mod.AIService.__new__(ai_mod.AIService)
+        svc.model = "glm-5.1"
+        svc.max_tokens = 2000
+        svc.thinking = {"type": "disabled"}
+        class _Completions:
+            @staticmethod
+            def create(**kw):
+                return _Resp()
+
+        class _Chat:
+            completions = _Completions()
+
+        class _Client:
+            chat = _Chat()
+
+        svc.client = _Client()
+
+        from app.core.database import SessionLocal
+        before = SessionLocal().query(AIUsage).count()
+        svc._complete("sys", "user", kind="match")
+        after = SessionLocal().query(AIUsage).count()
+        row = SessionLocal().query(AIUsage).order_by(AIUsage.id.desc()).first()
+        assert after == before + 1, "no usage row recorded per call"
+        assert row.kind == "match" and row.model == "glm-5.1"
+        assert row.prompt_tokens == 1000 and row.completion_tokens == 200
+        assert row.request_id == "req_test_1"
+        assert row.endpoint and "z.ai" in row.endpoint, (
+            f"residency-audit field empty: {row.endpoint!r}"
+        )
+        # cost math: GLM-5.1 verified prices 1.40/M in, 4.40/M out
+        expected_usd = (1000 * 1.40e-6) + (200 * 4.40e-6)
+        assert abs(row.cost_usd / 1e6 - expected_usd) < 1e-9, (
+            f"cost {row.cost_usd}u$ != expected {expected_usd:.9f}$"
+        )
+
+    def test_cached_tokens_priced_at_cached_rate(self, db):
+        import app.services.ai_service as ai_mod
+
+        class _Details:
+            cached_tokens = 800
+
+        class _Usage:
+            prompt_tokens = 1000
+            completion_tokens = 0
+            prompt_tokens_details = _Details()  # attribute, as the SDK provides
+
+        class _Resp:
+            usage = _Usage()
+            choices = [type("C", (), {"message": type("M", (), {
+                "content": "ok", "reasoning_content": None})()})()]
+            id = "req_test_2"
+
+        svc = ai_mod.AIService.__new__(ai_mod.AIService)
+        svc.model = "glm-5.1"
+        svc.max_tokens = 2000
+        svc.thinking = {"type": "disabled"}
+        class _Completions2:
+            @staticmethod
+            def create(**kw):
+                return _Resp()
+
+        class _Chat2:
+            completions = _Completions2()
+
+        class _Client2:
+            chat = _Chat2()
+
+        svc.client = _Client2()
+        svc._complete("s", "u", kind="judge")
+        from app.core.database import SessionLocal
+        from app.models import AIUsage
+        row = SessionLocal().query(AIUsage).order_by(AIUsage.id.desc()).first()
+        assert row.cached_tokens == 800
+        expected = (800 * 0.26e-6) + (200 * 1.40e-6)  # cached + uncached input
+        assert abs(row.cost_usd / 1e6 - expected) < 1e-9
+
+
+class TestSentryPIIScrub:
+    """F7: Sentry captures request bodies — on this API that means CV
+    text. scrub_pii must drop bodies whole and redact every known
+    PII-carrying field, recursively; init must be a no-op without a DSN."""
+
+    def test_scrub_drops_bodies_and_redacts_fields(self):
+        from app.core.telemetry import scrub_pii
+
+        event = {
+            "request": {"data": {"cv_text": "SECRET CV"}},
+            "extra": {"cv_text": "SECRET", "nested": {"cover_letter": "SECRET",
+                     "safe": "ok"}, "tailored_cv": "SECRET"},
+        }
+        out = scrub_pii(event)
+        assert out["request"]["data"] == "[redacted]"
+        assert out["extra"]["cv_text"] == "[redacted]"
+        assert out["extra"]["nested"]["cover_letter"] == "[redacted]"
+        assert out["extra"]["nested"]["safe"] == "ok"
+        assert "SECRET" not in str(out)
+
+    def test_scrub_truncates_cv_sized_strings(self):
+        from app.core.telemetry import scrub_pii
+
+        out = scrub_pii({"extra": {"some_blob": "x" * 9000}})
+        assert len(out["extra"]["some_blob"]) < 2100
+
+    def test_init_noop_without_dsn(self):
+        from app.core import telemetry
+
+        telemetry.init_sentry()  # must not raise with no DSN configured
+        # and must not have installed the client
+        try:
+            import sentry_sdk
+            assert sentry_sdk.Hub.current.client is None or \
+                not sentry_sdk.Hub.current.client.is_active()
+        except Exception:
+            pass

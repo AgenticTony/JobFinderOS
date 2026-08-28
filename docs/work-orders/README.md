@@ -65,7 +65,11 @@ on every draft.** The honest post-fix baseline is 40% (2/5) with ZERO
 Layer-A false positives (down from 80% — much of the earlier rate was
 our own lossy input). Residual prompt-side work continues under the
 WO-02 measurement protocol (FABRICATION_N=20 before/after any prompt
-change). Next: **WO-05 (observability)** and WO-04 (worker split).
+change). **WO-05 is DONE (2026-08-28)**: ai_usage cost rows on every AI call
+(cost + price-drift + residency audit in one table), Sentry gated and
+PII-scrubbed (F7), and MIG-WO0's off-site backup step verified locally
+(remaining human step: point OFFSITE_BACKUP_TARGET at the real target).
+Next: **WO-04 (worker split)**, then WO-03.
 
 **WO-11 and WO-12 are new P0s from the 2026-08-27 stack audit** and block the
 entire deploy path. They are cheap (WO-11 is a driver swap on a stack that

@@ -28,6 +28,61 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# WO-05: verified per-token prices (docs.z.ai, 2026-08-27; re-verify
+# before signing anything — prices moved once already). (input, cached, output) USD/M.
+AI_PRICES_USD_PER_M = {
+    "glm-5.1": (1.40, 0.26, 4.40),
+}
+DEFAULT_PRICE = (1.40, 0.26, 4.40)  # assume glm-5.1 pricing until updated
+
+
+def compute_cost_usd(model: str, prompt: int, cached: int, completion: int) -> int:
+    """Cost in MICRO-dollars (integer, exact at these magnitudes)."""
+    full, cached_rate, out = AI_PRICES_USD_PER_M.get(model, DEFAULT_PRICE)
+    uncached = max(0, prompt - cached)
+    usd = (uncached * full + cached * cached_rate + completion * out) / 1_000_000
+    return int(round(usd * 1_000_000))
+
+
+def record_ai_usage(kind: str, model: str, response) -> None:
+    """Insert one ai_usage row on a short-lived session.
+
+    Deliberately independent of caller sessions (works for matcher,
+    drafts, judge, scheduler alike) and failure-tolerant: observability
+    must never break the call it observes. The endpoint field is the
+    RESIDENCY-AUDIT field (which hostname served this call).
+    """
+    try:
+        from urllib.parse import urlparse
+
+        from app.core.database import SessionLocal
+        from app.models import AIUsage
+
+        usage = getattr(response, "usage", None)
+        prompt = getattr(usage, "prompt_tokens", 0) or 0
+        completion = getattr(usage, "completion_tokens", 0) or 0
+        cached = 0
+        details = getattr(usage, "prompt_tokens_details", None) if usage else None
+        if details is not None:
+            cached = getattr(details, "cached_tokens", 0) or 0
+        endpoint = urlparse(getattr(settings, "GLM_BASE_URL", "") or "").hostname
+
+        db = SessionLocal()
+        try:
+            db.add(AIUsage(
+                kind=kind, model=model, endpoint=endpoint,
+                request_id=getattr(response, "id", None),
+                prompt_tokens=prompt, cached_tokens=min(cached, prompt),
+                completion_tokens=completion,
+                cost_usd=compute_cost_usd(model, prompt, min(cached, prompt),
+                                          completion),
+            ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:  # noqa: BLE001 — observability never breaks the call
+        logger.warning("ai_usage recording failed: %s", e)
+
 
 class AIServiceError(Exception):
     """Raised when the AI service cannot complete a request."""
@@ -110,7 +165,8 @@ Respond with ONLY valid JSON (no markdown):
   "summary": "2-3 sentence professional summary"
 }"""
 
-        result = self._complete(system_prompt, f"## CV\n{cv_text}\n\nExtract the structured profile as JSON.")
+        result = self._complete(system_prompt, f"## CV\n{cv_text}\n\nExtract the structured profile as JSON.",
+                            kind="extract")
         return self._parse_json(result)
 
     # ------------------------------------------------------------------
@@ -150,7 +206,8 @@ Respond with ONLY valid JSON (no markdown):
 Evaluate this job for me and respond with ONLY valid JSON in the required format.
 """
 
-        raw = self._complete(system_prompt, user_message, temperature=0.0)  # scoring: deterministic
+        raw = self._complete(system_prompt, user_message, temperature=0.0,  # scoring: deterministic
+                             kind="match")
         parsed = self._parse_json(raw)
         if not parsed:
             # Unparseable output is a TRANSPORT/FORMAT failure, not a score.
@@ -242,7 +299,7 @@ Prepare my tailored application package.
             # the named untraceable claims, so the retry targets the defect
             user_message += f"\n\n--- CORRECTION ---\n{correction}"
 
-        raw = self._complete(system_prompt, user_message)
+        raw = self._complete(system_prompt, user_message, kind="tailor")
         parsed = self._parse_json(raw)
 
         return {
@@ -319,7 +376,8 @@ Respond with ONLY valid JSON (no markdown):
   "worth_a_look": [{{"query": "query", "why": "one sentence, second person, citing their CV evidence"}}]
 }}"""
 
-        raw = self._complete(system_prompt, f"## CV\n{cv_text[:6000]}\n\nSuggest search queries.")
+        raw = self._complete(system_prompt, f"## CV\n{cv_text[:6000]}\n\nSuggest search queries.",
+                           kind="suggest")
         parsed = self._parse_json(raw)
 
         direct = [str(q).strip() for q in parsed.get("from_your_experience", []) if str(q).strip()][:8]
@@ -476,7 +534,8 @@ An empty list means the document is faithful."""
             f"## TAILORED DOCUMENT\n{tailored_text[:9000]}\n\n"
             "List every unsupported claim."
         )
-        raw = self._complete(system_prompt, user_message, temperature=0.0)
+        raw = self._complete(system_prompt, user_message, temperature=0.0,
+                             kind="judge")
         parsed = self._parse_json(raw)
         if "unsupported" not in parsed:
             # FAIL CLOSED (review finding): _parse_json returns {} on any
@@ -529,8 +588,13 @@ An empty list means the document is faithful."""
     # Shared plumbing (TalentHive patterns)
     # ------------------------------------------------------------------
 
-    def _complete(self, system_prompt: str, user_message: str, temperature: float = 0.3) -> str:
-        """Run a chat completion and return raw content text."""
+    def _complete(self, system_prompt: str, user_message: str,
+                  temperature: float = 0.3, kind: str = "unknown") -> str:
+        """Run a chat completion and return raw content text.
+
+        kind labels the ai_usage row (WO-05): match | tailor | judge |
+        extract | suggest | unknown.
+        """
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -547,6 +611,7 @@ An empty list means the document is faithful."""
             extra_body={"thinking": {"type": self.thinking}},
         )
 
+        record_ai_usage(kind, self.model, response)
         result_text = response.choices[0].message.content
 
         # GLM-5 puts reasoning in reasoning_content; recover JSON from it if

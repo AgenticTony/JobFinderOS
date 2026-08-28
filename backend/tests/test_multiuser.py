@@ -1157,12 +1157,12 @@ class TestJudgeFailClosed:
         captured = {}
         real_complete = AIService._complete
 
-        def spy(self, system_prompt, user_message, temperature=0.3):
+        def spy(self, system_prompt, user_message, temperature=0.3, kind=None):
             if "fact-checker" in system_prompt:
                 captured["temp"] = temperature
                 return '{"unsupported": []}'
             return real_complete(self, system_prompt, user_message,
-                                 temperature=temperature)
+                                 temperature=temperature, kind=kind)
 
         monkeypatch.setattr(AIService, "_complete", spy)
         svc = AIService.__new__(AIService); svc.model = "glm-test"
@@ -1179,14 +1179,15 @@ class TestJudgeWrongTypeFailsClosed:
     FAITHFUL -> ships. Wrong type is the same transport/format failure
     as a missing key: never a verdict."""
 
-    def test_non_list_unsupported_raises(self):
+    def test_non_list_unsupported_raises(self, monkeypatch):
         from app.services.ai_service import AIService
 
         svc = AIService.__new__(AIService)
         for raw in ('{"unsupported": null}', '{"unsupported": "none"}',
                     '{"unsupported": {"claim": "invented degree"}}'):
-            AIService._complete = staticmethod(
-                lambda s, u, temperature=0.0, _r=raw: _r)
+            monkeypatch.setattr(
+                AIService, "_complete", staticmethod(
+                    lambda s, u, temperature=0.0, kind=None, _r=raw: _r))
             try:
                 out = AIService.judge_fabrication(svc, "cv", "doc")
                 raise AssertionError(
@@ -1196,6 +1197,7 @@ class TestJudgeWrongTypeFailsClosed:
             except ValueError:
                 pass  # the required behaviour
         # valid shapes still work
-        AIService._complete = staticmethod(
-            lambda s, u, temperature=0.0: '{"unsupported": []}')
+        monkeypatch.setattr(
+            AIService, "_complete", staticmethod(
+                lambda s, u, temperature=0.0, kind=None: '{"unsupported": []}'))
         assert AIService.judge_fabrication(svc, "cv", "doc") == []
