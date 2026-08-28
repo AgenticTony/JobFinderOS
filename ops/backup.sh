@@ -125,12 +125,16 @@ if [ -n "$OFFSITE_BACKUP_TARGET" ]; then
         echo "$(date -Iseconds) OFFSITE FAILED: sync error" >&2
         exit 1
     fi
-    # verification: count files at the destination (rsync local/ssh only)
-    case "$OFFSITE_BACKUP_TARGET" in
-        *:*) DST_COUNT=$(ssh "${OFFSITE_BACKUP_TARGET%%:*}" \
-                "find '${OFFSITE_BACKUP_TARGET#*:}' -type f | wc -l" 2>/dev/null | tr -d ' ') ;;
-        *)  DST_COUNT=$(find "$OFFSITE_BACKUP_TARGET" -type f 2>/dev/null | wc -l | tr -d ' ') ;;
-    esac
+    # verification: count files at the destination
+    if [ "$SYNC_CMD" = "rclone" ]; then
+        DST_COUNT=$(rclone lsf -R --files-only "$OFFSITE_BACKUP_TARGET" 2>/dev/null | wc -l | tr -d ' ')
+    else
+        case "$OFFSITE_BACKUP_TARGET" in
+            *:*) DST_COUNT=$(ssh "${OFFSITE_BACKUP_TARGET%%:*}" \
+                    "find '${OFFSITE_BACKUP_TARGET#*:}' -type f | wc -l" 2>/dev/null | tr -d ' ') ;;
+            *)  DST_COUNT=$(find "$OFFSITE_BACKUP_TARGET" -type f 2>/dev/null | wc -l | tr -d ' ') ;;
+        esac
+    fi
     if [ "$DST_COUNT" != "$SRC_COUNT" ]; then
         echo "$(date -Iseconds) OFFSITE VERIFY FAILED: src=$SRC_COUNT dst=$DST_COUNT" >&2
         exit 1
