@@ -56,8 +56,12 @@ def build_profile_context(profile: Profile) -> str:
     lines = []
     if profile.professional_title:
         lines.append(f"Professional title: {profile.professional_title}")
-    if profile.experience_years is not None:
-        lines.append(f"Years of experience: {profile.experience_years}")
+    # NOTE: experience_years is DELIBERATELY not rendered. The CV says
+    # '20 years in regulated operations'; a bare 'Years of experience: 20'
+    # next to an aspirational junior title strips the domain qualifier and
+    # hands the model '20 years of development' — the root cause of the
+    # judge's competence-inflation findings (WO-01 review, 2026-08-28).
+    # The full CV text is included in every prompt and states it truthfully.
     if skill_names:
         lines.append(f"Skills: {', '.join(skill_names[:40])}")
     if profile.location:

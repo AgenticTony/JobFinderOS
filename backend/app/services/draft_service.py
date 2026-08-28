@@ -138,8 +138,15 @@ def create_draft_for_job(
 
             draft.changes_summary = dump_json_list(result["changes_summary"])
 
+            # The guard's source of truth must match the MODEL'S input
+            # (WO-01 review): the model saw cv_text + profile_context, so
+            # verifying against the CV alone flags facts we ourselves fed
+            # it via the summary. After the lossy-years fix, the summary
+            # is safe to include — aligning before that fix would have
+            # laundered the bad summary into 'supported'.
+            model_input = (f"{profile.cv_text}\n{build_profile_context(profile)}")
             findings = unsupported_claims(
-                profile.cv_text,
+                model_input,
                 f"{result.get('cover_letter', '')}\n{result.get('tailored_cv', '')}",
                 allowed_names=[n for n in (job.company, job.title) if n],
             )

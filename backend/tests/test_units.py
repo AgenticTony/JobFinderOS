@@ -1689,3 +1689,32 @@ class TestTechVerificationTolerance:
         assert not [c for c in unsupported_claims("Skills: ASP.NET MVC.",
                                                   "Built on ASP.NET Core")
                     if c.kind == "technology"]
+
+
+class TestLossyContextRootCause:
+    """WO-01 review final round, root cause: the CV says '20 års
+    erfarenhet från reglerad verksamhet' (20 years in REGULATED
+    OPERATIONS); build_profile_context rendered 'Professional title:
+    Junior Fullstack Developer' + 'Years of experience: 20' — the
+    domain qualifier stripped, so the model received 'junior developer
+    with 20 years of experience', whose only coherent reading is 20
+    years of DEVELOPMENT. The judge's competence-inflation findings
+    were the model using a line WE handed it. The CV text (included in
+    full in every prompt) states it correctly — the bare number line is
+    redundant AND lossy, so it goes."""
+
+    def test_context_never_renders_bare_years_line(self):
+        from app.models import Profile as P
+        from app.services.cv_service import build_profile_context
+
+        profile = P(is_active=1, user_id=uuid.uuid4(),
+                    professional_title="Junior Fullstack Developer",
+                    experience_years=20, cv_file_name="cv.pdf",
+                    cv_text="20 års erfarenhet från reglerad verksamhet")
+        ctx = build_profile_context(profile)
+        assert "years of experience" not in ctx.lower(), (
+            f"lossy bare-years line still rendered: {ctx!r} — the domain "
+            "qualifier must live in the CV text, not be flattened here"
+        )
+        # the truthful line stays available: the CV itself is in every prompt
+        assert "reglerad" in profile.cv_text
