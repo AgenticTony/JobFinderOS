@@ -1718,3 +1718,47 @@ class TestLossyContextRootCause:
         )
         # the truthful line stays available: the CV itself is in every prompt
         assert "reglerad" in profile.cv_text
+
+
+class TestLiveCatchFixturesLoadBearing:
+    """WO-02 review: live_catch snapshots were write-only — the suite was
+    green with two physically absent. WO-01 specified them as PERMANENT
+    regression fixtures: every snapshot on disk must load, carry recorded
+    catches, and its Layer-A findings must still be reproducible by the
+    production checker."""
+
+    def test_every_snapshot_loads_and_layer_a_reproduces(self):
+        import json
+        from pathlib import Path
+
+        from app.services.fabrication import unsupported_claims
+
+        d = Path(__file__).parent / "fixtures" / "fabrication"
+        snapshots = sorted(d.glob("live_catch_*.json"))
+        assert snapshots, "no live_catch fixtures on disk — the catches are gone"
+        # EACH catch is individually load-bearing: deleting one snapshot
+        # (as happened during the baseline rerun) must fail here, not just
+        # emptying the directory. New catches append to this set.
+        expected = {"live_catch_580.json", "live_catch_583.json"}
+        present = {s_.name for s_ in snapshots}
+        assert expected <= present, (
+            f"recorded catches missing from disk: {expected - present} — "
+            "a production catch was dropped without replacing its fixture"
+        )
+        for snap in snapshots:
+            data = json.loads(snap.read_text())
+            assert data.get("judge"), f"{snap.name}: no judge catches recorded"
+            for c in data["judge"]:
+                assert c.get("claim"), f"{snap.name}: judge entry without claim"
+            # Layer A findings recorded in the snapshot must still be
+            # produced by the CURRENT checker (deterministic half)
+            claims = {c["value"].split("|")[0].lower()
+                      for c in data.get("layer_a", [])}
+            if claims:
+                reproduced = unsupported_claims(
+                    data["source_cv"], data["tailored"])
+                now = {c.value.split("|")[0].lower() for c in reproduced}
+                assert claims <= now, (
+                    f"{snap.name}: recorded Layer-A catches {claims - now} "
+                    "no longer reproduce — a checker change lost a real catch"
+                )

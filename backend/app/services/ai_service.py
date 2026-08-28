@@ -476,9 +476,22 @@ An empty list means the document is faithful."""
             f"## TAILORED DOCUMENT\n{tailored_text[:9000]}\n\n"
             "List every unsupported claim."
         )
-        parsed = self._parse_json(
-            self._complete(system_prompt, user_message))
-        unsupported = parsed.get("unsupported", [])
+        raw = self._complete(system_prompt, user_message, temperature=0.0)
+        parsed = self._parse_json(raw)
+        if "unsupported" not in parsed:
+            # FAIL CLOSED (review finding): _parse_json returns {} on any
+            # decode failure, which read as 'faithful' and shipped the
+            # document. Worse, truncation CORRELATES with guilt — a
+            # document with many fabrications produces a long unsupported
+            # array, hits max_tokens mid-JSON, parses to {}, and passes.
+            # Same rule as match_job: unparseable output is a
+            # transport/format failure, never a verdict. The caller's
+            # except marks the draft failed.
+            raise ValueError(
+                "Unparseable JSON from fabrication judge "
+                "(truncated/malformed response)"
+            )
+        unsupported = parsed["unsupported"]
         return unsupported if isinstance(unsupported, list) else []
 
     # ------------------------------------------------------------------

@@ -1103,3 +1103,71 @@ class TestProductionJudge:
         d = ds.create_draft_for_job(db, job, profile=p, user_id=uid)
         assert d.status == "ready"
         assert j_calls["n"] == 0, "judge ran despite the kill switch"
+
+
+class TestJudgeFailClosed:
+    """WO-02 review: the judge failed OPEN — _parse_json's {} on a
+    decode failure read as 'faithful' and shipped the document, and
+    truncation CORRELATES with fabrication count. It must fail closed
+    (the caller's except marks the draft failed), and verdicts must be
+    deterministic (temperature 0.0 — the retry loop and the measurement
+    protocol both depend on it)."""
+
+    def test_unparseable_judge_response_fails_the_draft(self, client, db, monkeypatch):
+        from app.services import draft_service
+        from app.services.ai_service import AIService
+
+        email = f"fc-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik. Python at Svenska Spel."
+        db.commit()
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         description="A role.")
+        db.add(job); db.flush()
+        db.add(MatchResult(user_id=uid, job_id=job.id, score=61,
+                           tier="good_match", decision="approved"))
+        db.commit()
+
+        clean = {"cover_letter": "Python at Svenska Spel.", "tailored_cv":
+                 "Erik. Python.", "changes_summary": []}
+        monkeypatch.setattr(AIService, "tailor_application",
+                            lambda self, **kw: dict(clean))
+        monkeypatch.setattr(AIService, "judge_fabrication",
+                            lambda self, a, b: (_ for _ in ()).throw(
+                                ValueError("Unparseable JSON from fabrication judge")))
+        fake = AIService.__new__(AIService); fake.model = "glm-test"
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(draft_service.settings, "FABRICATION_JUDGE", "on",
+                            raising=False)
+        d = draft_service.create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed", (
+            f"judge transport failure read as a verdict: {d.status} — a "
+            "malformed judge response must fail CLOSED"
+        )
+        assert "judge" in (d.error or "").lower() or "unparseable" in (d.error or "").lower()
+
+    def test_judge_called_at_temperature_zero(self, client, db, monkeypatch):
+        from app.services.ai_service import AIService
+
+        captured = {}
+        real_complete = AIService._complete
+
+        def spy(self, system_prompt, user_message, temperature=0.3):
+            if "fact-checker" in system_prompt:
+                captured["temp"] = temperature
+                return '{"unsupported": []}'
+            return real_complete(self, system_prompt, user_message,
+                                 temperature=temperature)
+
+        monkeypatch.setattr(AIService, "_complete", spy)
+        svc = AIService.__new__(AIService); svc.model = "glm-test"
+        svc.judge_fabrication("CV", "doc")
+        assert captured.get("temp") == 0.0, (
+            f"judge temperature {captured.get('temp')!r} — verdicts must be "
+            "deterministic (retry semantics + reproducible baselines)"
+        )
