@@ -1218,8 +1218,6 @@ class TestUserIdOnCostRows:
         p.cv_text = "Erik. Python developer at Svenska Spel."
         db.commit()
 
-        calls = {"n": 0}
-
         class _U:
             prompt_tokens = 100
             completion_tokens = 20

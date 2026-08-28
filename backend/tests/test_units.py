@@ -2057,14 +2057,13 @@ class TestClaimInsertRace:
     commit is exactly what two processes produce."""
 
     def test_pk_collision_loses_cleanly(self, db):
-        from app.services import worker
-
         # Simulate the race: claim_hunt queries (row absent), we sneak
         # the row in behind its back, then its INSERT must lose cleanly
         import datetime
 
         from app.core.timeutil import utc_now
         from app.models import SystemLock
+        from app.services import worker
 
         original_query = db.query
 
