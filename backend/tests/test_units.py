@@ -2368,14 +2368,18 @@ class TestProductionPostgresGuard:
                      CORS_ORIGINS="https://jobfinderos.pages.dev",
                      DATABASE_URL="sqlite:///./jobfinderos.db")
 
-    def test_default_sqlite_rejected_when_debug_false(self):
+    def test_default_sqlite_rejected_when_debug_false(self, monkeypatch):
         """The dangerous default: DATABASE_URL left UNSET resolves to the
-        sqlite default — the exact recreation-incident shape."""
+        sqlite default — the exact recreation-incident shape. Hermetic:
+        the env var AND the .env file must both be neutralized (pydantic
+        reads .env too, and conftest exports DATABASE_URL on the
+        postgres CI job)."""
         import pytest
 
         from app.core.config import Settings
+        monkeypatch.delenv("DATABASE_URL", raising=False)
         with pytest.raises(ValueError):
-            Settings(DEBUG=False, AUTH_SECRET="x" * 48,
+            Settings(_env_file=None, DEBUG=False, AUTH_SECRET="x" * 48,
                      CORS_ORIGINS="https://jobfinderos.pages.dev")
 
     def test_postgres_passes_when_debug_false(self):
