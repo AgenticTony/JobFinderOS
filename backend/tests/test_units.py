@@ -2575,24 +2575,22 @@ class TestFuzzyDedupeWiring:
         return j
 
     def test_batch_pair_collapses_agency_copy(self, db):
-        import uuid as _uuid
-
         from app.services.matcher_service import _dismiss_fuzzy_duplicates
+        owner = _profile(db).user_id  # real users row (PG enforces the FK)
         direct = self._job(db, "Integration Developer", "PÅGEN AKTIEBOLAG")
         agency = self._job(db, "Integration Developer till Pågen",
                            "Cabeza rekrytering och konsulting AB")
-        dropped = _dismiss_fuzzy_duplicates(db, _uuid.uuid4(), [direct, agency], "test")
+        dropped = _dismiss_fuzzy_duplicates(db, owner, [direct, agency], "test")
         assert [j.id for j in dropped] == [agency.id]
 
     def test_stored_agency_copy_flipped_for_new_direct_ad(self, db):
-        import uuid as _uuid
-
         from app.core.timeutil import utc_now
         from app.models import MatchResult
         from app.services.matcher_service import _dismiss_fuzzy_duplicates
+        owner = _profile(db).user_id  # real users row (PG enforces the FK)
         stored_job = self._job(db, "Integration Developer till Pågen",
                                "Cabeza rekrytering och konsulting AB")
-        m = MatchResult(user_id=_uuid.uuid4(), job_id=stored_job.id, score=53,
+        m = MatchResult(user_id=owner, job_id=stored_job.id, score=53,
                         tier="good_match", recommendation="apply",
                         reasoning="r", decision=None)
         m.created_at = utc_now()  # production rows are tz-aware (timeutil)
@@ -2605,9 +2603,8 @@ class TestFuzzyDedupeWiring:
         assert m.dismissed_reason == "duplicate"  # stored agency copy flipped
 
     def test_unrelated_generic_titles_pass_through(self, db):
-        import uuid as _uuid
-
         from app.services.matcher_service import _dismiss_fuzzy_duplicates
+        owner = _profile(db).user_id
         a = self._job(db, "Software Developer", "Knowit Aktiebolag")
         b = self._job(db, "Software Developer", "Edument AB")
-        assert _dismiss_fuzzy_duplicates(db, _uuid.uuid4(), [a, b], "test") == []
+        assert _dismiss_fuzzy_duplicates(db, owner, [a, b], "test") == []
