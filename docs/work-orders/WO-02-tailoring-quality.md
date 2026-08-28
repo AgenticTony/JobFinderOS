@@ -61,6 +61,27 @@ inside the same regenerate-then-block loop as Layer A:
       default; 127 passed + 2 skipped)
 - [x] Cost lever documented and tested
 
+## The N=20 attempt and the pool ceiling (2026-08-28)
+
+FABRICATION_N=20 was attempted; the query returned **5** — that is the
+entire eligible pool (approved + description). The 40% (2/5) figure is
+therefore both the baseline AND the ceiling of what the current pool
+can measure. Before any prompt-side tuning: approve a broader set of
+matches (or widen the harness's sampling to high-scoring pending
+matches, clearly labelled as pre-approval) to get N≥20.
+
+This round's judge catches (snapshots kept as fixtures) — the residual
+fabrication classes on real output:
+- live_catch_580: invented project feature ("TalentHiv included
+  authentication"), invented frontend competence ("responsive web
+  development"), invented AI tooling ("AI-based development tools")
+- live_catch_583: fullstack self-description upgrades, specific stack
+  claims (React/TypeScript, C#/.NET with Web API) not in the CV
+
+Layer A: 0 high-confidence findings, 0 false positives, 1 advisory —
+the deterministic layer is now clean on real output; every real catch
+is the judge's.
+
 ## What is deliberately NOT in this WO
 
 Prompt-side tuning of the tailor. The residual 40% needs a larger
