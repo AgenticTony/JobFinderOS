@@ -10,8 +10,11 @@ set -uo pipefail
 
 API="${1:-https://jobfinderos-api.onrender.com}"
 FRONTEND="${2:-https://jobfinderos.pages.dev}"
-PROBE_EMAIL="deploy-check@jobfinderos.dev"
-PROBE_PASS="DeployCheck-$(date +%s)!"
+# Unique probe per run (plus-addressing): a timestamped password broke
+# re-runs — the account exists from run 1, and every run generates a new
+# password that no longer matches it. Fresh address + fixed password.
+PROBE_EMAIL="deploy-check+$(date +%s)@jobfinderos.dev"
+PROBE_PASS="DeployCheck-Probe-2026!"
 PASS=0; FAIL=0
 
 ok()   { PASS=$((PASS+1)); echo "  PASS  $1"; }
@@ -19,26 +22,34 @@ bad()  { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 
 echo "== API: $API =="
 
-# 1. /health — 200 + status ok + database up
-body=$(curl -s -m 60 "$API/health" || true)
-code=$(curl -s -o /dev/null -w "%{http_code}" -m 60 "$API/health" || true)
+# 1. /health — 200 + status ok + database up. Free instances spin down
+#    after 15 min idle and Render's edge answers the FIRST request with a
+#    plain-text 404 while the instance wakes (~1 min worst case) — retry.
+body=""; code="000"
+for attempt in 1 2 3 4 5 6; do
+    body=$(curl -s -m 90 "$API/health" || true)
+    code=$(curl -s -o /dev/null -w "%{http_code}" -m 90 "$API/health" || true)
+    if [ "$code" = "200" ]; then break; fi
+    echo "  (wake attempt $attempt: code=$code — free-instance cold start, retrying)"
+    sleep 12
+done
 if [ "$code" = "200" ] && echo "$body" | grep -q '"database":"up"'; then
     ok "/health 200, database up"
 else
     bad "/health (code=$code body=$body)"
-    echo "  -> if 404: blueprint not applied / wrong service name."
-    echo "  -> if spin-down: first request takes ~1 min on the free plan, retry."
+    echo "  -> if 404 persists: blueprint not applied / wrong service name."
 fi
 
-# 2. CORS preflight from the frontend origin — origin must be echoed
-#    (allow_credentials=True means a wildcard here would be the defect)
-cors=$(curl -s -m 30 -o /dev/null -w "%{http_code}" -X OPTIONS "$API/api/v1/auth/jwt/login" \
+# 2. CORS preflight from the frontend origin — ONE request, capture code
+#    and headers together (two requests straddle a cold-start wake). The
+#    origin must be ECHOED (allow_credentials=True forbids wildcard).
+cors_headers=$(mktemp)
+cors=$(curl -s -m 60 -o /dev/null -D "$cors_headers" -w "%{http_code}" -X OPTIONS "$API/api/v1/auth/jwt/login" \
     -H "Origin: $FRONTEND" \
     -H "Access-Control-Request-Method: POST" \
     -H "Access-Control-Request-Headers: content-type" || true)
-allow=$(curl -s -m 30 -D - -o /dev/null -X OPTIONS "$API/api/v1/auth/jwt/login" \
-    -H "Origin: $FRONTEND" \
-    -H "Access-Control-Request-Method: POST" | tr -d '\r' | grep -i '^access-control-allow-origin:' || true)
+allow=$(tr -d '\r' < "$cors_headers" | grep -i '^access-control-allow-origin:' || true)
+rm -f "$cors_headers"
 if [ "$cors" = "200" ] && echo "$allow" | grep -q "$FRONTEND"; then
     ok "CORS preflight from $FRONTEND allowed"
 else
@@ -46,15 +57,23 @@ else
     echo "  -> fix: Render api env CORS_ORIGINS must list $FRONTEND exactly."
 fi
 
-# 3. Auth roundtrip: register -> login -> me (proves live DB writes)
+# 3. Auth roundtrip: register -> login -> me (proves live DB writes).
+#    Render's free edge intermittently answers 404 'no-server' while the
+#    instance is half-awake — retry the login rather than misdiagnosing.
 reg=$(curl -s -m 30 -o /dev/null -w "%{http_code}" -X POST "$API/api/v1/auth/register" \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"$PROBE_EMAIL\",\"password\":\"$PROBE_PASS\"}" || true)
-[ "$reg" = "201" ] || [ "$reg" = "400" ] && ok "register ($reg; 400 = probe exists from a previous run)" || bad "register ($reg)"
-login=$(curl -s -m 30 -X POST "$API/api/v1/auth/jwt/login" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    --data-urlencode "username=$PROBE_EMAIL" --data-urlencode "password=$PROBE_PASS" || true)
-token=$(echo "$login" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+[ "$reg" = "201" ] || [ "$reg" = "400" ] && ok "register ($reg)" || bad "register ($reg)"
+login=""; token=""
+for attempt in 1 2 3 4 5; do
+    login=$(curl -s -m 60 -X POST "$API/api/v1/auth/jwt/login" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        --data-urlencode "username=$PROBE_EMAIL" --data-urlencode "password=$PROBE_PASS" || true)
+    token=$(echo "$login" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+    [ -n "$token" ] && break
+    echo "  (login wake attempt $attempt — free-edge no-server, retrying)"
+    sleep 8
+done
 if [ -n "$token" ]; then
     me=$(curl -s -m 30 -H "Authorization: Bearer $token" "$API/api/v1/users/me" || true)
     echo "$me" | grep -q "$PROBE_EMAIL" && ok "login + /users/me roundtrip" || bad "/users/me ($me)"

@@ -89,6 +89,11 @@ services:
     dockerContext: ./
     plan: 0.5c-512mb          # metered per-second, ~$1-2/mo at hourly hunts
     schedule: "0 * * * *"     # hourly, UTC (render.com/docs/cronjobs)
+    # EU residency (WO-06 posture): the hunt pulls user CV/profile data
+    # from Supabase into memory while matching — it must NOT run in a US
+    # region. Region is immutable after creation: recreating the service
+    # is the only way to move it.
+    region: frankfurt
     envVars:
       - key: DATABASE_URL
         sync: false
