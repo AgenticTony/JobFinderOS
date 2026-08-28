@@ -1,8 +1,18 @@
 # WO-07 — Production Deployment Runbook (Render + Cloudflare Pages)
 
-Status: **Step 1 DONE** (2026-08-28 — bucket `cvs` created + verified
-private via `ops/provision_supabase_storage.py`; SUPABASE_* uncommented
-in `backend/.env`). Steps 2–4 are the remaining dashboard work.
+Status: **DEPLOYED 2026-08-28.** API live (frankfurt, free), hunt cron
+live (frankfurt, hourly), frontend live (https://jobfinderos.pages.dev).
+Verifier 6/6. One incident during rollout, worth remembering:
+
+> **sync:false secrets do NOT survive service recreation.** Deleting a
+> service and recreating it via a later blueprint sync leaves its
+> sync:false values EMPTY (the prompts only appear at INITIAL blueprint
+> creation). The recreated cron's first run "succeeded" in 13s against
+> container-local SQLite. Fixed by pasting the values into the service's
+> Environment in the dashboard — and permanently by the worker's
+> production guard (worker.py: refuses to hunt when ENVIRONMENT=production
+> without Postgres; commit 6cff8ed). If a service is ever recreated,
+> re-check its Environment page before trusting the first run.
 
 ## Topology & monthly cost
 
