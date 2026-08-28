@@ -89,6 +89,15 @@ services and persists across deploys.
 
 ## Step 4 — post-deploy verification
 
+One command checks every gate (health, CORS preflight, a live
+register/login roundtrip, and the Pages bundle's inlined API URL):
+
+```sh
+bash ops/verify_deployment.sh
+```
+
+Manual spot-checks if you prefer:
+
 ```sh
 curl https://jobfinderos-api.onrender.com/health        # {"status":"ok","database":"up",...}
 # In the browser: open the pages.dev URL → register → login → upload CV
