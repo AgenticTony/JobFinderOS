@@ -1,7 +1,7 @@
 # WO-12 — Postgres connection path (DECIDED)
 
 > Priority: **P0** · Depends on: WO-11 (done) · Status: **decided
-> 2026-08-27** — this work order's deliverable IS the decision and its
+>  — this work order's deliverable IS the decision and its
 > plumbing; no runtime code changes (the connection does not exist until
 > MIG-WO1 provisions Supabase).
 

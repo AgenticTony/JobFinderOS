@@ -82,7 +82,7 @@ copy the current backup set off-machine (any of: another machine,
 encrypted cloud storage, an S3 bucket). Nothing else starts until a copy
 exists somewhere the laptop cannot destroy.
 
-### MIG-WO1 — Database: SQLite → Supabase Postgres (~0.5–1 day)
+### MIG-WO1 — Database: SQLite → Supabase Postgres — **EXECUTED 2026-08-28**
 
 Scope: provision the Supabase project (EU); `DATABASE_URL` to its
 Supavisor SESSION-mode pooler URL (the decided path — WO-12); alembic to head; data migration script for the live
