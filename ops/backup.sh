@@ -95,18 +95,27 @@ if [ -d "$PROJECT/backend/uploads/drafts" ]; then
 fi
 
 # --- Database backup: pg_dump (Postgres/Supabase) or sqlite3 .backup ---
+# Resolve DATABASE_URL from .env BEFORE the branch test (review r2: the
+# fallback sat INSIDE the if-body it was meant to enable, so the nightly
+# launchd run — which exports no DATABASE_URL — silently took the SQLite
+# branch and backed up the FROZEN pre-migration file while the live data
+# had moved to Supabase. A backup that runs, verifies, and contains the
+# wrong database is discovered at restore time.)
+DATABASE_URL="${DATABASE_URL:-}"
+if [ -z "$DATABASE_URL" ]; then
+    DATABASE_URL=$(grep '^DATABASE_URL=' "$PROJECT/backend/.env" | head -1 | cut -d= -f2)
+fi
+
 PG_DUMP=$(command -v pg_dump || echo /opt/homebrew/opt/libpq/bin/pg_dump)
 if [ -x "$PG_DUMP" ] && \
    echo "$DATABASE_URL" | grep -q "^postgre"; then
-    # Postgres: pg_dump to the backup dir (DATABASE_URL from the env or .env)
-    [ -z "$DATABASE_URL" ] && DATABASE_URL=$(grep '^DATABASE_URL=' "$PROJECT/backend/.env" | head -1 | cut -d= -f2)
     STAMP=$(date +%Y%m%d-%H%M%S)
     "$PG_DUMP" --no-owner --no-privileges --dbname "${DATABASE_URL/postgresql+psycopg/postgresql}" \
         --file "$BACKUP_DIR/db-$STAMP.sql" 2>/dev/null
-    if [ $? -eq 0 ]; then
+    if [ $? -eq 0 ] && [ -s "$BACKUP_DIR/db-$STAMP.sql" ]; then
         echo "$(date -Iseconds) pg_dump OK: db-$STAMP.sql ($(du -h "$BACKUP_DIR/db-$STAMP.sql" | cut -f1))"
     else
-        echo "$(date -Iseconds) pg_dump FAILED (exit $?)" >&2
+        echo "$(date -Iseconds) pg_dump FAILED (exit $? or empty file)" >&2
         exit 1
     fi
     # Retain the SQLite era's .db snapshots alongside; prune .sql by age below

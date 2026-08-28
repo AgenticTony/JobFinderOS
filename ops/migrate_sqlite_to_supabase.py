@@ -85,8 +85,6 @@ def main(snapshot_path: str, force: bool = False) -> int:
     dst = create_engine(dst_url, connect_args={"sslmode": "require"})
 
     # Refuse to re-run against a populated database without --force
-    # (a re-run INSERTs duplicate rows — the snapshot is the truth, not
-    # the live state, so there is no idempotency to lean on)
     if not force:
         with dst.connect() as conn:
             existing = conn.execute(
@@ -97,6 +95,15 @@ def main(snapshot_path: str, force: bool = False) -> int:
             return 2
 
     with dst.begin() as conn:
+        if force:
+            # --force wipes in reverse-FK order inside the SAME transaction
+            # (review r2: the flag promised a wipe it never performed — the
+            # INSERT loop would PK-violate and roll back with an opaque
+            # error). The transaction makes this atomic: a failure leaves
+            # the destination untouched.
+            for t in reversed(TABLES):
+                n = conn.execute(text(f"DELETE FROM {t}")).rowcount
+                print(f"  wiped {t}: {n} rows")
         for t in TABLES:
             rows = data[t]
             if not rows:

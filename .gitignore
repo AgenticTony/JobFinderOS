@@ -30,3 +30,8 @@ out/
 # Logs
 *.log
 .playwright-mcp/
+# agent tooling (skills, session state)
+.agent/
+.claude/
+agents/
+skills-lock.json
