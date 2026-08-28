@@ -22,11 +22,43 @@ from app.services.scrapers.base import BaseScraper, NormalizedJob
 logger = logging.getLogger(__name__)
 
 API_URL = "https://jobsearch.api.jobtechdev.se/search"
+TAXONOMY_URL = "https://taxonomy.api.jobtechdev.se/v1/taxonomy/main/concepts"
 PER_QUERY_LIMIT = 100  # API max page size
 # WO-06: the official whole-market API is the highest-precision source
 # (75% keeper rate vs 13% for the remote aggregators) — walk offset
 # pages per query instead of taking only page one.
 MAX_PAGES_PER_QUERY = 3
+
+# name -> taxonomy municipality code (JobTech's search API filters by CODE,
+# not name — 'municipality: One or more municipality codes, code according
+# to the taxonomy' per the official swagger). Fetched once per process.
+_MUNICIPALITY_CODES: Optional[Dict[str, str]] = None
+
+
+def _municipality_codes() -> Dict[str, str]:
+    global _MUNICIPALITY_CODES
+    if _MUNICIPALITY_CODES is None:
+        codes: Dict[str, str] = {}
+        try:
+            resp = httpx.get(
+                TAXONOMY_URL,
+                params={"version": 1, "type": "municipality"},
+                timeout=settings.SCRAPE_TIMEOUT_SECONDS,
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+            for c in resp.json():
+                label = c.get("taxonomy/preferred-label")
+                cid = c.get("taxonomy/id")
+                if label and cid:
+                    codes[str(label).lower()] = str(cid)
+        except Exception as e:  # noqa: BLE001 — a taxonomy miss must not
+            # break scraping: without codes we fetch unfiltered and the
+            # local location gate still enforces the user's scope.
+            logger.warning("[jobtech] taxonomy fetch failed (%s) — "
+                           "falling back to unfiltered fetch + local gate", e)
+        _MUNICIPALITY_CODES = codes
+    return _MUNICIPALITY_CODES
 
 
 def _parse_dt(raw: Optional[str]) -> Optional[datetime]:
@@ -63,14 +95,32 @@ class JobtechScraper(BaseScraper):
             headers["api-key"] = settings.JOBTECH_API_KEY
 
         queries = self._queries(context)
+
+        # Fetch-side municipality filtering (official API param): when the
+        # user chose municipalities, request ONLY those kommuner instead of
+        # fetching all of Sweden and filtering locally. Codes resolve via
+        # the taxonomy map; unresolved names fall back to the local gate.
+        place_params: List[tuple] = []
+        chosen = (context or {}).get("municipalities") or []
+        if chosen:
+            code_map = _municipality_codes()
+            resolved = [code_map[m.lower()] for m in chosen if m.lower() in code_map]
+            if resolved:
+                place_params = [("municipality", c) for c in resolved]
+                logger.info("[jobtech] place-filtered to %d municipality code(s)",
+                            len(resolved))
+            else:
+                logger.warning("[jobtech] no taxonomy codes for %s — "
+                               "unfiltered fetch, local gate applies", chosen)
+
         for query in queries:
             for page in range(MAX_PAGES_PER_QUERY):
                 offset = page * PER_QUERY_LIMIT
                 try:
                     response = httpx.get(
                         API_URL,
-                        params={"q": query, "limit": PER_QUERY_LIMIT,
-                                "offset": offset},
+                        params=[("q", query), ("limit", PER_QUERY_LIMIT),
+                                ("offset", offset), *place_params],
                         headers=headers,
                         timeout=settings.SCRAPE_TIMEOUT_SECONDS,
                         follow_redirects=True,

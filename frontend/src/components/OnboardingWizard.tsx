@@ -77,7 +77,11 @@ export default function OnboardingWizard({
   const [geo, setGeo] = useState<GeoData | null>(null);
   const [country, setCountry] = useState(initialCountry ?? '');
   const [region, setRegion] = useState(initialRegion ?? '');
-  const [municipality, setMunicipality] = useState(initialMunicipality ?? '');
+  // STRICT multi-municipality scope: picking Malmö means Malmö; add Lund
+  // for the commute belt. Empty selection = explicit whole region.
+  const [municipalityList, setMunicipalityList] = useState<string[]>(
+    initialMunicipality ? [initialMunicipality] : []
+  );
   const [remoteOnly, setRemoteOnly] = useState(false);
   const [includeRemote, setIncludeRemote] = useState(Boolean(initialIncludeRemote));
   const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']);
@@ -187,7 +191,8 @@ export default function OnboardingWizard({
       await onComplete({
         country,
         region: region || null,
-        municipality: municipality || null,
+        municipalities: municipalityList,
+        municipality: municipalityList[0] ?? null, // legacy single, kept in sync
         remote_only: remoteOnly,
         include_remote: includeRemote || remoteOnly,
         search_queries: [...selected],
@@ -260,7 +265,7 @@ export default function OnboardingWizard({
                         onClick={() => {
                           setCountry(c.code);
                           setRegion('');
-                          setMunicipality('');
+                          setMunicipalityList([]);
                         }}
                         className={cn(
                           'rounded-xl border p-5 text-left transition-colors',
@@ -290,7 +295,7 @@ export default function OnboardingWizard({
                         value={region}
                         onChange={(e) => {
                           setRegion(e.target.value);
-                          setMunicipality('');
+                          setMunicipalityList([]);
                         }}
                         className="w-full rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-hi outline-none transition-colors focus:border-signal"
                       >
@@ -300,22 +305,49 @@ export default function OnboardingWizard({
                         ))}
                       </select>
                     </label>
-                    <label className="block">
+                    <div>
                       <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
-                        City / municipality <span className="normal-case">(optional — whole region is fine)</span>
+                        Cities / municipalities{' '}
+                        <span className="normal-case">
+                          (pick one or several — none selected means all of {region || 'the region'})
+                        </span>
                       </span>
-                      <select
-                        value={municipality}
-                        onChange={(e) => setMunicipality(e.target.value)}
-                        disabled={!region}
-                        className="w-full rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-hi outline-none transition-colors focus:border-signal disabled:opacity-40"
-                      >
-                        <option value="">All of {region || 'region'}…</option>
-                        {municipalities.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                    </label>
+                      {!region ? (
+                        <p className="rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-low">
+                          Select a region first…
+                        </p>
+                      ) : (
+                        <div
+                          role="group"
+                          aria-label="Municipalities"
+                          className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-lg border border-line bg-ink p-2.5"
+                        >
+                          {municipalities.map((m) => {
+                            const on = municipalityList.includes(m);
+                            return (
+                              <button
+                                key={m}
+                                type="button"
+                                aria-pressed={on}
+                                onClick={() =>
+                                  setMunicipalityList((prev) =>
+                                    prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]
+                                  )
+                                }
+                                className={cn(
+                                  'rounded-full border px-3 py-1.5 text-sm transition-colors',
+                                  on
+                                    ? 'border-signal bg-signal/15 text-hi'
+                                    : 'border-line text-mid hover:border-line-2 hover:text-hi'
+                                )}
+                              >
+                                {m}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                     <button
                       onClick={() => setIncludeRemote(!includeRemote)}
                       aria-pressed={includeRemote}
@@ -550,7 +582,15 @@ export default function OnboardingWizard({
                   <StepTitle title="Ready — here's your setup" />
                   <div className="mt-5 space-y-2.5 rounded-xl border border-line bg-ink/60 p-4 text-sm">
                     <SummaryRow label="Country" value={`${flagFor(country)} ${nameFor(geo, country)}`} />
-                    <SummaryRow label="Area" value={[municipality, region].filter(Boolean).join(', ') || 'everywhere'} />
+                    <SummaryRow
+                      label="Area"
+                      value={
+                        (municipalityList.length
+                          ? [...municipalityList]
+                          : [`All of ${region}`]
+                        ).join(', ') || 'everywhere'
+                      }
+                    />
                     <SummaryRow label="Remote" value={remoteOnly ? 'remote jobs only' : includeRemote ? 'local + remote' : 'strictly local'} />
                     <SummaryRow label="Languages" value={languages.join(', ')} />
                     <SummaryRow label="Strategy" value={MODES.find((m) => m.id === mode)?.label ?? mode} />

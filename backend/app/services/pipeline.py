@@ -47,6 +47,7 @@ def build_scrape_context(db: Session, *, user_id) -> Optional[Dict]:
         "country": (profile.country or "").upper(),
         "region": profile.region,
         "municipality": profile.municipality,
+        "municipalities": parse_json_list(getattr(profile, "municipalities", None)),
         "remote_only": bool(profile.remote_only),
         "include_remote": bool(profile.include_remote),
         "queries": parse_json_list(profile.search_queries),
@@ -58,8 +59,12 @@ def passes_location_filter(job: NormalizedJob, ctx: Dict) -> bool:
     """
     Universal location gate — applied to every source identically.
 
-    - Jobs located in the user's municipality/region always pass
-      (local on-site, local remote, hybrid)
+    - STRICT municipality matching (user decision, post-first-hunt: picking
+      Malmö means Malmö): a job passes if its location names ANY of the
+      user's chosen municipalities. The legacy single `municipality` value
+      behaves as a one-item list.
+    - Region-wide admission ONLY when the user chose no municipality at
+      all (the wizard's explicit whole-region path).
     - Remote jobs and location-less jobs only pass when the user opted
       into remote work in onboarding (include_remote) — otherwise the
       search is strictly local
@@ -68,8 +73,13 @@ def passes_location_filter(job: NormalizedJob, ctx: Dict) -> bool:
     if ctx.get("remote_only") and not job.remote:
         return False
 
-    terms = [t.lower() for t in (ctx.get("municipality"), ctx.get("region")) if t]
-    if terms and job.location and any(term in job.location.lower() for term in terms):
+    munis = [m.lower() for m in ctx.get("municipalities") or []]
+    if not munis and ctx.get("municipality"):
+        munis = [str(ctx["municipality"]).lower()]
+    if munis and job.location and any(m in job.location.lower() for m in munis):
+        return True
+    if (not munis and ctx.get("region") and job.location
+            and str(ctx["region"]).lower() in job.location.lower()):
         return True
 
     # COUNTRY ROUTING (WO-06 / D1): a job whose location names ONLY
@@ -81,7 +91,7 @@ def passes_location_filter(job: NormalizedJob, ctx: Dict) -> bool:
     if blocked_for_user(location_countries(job.location), ctx.get("country")):
         return False
 
-    # Outside the area (or no location text): only for remote-opted users
+    # Outside the chosen area (or no location text): only for remote-opted users
     return bool(ctx.get("include_remote")) and bool(job.remote)
 
 

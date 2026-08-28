@@ -52,7 +52,11 @@ class Profile(Base):
     onboarded = Column(Integer, default=0, nullable=False)  # 1 after wizard completes
     country = Column(String(2), nullable=True)  # ISO code: SE, GB
     region = Column(String(255), nullable=True)  # e.g. "Skåne län", "Greater London"
-    municipality = Column(String(255), nullable=True)  # e.g. "Malmö"
+    municipality = Column(String(255), nullable=True)  # e.g. "Malmö" (legacy single)
+    # JSON array — strict multi-municipality location scope (user decision:
+    # picking Malmö means Malmö; add Lund for the commute belt). Empty +
+    # no legacy value = explicit whole-region.
+    municipalities = Column(Text, nullable=True)  # JSON array of strings
     remote_only = Column(Integer, default=0, nullable=False)  # 1 = drop on-site jobs
     include_remote = Column(Integer, default=0, nullable=False)  # 1 = opt in to worldwide remote jobs
     search_queries = Column(Text, nullable=True)  # JSON array — AI-suggested, user-approved

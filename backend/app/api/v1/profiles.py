@@ -130,7 +130,12 @@ async def save_onboarding(
 
     profile.country = country
     profile.region = payload.region
-    profile.municipality = payload.municipality
+    # Strict multi-municipality scope (user decision: picking Malmö means
+    # Malmö; add Lund for the commute belt; none = explicit whole-region).
+    # Legacy single field kept in sync (first item) for older consumers.
+    municipalities = payload.municipalities or []
+    profile.municipalities = dump_json_list(municipalities)
+    profile.municipality = municipalities[0] if municipalities else payload.municipality
     profile.remote_only = 1 if payload.remote_only else 0
     profile.include_remote = 1 if (payload.include_remote or payload.remote_only) else 0
     profile.search_queries = dump_json_list(payload.search_queries)

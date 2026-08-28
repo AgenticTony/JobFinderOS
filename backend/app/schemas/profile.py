@@ -12,7 +12,9 @@ class OnboardingRequest(BaseModel):
     """The onboarding wizard's final payload."""
     country: str  # ISO code: SE, GB
     region: Optional[str] = None
-    municipality: Optional[str] = None
+    municipality: Optional[str] = None  # legacy single (kept in sync: first of list)
+    # strict multi-municipality scope; empty list = explicit whole-region
+    municipalities: Optional[List[str]] = None
     remote_only: bool = False
     include_remote: bool = False
     search_queries: List[str] = []
@@ -53,6 +55,7 @@ class ProfileResponse(BaseModel):
     country: Optional[str] = None
     region: Optional[str] = None
     municipality: Optional[str] = None
+    municipalities: List[str] = []
     remote_only: bool = False
     include_remote: bool = False
     search_queries: List[str] = []
@@ -88,6 +91,8 @@ class ProfileResponse(BaseModel):
             country=profile.country,
             region=profile.region,
             municipality=profile.municipality,
+            municipalities=parse_json_list(
+                getattr(profile, "municipalities", None)),
             remote_only=bool(profile.remote_only),
             include_remote=bool(profile.include_remote),
             search_queries=parse_json_list(profile.search_queries),

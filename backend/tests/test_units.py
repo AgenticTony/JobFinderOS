@@ -1203,10 +1203,12 @@ class TestJobtechPagination:
         calls = []
 
         def fake_get(url, params=None, **kw):
-            calls.append(params)
+            # scraper sends list-of-tuples params (place filter support)
+            p = dict(params)
+            calls.append(p)
             return type("R", (), {
                 "raise_for_status": lambda s: None,
-                "json": staticmethod(lambda s=None: pages[min(params["offset"] // 100, 2)]),
+                "json": staticmethod(lambda s=None: pages[min(p["offset"] // 100, 2)]),
             })()
 
         monkeypatch.setattr(jt.httpx, "get", fake_get)
@@ -1221,10 +1223,11 @@ class TestJobtechPagination:
         import app.services.scrapers.jobtech as jt
 
         def fake_get(url, params=None, **kw):
+            p = dict(params)
             return type("R", (), {
                 "raise_for_status": lambda s: None,
                 "json": staticmethod(lambda s=None: {
-                    "hits": [{"id": str(params["offset"] + i), "headline": "j",
+                    "hits": [{"id": str(p["offset"] + i), "headline": "j",
                               "removed": False} for i in range(100)]}),
             })()
 
@@ -2393,3 +2396,96 @@ class TestProductionPostgresGuard:
         from app.core.config import Settings
         s = Settings(DEBUG=True, DATABASE_URL="sqlite:///./jobfinderos.db")
         assert s.DATABASE_URL.startswith("sqlite")
+
+
+class TestMunicipalLocationFilter:
+    """Product decision (user, post-first-hunt): picking Malmö means Malmö.
+    The gate becomes STRICT multi-municipality; region-wide only when the
+    user chose NO municipalities (explicit whole-region). Red-first: the
+    old gate admitted anything in the user's REGION ('Lund, Skåne län'
+    passed for a Malmö user)."""
+
+    def _job(self, location, remote=False):
+        from types import SimpleNamespace
+        return SimpleNamespace(location=location, remote=remote)
+
+    def test_region_no_longer_passes_when_municipalities_set(self):
+        from app.services.pipeline import passes_location_filter
+        ctx = {"country": "SE", "region": "Skåne län",
+               "municipalities": ["Malmö"], "remote_only": False,
+               "include_remote": False}
+        assert passes_location_filter(self._job("Lund, Skåne län"), ctx) is False
+
+    def test_multi_municipality_membership(self):
+        from app.services.pipeline import passes_location_filter
+        ctx = {"country": "SE", "region": "Skåne län",
+               "municipalities": ["Malmö", "Lund"], "remote_only": False,
+               "include_remote": False}
+        assert passes_location_filter(self._job("Lund, Skåne län"), ctx) is True
+        assert passes_location_filter(self._job("Malmö, Skåne län"), ctx) is True
+        assert passes_location_filter(self._job("Ängelholm, Skåne län"), ctx) is False
+
+    def test_legacy_single_municipality_is_strict(self):
+        """Tony's current profile: municipality='Malmö', no list — must
+        behave as ['Malmö'] (strict), not region-wide."""
+        from app.services.pipeline import passes_location_filter
+        ctx = {"country": "SE", "region": "Skåne län", "municipality": "Malmö",
+               "remote_only": False, "include_remote": False}
+        assert passes_location_filter(self._job("Malmö, Skåne län"), ctx) is True
+        assert passes_location_filter(self._job("Lund, Skåne län"), ctx) is False
+
+    def test_region_wide_only_when_no_municipality_chosen(self):
+        from app.services.pipeline import passes_location_filter
+        ctx = {"country": "SE", "region": "Skåne län",
+               "remote_only": False, "include_remote": False}
+        assert passes_location_filter(self._job("Ängelholm, Skåne län"), ctx) is True
+
+    def test_remote_rules_unchanged(self):
+        from app.services.pipeline import passes_location_filter
+        ctx = {"country": "SE", "municipalities": ["Malmö"],
+               "remote_only": False, "include_remote": True}
+        assert passes_location_filter(self._job("Remote — worldwide", remote=True), ctx) is True
+        assert passes_location_filter(self._job("Remote — worldwide", remote=False), ctx) is False
+
+
+class TestJobtechPlaceFilter:
+    """The official API's `municipality` param takes taxonomy CODES — when
+    the user chose municipalities, the scraper fetches ONLY those kommuner
+    instead of all of Sweden; unresolved names fall back to the local gate."""
+
+    def test_municipality_codes_sent_when_chosen(self, monkeypatch):
+        import app.services.scrapers.jobtech as jt
+
+        monkeypatch.setattr(jt, "_MUNICIPALITY_CODES",
+                            {"malmö": "O5cp", "lund": "LuNd"})
+
+        captured = []
+
+        def fake_get(url, params=None, **kw):
+            captured.append(params)
+            return type("R", (), {
+                "raise_for_status": lambda s: None,
+                "json": staticmethod(lambda s=None: {"hits": []}),
+            })()
+
+        monkeypatch.setattr(jt.httpx, "get", fake_get)
+        jt.JobtechScraper().fetch({"queries": ["dev"],
+                                   "municipalities": ["Malmö", "Lund"]})
+        sent = captured[0]
+        assert ("municipality", "O5cp") in sent and ("municipality", "LuNd") in sent
+
+    def test_no_place_params_without_municipalities(self, monkeypatch):
+        import app.services.scrapers.jobtech as jt
+
+        captured = []
+
+        def fake_get(url, params=None, **kw):
+            captured.append(params)
+            return type("R", (), {
+                "raise_for_status": lambda s: None,
+                "json": staticmethod(lambda s=None: {"hits": []}),
+            })()
+
+        monkeypatch.setattr(jt.httpx, "get", fake_get)
+        jt.JobtechScraper().fetch({"queries": ["dev"]})
+        assert all("municipality" not in dict(p) for p in captured)

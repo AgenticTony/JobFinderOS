@@ -112,7 +112,8 @@ export interface Profile {
 export interface OnboardingPayload {
   country: string;
   region?: string | null;
-  municipality?: string | null;
+  municipality?: string | null; // legacy single (first of the list)
+  municipalities?: string[];    // strict scope; empty = whole region
   remote_only: boolean;
   include_remote: boolean;
   search_queries: string[];
