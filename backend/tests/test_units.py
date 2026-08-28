@@ -2168,3 +2168,126 @@ class TestClaimAtomicUpdatePath:
             )
         finally:
             s.close()
+
+
+class TestMigrationAdvisoryLock:
+    """WO-07: on a Render blueprint deploy the web service and the hunt
+    cron boot near-simultaneously against the same Postgres — and
+    alembic's `upgrade head` takes no lock of its own (two concurrent
+    runs both apply a pending migration; one crashes on duplicate DDL
+    and fails its deploy). init_db must serialize boots with a Postgres
+    advisory lock: lock BEFORE upgrade, unlock AFTER."""
+
+    def test_postgres_upgrade_wrapped_in_advisory_lock(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import app.core.database as dbmod
+        from alembic import command
+
+        calls = []
+
+        lock_conn = MagicMock()
+        lock_conn.execute.side_effect = (
+            lambda sql, *a, **k: calls.append(("conn", str(sql)))
+        )
+        lock_ctx = MagicMock()
+        lock_ctx.__enter__.return_value = lock_conn
+
+        fake_engine = MagicMock()
+        fake_engine.connect.return_value = lock_ctx
+
+        def fake_upgrade(cfg, rev):
+            calls.append(("upgrade", rev))
+
+        monkeypatch.setattr(dbmod, "DATABASE_URL",
+                            "postgresql+psycopg://u:p@host:5432/db")
+        monkeypatch.setattr(dbmod, "engine", fake_engine)
+        monkeypatch.setattr(command, "upgrade", fake_upgrade)
+
+        dbmod.init_db()
+
+        assert len(calls) == 3, f"expected lock/upgrade/unlock, got {calls}"
+        assert "pg_advisory_lock" in calls[0][1], calls[0]
+        assert calls[1] == ("upgrade", "head"), calls[1]
+        assert "pg_advisory_unlock" in calls[2][1], calls[2]
+
+    def test_unlock_runs_even_when_upgrade_fails(self, monkeypatch):
+        """A crashed migration must not leak the lock (it would block the
+        retrying deploy for the session's lifetime)."""
+        from unittest.mock import MagicMock
+
+        import app.core.database as dbmod
+        from alembic import command
+
+        calls = []
+
+        lock_conn = MagicMock()
+        lock_conn.execute.side_effect = (
+            lambda sql, *a, **k: calls.append(("conn", str(sql)))
+        )
+        lock_ctx = MagicMock()
+        lock_ctx.__enter__.return_value = lock_conn
+
+        fake_engine = MagicMock()
+        fake_engine.connect.return_value = lock_ctx
+
+        def boom(cfg, rev):
+            calls.append(("upgrade", rev))
+            raise RuntimeError("migration DDL failed")
+
+        monkeypatch.setattr(dbmod, "DATABASE_URL",
+                            "postgresql+psycopg://u:p@host:5432/db")
+        monkeypatch.setattr(dbmod, "engine", fake_engine)
+        monkeypatch.setattr(command, "upgrade", boom)
+
+        import pytest
+        with pytest.raises(RuntimeError):
+            dbmod.init_db()
+
+        assert any("pg_advisory_unlock" in c[1] for c in calls), (
+            f"unlock missing after failure: {calls}"
+        )
+
+
+class TestWorkerOnceMode:
+    """WO-07: the Render cron job runs ONE claim-hunt-release cycle and
+    exits (metered per-second billing — a scheduler loop would bill 12h
+    runs and hit Render's cron cap)."""
+
+    def test_once_runs_single_cycle_without_scheduler(self, monkeypatch):
+        from app.services import worker
+
+        ran = []
+        monkeypatch.setattr(worker, "run_scheduled_hunt",
+                            lambda: ran.append(1) or {"status": "ran"})
+
+        def no_scheduler(*a, **k):
+            raise AssertionError("--once must never start the scheduler loop")
+
+        import apscheduler.schedulers.blocking as apsb
+        monkeypatch.setattr(apsb, "BlockingScheduler", no_scheduler)
+
+        rc = worker.main(["--once"])
+
+        assert rc == 0
+        assert ran == [1]
+
+    def test_default_mode_still_schedules(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from app.core.config import settings
+        from app.services import worker
+
+        sched = MagicMock()
+        monkeypatch.setattr(
+            "apscheduler.schedulers.blocking.BlockingScheduler",
+            lambda: sched,
+        )
+        rc = worker.main([])
+
+        assert rc == 0
+        sched.add_job.assert_called_once()
+        kwargs = sched.add_job.call_args.kwargs
+        assert kwargs["id"] == "jobfinder_hunt"
+        assert kwargs["minutes"] == settings.SCRAPE_INTERVAL_MINUTES
+        sched.start.assert_called_once()

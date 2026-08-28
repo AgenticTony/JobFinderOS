@@ -1,0 +1,111 @@
+# WO-07 production topology — Render blueprint (official spec:
+# render.com/docs/blueprint-spec).
+#
+# Cost floor (user constraint: cheapest credible production):
+#   - API: the ONLY always-on process, on a free instance (512MB, spins
+#     down after 15 min idle, ~1 min cold start — acceptable pre-revenue).
+#   - Hunts: an hourly CRON JOB, not a 24/7 worker. Cron runs are billed
+#     per second of ACTIVE runtime ($1/mo minimum; 0.5c-512mb ≈
+#     $0.00016/min) — hourly ~10-min hunts ≈ $1-2/mo vs $7/mo for a
+#     24/7 worker. worker --once (Dockerfile.hunt) claims the DB hunt
+#     lock, runs one cycle, exits.
+#   - Postgres: Supabase (WO-03), not a Render database.
+#   - Frontend: Cloudflare Pages (static export, free) — separate deploy,
+#     see docs/deploy/WO-07-runbook.md.
+#
+# Secrets are `sync: false` — Render prompts for them ONCE during
+# initial Blueprint creation (never commit real values here).
+services:
+  # ── API (web service) ────────────────────────────────────────────
+  - type: web
+    name: jobfinderos-api
+    runtime: docker
+    rootDir: backend
+    # dockerfilePath/dockerContext resolve from the REPO ROOT regardless
+    # of rootDir (blueprint spec) — spell both out
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    # Same side of the pond as Supabase eu-west-1 (Frankfurt) — keeps the
+    # data path intra-EU (GDPR/WO-06 residency). If unavailable at
+    # creation time, oregon is the fallback.
+    region: frankfurt
+    healthCheckPath: /health   # DB-connectivity probe (app/main.py) — a
+                               # failed check fails the deploy (render.com/docs/health-checks)
+    autoDeploy: true           # deploys on push to main
+    envVars:
+      # Database — Supabase session pooler URL from backend/.env
+      # (WO-12: session mode, not transaction — prepare_threshold caveat)
+      - key: DATABASE_URL
+        sync: false
+      # AI — Z.ai GLM (scoring + tailoring + judge)
+      - key: GLM_API_KEY
+        sync: false
+      # Auth — Render generates a 256-bit value ONCE and persists it
+      # across deploys (blueprint-spec: generateValue). DEBUG=false
+      # rejects weak/short secrets at boot (config.py _production_guards).
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: DEBUG
+        value: "false"
+      - key: ENVIRONMENT
+        value: production
+      # CORS — explicit origins only (allow_credentials=True forbids *).
+      # Set to the Pages URL after the frontend project exists, e.g.
+      # https://jobfinderos.pages.dev[,https://www.yourdomain.com]
+      - key: CORS_ORIGINS
+        sync: false
+      # CV storage — Render's free filesystem is EPHEMERAL (lost on every
+      # deploy/restart/spin-down), so CVs go to Supabase Storage
+      # (private bucket; ops/provision_supabase_storage.py provisions it).
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      # Scraping + per-source keys (empty keys = source self-disables)
+      - key: SCRAPE_SOURCES
+        value: arbeitnow,remotive,jobicy,workingnomads,jobtech,reed
+      - key: JOBTECH_API_KEY
+        sync: false
+      - key: REED_API_KEY
+        sync: false
+      - key: SENTRY_DSN     # empty = off (WO-05); EU region project when set
+        sync: false
+      # Hunts run in the CRON service, never the API (WO-04: two API
+      # replicas must never race the scheduler; default false anyway)
+      - key: ENABLE_SCHEDULER
+        value: "false"
+
+  # ── Hunt cron (one-shot) ─────────────────────────────────────────
+  - type: cron
+    name: jobfinderos-hunt
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./backend/Dockerfile.hunt
+    dockerContext: ./backend
+    plan: 0.5c-512mb          # metered per-second, ~$1-2/mo at hourly hunts
+    schedule: "0 * * * *"     # hourly, UTC (render.com/docs/cronjobs)
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GLM_API_KEY
+        sync: false
+      # Settings validates AUTH_SECRET even in the worker (DEBUG=false
+      # guard is global); the worker never signs tokens, its value just
+      # has to exist and be strong.
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: DEBUG
+        value: "false"
+      - key: ENVIRONMENT
+        value: production
+      - key: SCRAPE_SOURCES
+        value: arbeitnow,remotive,jobicy,workingnomads,jobtech,reed
+      - key: JOBTECH_API_KEY
+        sync: false
+      - key: REED_API_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false

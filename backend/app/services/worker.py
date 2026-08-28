@@ -137,13 +137,39 @@ def run_scheduled_hunt() -> dict:
     return summary
 
 
-def main() -> int:
-    """Worker entrypoint: init DB, run the scheduler loop forever."""
+def main(argv=None) -> int:
+    """Worker entrypoint.
+
+    Default: init DB, run the scheduler loop forever (the 24/7 worker
+    deploy shape). `--once`: run ONE claim-hunt-release cycle and exit —
+    the Render cron-job shape (WO-07): cron runs are billed per second
+    of active runtime, so the process must exit when the hunt is done;
+    the DB claim lock keeps overlapping schedules safe anyway.
+    """
+
+    import argparse
+
+    logging.basicConfig(level=logging.INFO)
+
+    ap = argparse.ArgumentParser(
+        prog="worker",
+        description="JobFinderOS hunt worker (scheduler loop or one-shot)",
+    )
+    ap.add_argument(
+        "--once", action="store_true",
+        help="run a single hunt cycle (claim -> hunt -> release) and exit",
+    )
+    args = ap.parse_args(argv)
+
+    init_db()
+
+    if args.once:
+        summary = run_scheduled_hunt()
+        logger.info("One-shot hunt complete: %s", summary)
+        return 0
 
     from apscheduler.schedulers.blocking import BlockingScheduler
 
-    logging.basicConfig(level=logging.INFO)
-    init_db()
     scheduler = BlockingScheduler()
     scheduler.add_job(
         run_scheduled_hunt,

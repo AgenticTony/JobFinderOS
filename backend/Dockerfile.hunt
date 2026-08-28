@@ -1,0 +1,30 @@
+# JobFinderOS hunt image — the ONE-SHOT cron shape (WO-07).
+#
+# Same layers as the API image; only the CMD differs: run a single
+# claim -> hunt -> release cycle and exit. Render cron jobs are billed
+# per second of ACTIVE runtime (render.com/docs/cronjobs, $1/mo minimum)
+# — a scheduler loop here would bill to the 12-hour run cap. Overlapping
+# schedules are already safe: run_scheduled_hunt claims the DB hunt lock
+# (WO-04) and Render itself delays a scheduled run while one is active.
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
+
+# alembic ships: the one-shot cycle calls init_db() first (advisory-lock
+# serialized against the API's boot migrations)
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+COPY scripts ./scripts
+
+RUN useradd --create-home --uid 10001 jobfinder && chown -R jobfinder /app
+USER jobfinder
+
+CMD ["python", "-m", "app.services.worker", "--once"]

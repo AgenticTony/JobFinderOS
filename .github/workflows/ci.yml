@@ -142,6 +142,45 @@ jobs:
         run: docker build -t jobfinderos-backend:ci backend/
       - name: Image smoke (imports, boots schema)
         run: docker run --rm --entrypoint python -e DEBUG=true jobfinderos-backend:ci -c "import app.main; print('container OK')"
+      - name: Build hunt image (WO-07 cron shape)
+        run: docker build -f backend/Dockerfile.hunt -t jobfinderos-hunt:ci backend/
+      - name: Hunt image smoke (--once CLI parses, exits clean)
+        run: docker run --rm --entrypoint python jobfinderos-hunt:ci -m app.services.worker --help
+
+  blueprint:
+    name: Render blueprint (render.yaml valid)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: render.yaml parses + invariants
+        run: |
+          python - <<'EOF'
+          import yaml
+          with open("render.yaml") as f:
+              spec = yaml.safe_load(f)
+          services = {s["name"]: s for s in spec["services"]}
+          api, hunt = services["jobfinderos-api"], services["jobfinderos-hunt"]
+          assert api["type"] == "web" and api["runtime"] == "docker"
+          assert api["healthCheckPath"] == "/health"
+          assert api["plan"] == "free"
+          assert hunt["type"] == "cron" and hunt["schedule"] == "0 * * * *"
+          # dockerfilePath resolves from the REPO ROOT (blueprint spec) —
+          # a path that silently assumed rootDir would build the wrong image
+          assert hunt["dockerfilePath"] == "./backend/Dockerfile.hunt"
+          # No secret may carry a literal value (render.com/docs/blueprint-spec:
+          # sync:false prompts at creation; generateValue makes one)
+          for s in spec["services"]:
+              for v in s.get("envVars", []):
+                  if v["key"] in {"DATABASE_URL", "GLM_API_KEY", "SUPABASE_URL",
+                                  "SUPABASE_SERVICE_KEY", "AUTH_SECRET"}:
+                      assert v.get("sync") is False or v.get("generateValue"), (
+                          f"{s['name']}/{v['key']} must be sync:false or generateValue")
+                  assert "value" not in v or v["key"] not in {
+                      "DATABASE_URL", "GLM_API_KEY", "SUPABASE_URL",
+                      "SUPABASE_SERVICE_KEY", "RESEND_API_KEY"}, \
+                      f"secret {v['key']} has a literal value in render.yaml"
+          print("render.yaml invariants OK:", list(services))
+          EOF
 
   frontend:
     name: Frontend (type-check + build)
@@ -165,5 +204,14 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
 
-      - name: Build
+      - name: Build (static export — WO-07 Cloudflare Pages shape)
+        env:
+          NEXT_PUBLIC_API_URL: https://jobfinderos-api.onrender.com
         run: npm run build
+
+      - name: Export artifact check
+        run: |
+          test -f out/index.html
+          test -f out/login.html
+          grep -q 'jobfinderos-api.onrender.com' out/index.html
+          echo "static export OK: out/ with baked API URL"

@@ -77,8 +77,25 @@ def init_db():
     cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
 
     if DATABASE_URL.startswith("postgres"):
-        command.upgrade(cfg, "head")
-        logger.info("Alembic migrations applied (postgres)")
+        # Serialize boots across processes (WO-07): on a Render blueprint
+        # deploy the web service and the hunt cron start near-simultaneously,
+        # and alembic's `upgrade head` takes no lock of its own — two
+        # concurrent runs both apply a pending migration and one crashes on
+        # duplicate DDL. Postgres advisory locks are the official primitive
+        # for this: the loser blocks until the winner finishes, then sees
+        # alembic_version already at head and no-ops. Session-scoped on a
+        # dedicated connection (command.upgrade opens its own); process
+        # death between lock and unlock releases it with the connection.
+        _MIGRATION_LOCK_KEY = 821371
+        with engine.connect() as lock_conn:
+            lock_conn.execute(sa_text(
+                f"SELECT pg_advisory_lock({_MIGRATION_LOCK_KEY})"))
+            try:
+                command.upgrade(cfg, "head")
+            finally:
+                lock_conn.execute(sa_text(
+                    f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_KEY})"))
+        logger.info("Alembic migrations applied (postgres, advisory-locked)")
         return
 
     insp = sa_inspect(engine)

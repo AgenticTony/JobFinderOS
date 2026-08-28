@@ -1,5 +1,6 @@
-# JobFinderOS backend worker — python:3.12-slim (official image guidance:
-# keep prod images slim, never run as root)
+# JobFinderOS API (web) image — python:3.12-slim (official image guidance:
+# keep prod images slim, never run as root). The one-shot hunt image is
+# Dockerfile.hunt (WO-07: same layers, different CMD).
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -22,5 +23,7 @@ COPY scripts ./scripts
 RUN useradd --create-home --uid 10001 jobfinder && chown -R jobfinder /app
 USER jobfinder
 
+# Render sets PORT (default 10000) on web services and recommends binding
+# to it (render.com/docs/web-services); local docker runs keep 8000.
 EXPOSE 8000
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
