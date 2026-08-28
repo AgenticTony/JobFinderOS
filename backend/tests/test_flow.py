@@ -59,7 +59,7 @@ PROFILE_JSON = json.dumps(
 )
 
 
-def fake_complete(self, system_prompt, user_message, temperature=0.3):
+def fake_complete(self, system_prompt, user_message, temperature=0.3, kind=None):
     if "application package" in system_prompt:  # tailor_application
         return TAILOR_JSON
     if "career coach analyzing" in system_prompt:  # extract_profile
