@@ -64,6 +64,8 @@ def fake_complete(self, system_prompt, user_message, temperature=0.3):
         return TAILOR_JSON
     if "career coach analyzing" in system_prompt:  # extract_profile
         return PROFILE_JSON
+    if "fact-checker" in system_prompt:  # fabrication judge (WO-02)
+        return '{"unsupported": []}'  # clean verdict
     return MATCH_JSON
 
 
