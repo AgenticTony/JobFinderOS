@@ -19,6 +19,9 @@ _PII_KEYS = {
     "reasoning", "matched_skills", "missing_skills", "transferable_skills",
     "cover_note", "profile_context", "job_description", "cv_file_path",
     "ai_summary", "recent_roles", "skills", "search_queries",
+    # identity fields (reviewer probe: full_name left the machine)
+    "full_name", "email", "phone", "location", "preferred_locations",
+    "display_name", "username",
 }
 
 
@@ -33,6 +36,14 @@ def scrub_pii(event, hint=None):
     extra = event.get("extra")
     if isinstance(extra, dict):
         event["extra"] = _redact(extra)
+    # Breadcrumbs carry LOG MESSAGES — httpx/uvicorn logs include request
+    # payloads; a reviewer probe showed cv_text riding through them
+    crumbs = event.get("breadcrumbs")
+    if isinstance(crumbs, list):
+        for c in crumbs:
+            if isinstance(c, dict) and "message" in c:
+                c["message"] = _redact(c["message"]) if isinstance(c["message"], dict) \
+                    else "[redacted message]"
 
     def _redact_frames(frames):
         for f in frames or []:

@@ -1899,3 +1899,35 @@ class TestSentryPIIScrub:
                 not sentry_sdk.Hub.current.client.is_active()
         except Exception:
             pass
+
+
+class TestScrubRealisticEvent:
+    """Reviewer's realistic-event probe: the original tests checked extra/
+    request in isolation. A REAL Sentry event also carries breadcrumbs
+    (log messages — which include request payloads) and frame locals with
+    IDENTITY fields (full_name is personal data and was not in the set)."""
+
+    def test_breadcrumbs_are_scrubbed(self):
+        from app.core.telemetry import scrub_pii
+
+        event = {"breadcrumbs": [
+            {"message": '{"cv_text": "SECRET CV", "full_name": "Anthony Foran"}'}],
+            "extra": {}}
+        out = scrub_pii(event)
+        assert "SECRET" not in str(out) and "Anthony Foran" not in str(out), (
+            "breadcrumb messages carry request payloads — they must be "
+            "scrubbed like every other pocket"
+        )
+
+    def test_identity_fields_are_redacted(self):
+        from app.core.telemetry import scrub_pii
+
+        event = {"exception": {"values": [{"type": "E", "stacktrace": {"frames": [
+            {"vars": {"profile": {"full_name": "Anthony Foran",
+                                  "email": "x@y.se",
+                                  "phone": "+4670000000",
+                                  "location": "Malmö"}}}]}}]}}
+        out = scrub_pii(event)
+        flat = str(out)
+        for leaked in ("Anthony Foran", "x@y.se", "+4670000000"):
+            assert leaked not in flat, f"identity field {leaked!r} left the machine"
