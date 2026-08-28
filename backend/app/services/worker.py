@@ -161,6 +161,19 @@ def main(argv=None) -> int:
     )
     args = ap.parse_args(argv)
 
+    # Production posture guard (WO-07 live incident): the recreated cron
+    # ran 'successfully' in 13s against container-local SQLite — its
+    # DATABASE_URL was empty (sync:false prompts only happen at INITIAL
+    # blueprint creation, and the service was created by a later sync).
+    # A silent no-op hunt is the worst failure mode; fail loudly instead.
+    if (settings.ENVIRONMENT == "production"
+            and not settings.DATABASE_URL.startswith("postgres")):
+        logger.error(
+            "REFUSING to hunt: ENVIRONMENT=production but DATABASE_URL is "
+            "not Postgres (likely unset — check the service's environment. "
+            "A hunt against throwaway SQLite silently does nothing.)")
+        return 1
+
     init_db()
 
     if args.once:

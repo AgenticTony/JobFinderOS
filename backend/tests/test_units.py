@@ -2291,3 +2291,39 @@ class TestWorkerOnceMode:
         assert kwargs["id"] == "jobfinder_hunt"
         assert kwargs["minutes"] == settings.SCRAPE_INTERVAL_MINUTES
         sched.start.assert_called_once()
+
+
+class TestWorkerProductionPostgresGuard:
+    """WO-07 live incident: the recreated frankfurt cron ran 'successfully'
+    in 13s against container-local SQLite — its sync:false DATABASE_URL
+    was empty on the new service (sync prompts only happen at INITIAL
+    blueprint creation). A production hunt must REFUSE to run without
+    Postgres instead of silently doing nothing."""
+
+    def test_once_refuses_sqlite_in_production(self, monkeypatch):
+        from app.services import worker
+
+        monkeypatch.setattr(worker.settings, "ENVIRONMENT", "production")
+        monkeypatch.setattr(worker.settings, "DATABASE_URL",
+                            "sqlite:///./jobfinderos.db")
+        called = []
+        monkeypatch.setattr(worker, "run_scheduled_hunt",
+                            lambda: called.append(1))
+        monkeypatch.setattr(worker, "init_db", lambda: None)
+
+        rc = worker.main(["--once"])
+
+        assert rc == 1, "must refuse (exit 1), not 'succeed' silently"
+        assert called == [], "run_scheduled_hunt must never fire"
+
+    def test_once_runs_with_postgres_in_production(self, monkeypatch):
+        from app.services import worker
+
+        monkeypatch.setattr(worker.settings, "ENVIRONMENT", "production")
+        monkeypatch.setattr(worker.settings, "DATABASE_URL",
+                            "postgresql+psycopg://u:p@h/db")
+        monkeypatch.setattr(worker, "run_scheduled_hunt",
+                            lambda: {"status": "ran"})
+        monkeypatch.setattr(worker, "init_db", lambda: None)
+
+        assert worker.main(["--once"]) == 0
