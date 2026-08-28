@@ -16,6 +16,7 @@ import logging
 
 from app.core.config import settings
 from app.core.database import SessionLocal, init_db
+from app.services.ai_service import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -26,31 +27,46 @@ CLAIM_TTL_MINUTES = 45  # a hunt cycle's worst-case budget (matching
 def claim_hunt(db) -> bool:
     """Claim the hunt lock. True = this process runs the cycle; False =
     someone else holds it (skip, don't error). Stale claims (crashed
-    holder past TTL) are stealable."""
+    holder past TTL) are stealable.
+
+    ATOMIC (review r2): one conditional UPDATE whose rowcount is the
+    verdict — the previous SELECT->check->UPDATE had no serialization
+    and a seeded 8-thread race produced 8/8 winners. Portable: the
+    single-statement UPDATE is atomic on both SQLite and Postgres.
+    """
     import datetime
+
+    from sqlalchemy import or_, update
 
     from app.core.timeutil import utc_now
     from app.models import SystemLock
 
     now = utc_now()
-    ttl = datetime.timedelta(minutes=CLAIM_TTL_MINUTES)
-    row = db.query(SystemLock).filter(SystemLock.name == "hunt").first()
-    if row is None:
-        # first-ever claim: INSERT the row (get-or-create without a race
-        # window — a second inserter fails the PK and simply loses)
-        db.add(SystemLock(name="hunt", locked_until=now + ttl))
-        try:
-            db.commit()
-            return True
-        except Exception:  # noqa: BLE001 — PK collision = another process claimed first
-            db.rollback()
-            return False
-    if row.locked_until is not None and row.locked_until > now:
-        return False
-    row.locked_until = now + ttl
-    db.add(row)
+    new_until = now + datetime.timedelta(minutes=CLAIM_TTL_MINUTES)
+
+    result = db.execute(
+        update(SystemLock)
+        .where(
+            SystemLock.name == "hunt",
+            or_(SystemLock.locked_until.is_(None),
+                SystemLock.locked_until <= now),
+        )
+        .values(locked_until=new_until)
+    )
     db.commit()
-    return True
+    if result.rowcount == 1:
+        return True
+
+    # rowcount 0: either held (False) or the row does not exist yet —
+    # first-ever claim via INSERT; the PK makes a second inserter lose
+    db.rollback()
+    db.add(SystemLock(name="hunt", locked_until=new_until))
+    try:
+        db.commit()
+        return True
+    except Exception:  # noqa: BLE001 — PK collision = another process claimed first
+        db.rollback()
+        return False
 
 
 def release_hunt(db) -> None:
@@ -80,37 +96,43 @@ def run_scheduled_hunt() -> dict:
         db.close()
 
     summary = {"status": "ran", "users": 0, "errors": 0}
-    db = SessionLocal()
     try:
-        user_ids = [
-            row[0]
-            for row in db.query(Profile.user_id)
-            .filter(Profile.country.isnot(None), Profile.user_id.isnot(None))
-            .distinct().all()
-        ]
+        db = SessionLocal()
+        try:
+            user_ids = [
+                row[0]
+                for row in db.query(Profile.user_id)
+                .filter(Profile.country.isnot(None),
+                        Profile.user_id.isnot(None))
+                .distinct().all()
+            ]
+        finally:
+            db.close()
+        if not user_ids:
+            logger.info("Scheduled hunt: no onboarded users")
+            return {"status": "ran", "users": 0, "errors": 0}
+
+        for uid in user_ids:
+            # WO-04 review: scheduled hunts carry their user's id onto
+            # ai_usage rows — most spend flows through here, and WO-14's
+            # trial budget meters it per user
+            token = current_user_id.set(uid)
+            try:
+                run_pipeline(user_id=uid)
+                summary["users"] += 1
+            except Exception as e:  # noqa: BLE001 — one user's failure never kills the cycle
+                summary["errors"] += 1
+                logger.error("Scheduled hunt failed for user %s: %s", uid, e)
+            finally:
+                current_user_id.reset(token)
     finally:
-        db.close()
-    if not user_ids:
-        logger.info("Scheduled hunt: no onboarded users")
+        # ALWAYS released (review: a transient error between claim and
+        # release leaked the claim = 45-minute silent outage)
         db = SessionLocal()
         try:
             release_hunt(db)
         finally:
             db.close()
-        return {"status": "ran", "users": 0, "errors": 0}
-
-    for uid in user_ids:
-        try:
-            run_pipeline(user_id=uid)
-            summary["users"] += 1
-        except Exception as e:  # noqa: BLE001 — one user's failure never kills the cycle
-            summary["errors"] += 1
-            logger.error("Scheduled hunt failed for user %s: %s", uid, e)
-    db = SessionLocal()
-    try:
-        release_hunt(db)
-    finally:
-        db.close()
     logger.info("Scheduled hunt: %s", summary)
     return summary
 

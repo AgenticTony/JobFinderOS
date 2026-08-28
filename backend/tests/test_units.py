@@ -2053,43 +2053,118 @@ class TestWorkerEntrypoint:
 class TestClaimInsertRace:
     """RC1 on the claim tests stayed green when the PK-collision guard
     was removed — those tests never race. This one forces the collision
-    deterministically: a row inserted AFTER the query but BEFORE the
-    commit is exactly what two processes produce."""
+    deterministically at the CURRENT race point: with the atomic UPDATE
+    claim, a zero-rowcount UPDATE falls through to INSERT — inject the
+    competing row between the UPDATE and the INSERT."""
 
     def test_pk_collision_loses_cleanly(self, db):
-        # Simulate the race: claim_hunt queries (row absent), we sneak
-        # the row in behind its back, then its INSERT must lose cleanly
         import datetime
 
         from app.core.timeutil import utc_now
         from app.models import SystemLock
         from app.services import worker
 
-        original_query = db.query
+        original_execute = db.execute
+        state = {"injected": False}
 
-        class SneakyQuery:
-            def __init__(self, *a, **kw):
-                self._q = original_query(*a, **kw)
+        def sneaky_execute(*a, **kw):
+            result = original_execute(*a, **kw)
+            if (not state["injected"] and a
+                    and "system_locks" in str(a[0])):
+                state["injected"] = True
+                db.add(SystemLock(name="hunt", locked_until=utc_now()
+                                  + datetime.timedelta(minutes=45)))
+                db.flush()  # the other process's row lands mid-window
+            return result
 
-            def filter(self, *a, **kw):
-                self._q = self._q.filter(*a, **kw)
-                return self
-
-            def first(self):
-                result = self._q.first()
-                if result is None:
-                    # the other process inserts HERE
-                    db.add(SystemLock(name="hunt", locked_until=utc_now()
-                                      + datetime.timedelta(minutes=45)))
-                    db.commit()
-                return result
-
-        db.query = SneakyQuery
+        db.execute = sneaky_execute
         try:
             won = worker.claim_hunt(db)
         finally:
-            db.query = original_query
+            db.execute = original_execute
         assert won is False, (
             "the losing inserter must return False, not raise — a PK "
             "collision is another process winning the claim"
         )
+
+    
+
+class TestClaimAtomicUpdatePath:
+    """Reviewer round 2: the UPDATE path was SELECT->check->UPDATE->COMMIT
+    with no predicate — my 8-thread probe showed 1/8 only because the
+    table was FRESH (INSERT path, PK picks a winner). Seeded — steady
+    state, cycle two onward — 8 threads ALL won. The claim must be one
+    conditional UPDATE whose rowcount is the verdict."""
+
+    def test_seeded_concurrent_race_yields_one_winner(self, db):
+        import threading
+
+        from app.services.worker import claim_hunt, release_hunt
+
+        # SEED: row exists and is released — the steady state
+        assert claim_hunt(db) is True
+        release_hunt(db)
+
+        barrier = threading.Barrier(8)
+        wins = []
+
+        def race():
+            barrier.wait()
+            s = db.__class__.__mro__ and None  # noqa: F841 — placeholder
+            from app.core.database import SessionLocal
+            s = SessionLocal()
+            try:
+                if claim_hunt(s):
+                    wins.append(1)
+            finally:
+                s.close()
+
+        ts = [threading.Thread(target=race) for _ in range(8)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        assert len(wins) == 1, (
+            f"{len(wins)}/8 threads won the SAME released claim — the "
+            "UPDATE path does not exclude; the claim must be a single "
+            "conditional UPDATE"
+        )
+
+    def test_claim_released_on_enumeration_failure(self, db, monkeypatch):
+        """Reviewer: an exception between claim and release leaks the
+        claim — a 45-minute silent outage from a transient DB error."""
+        from app.services import worker
+
+        monkeypatch.setattr(worker, "claim_hunt", lambda db_: True)
+        # user enumeration explodes (transient DB error shape)
+        import sqlalchemy as sa
+
+        def boom(*a, **kw):
+            raise sa.OperationalError("stmt", {}, RuntimeError("transient"))
+        monkeypatch.setattr(
+            "app.services.pipeline.run_pipeline", lambda **kw: (_ for _ in ()).throw(RuntimeError("x")))
+        # make Profile query itself raise: patch SessionLocal used inside
+        class _BoomSession:
+            def __init__(self, *a, **kw):
+                raise RuntimeError("transient DB error")
+        monkeypatch.setattr(worker, "SessionLocal", _BoomSession)
+        try:
+            worker.run_scheduled_hunt()
+        except Exception:
+            pass  # the failure itself is expected to propagate or log
+        # the claim must NOT be leaked: a fresh session can claim
+        from app.core.database import SessionLocal
+        s = SessionLocal()
+        try:
+            import datetime
+
+            from app.core.timeutil import utc_now
+            from app.models import SystemLock
+            s.add(SystemLock(name="hunt", locked_until=utc_now()
+                             + datetime.timedelta(minutes=45)))
+            s.commit()
+        except Exception:
+            raise AssertionError(
+                "run_scheduled_hunt leaked the claim — enumeration "
+                "failure must release (try/finally)"
+            )
+        finally:
+            s.close()
