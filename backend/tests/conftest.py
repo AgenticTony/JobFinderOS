@@ -32,6 +32,10 @@ TEST_DB = os.environ.get("TEST_DATABASE_URL") or "sqlite:///./test_suite.db"
 os.environ["DATABASE_URL"] = TEST_DB
 os.environ.setdefault("GLM_API_KEY", "")
 os.environ["DEBUG"] = "true"  # tests run with production guards relaxed
+# WO-02: the per-draft fabrication judge is OFF for the suite by
+# default — draft tests script Layer A and must not spend judge calls.
+# TestProductionJudge opts in per-test.
+os.environ.setdefault("FABRICATION_JUDGE", "off")
 
 
 def pytest_collection_modifyitems(session, config, items):

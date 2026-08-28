@@ -449,6 +449,38 @@ Respond with ONLY valid JSON (no markdown):
   "confidence": "high|medium|low"
 }"""
 
+    def judge_fabrication(self, source_of_truth: str,
+                          tailored_text: str) -> list:
+        """WO-02: the fabrication judge, IN PRODUCTION on every draft.
+
+        A FRESH call with no tailoring context — asking the same
+        conversation to grade its own output measures agreeableness,
+        not fidelity. The judge is the only mechanism with demonstrated
+        catches on real output (WO-01's live runs: every real fabrication
+        was semantic — invented work authority, duties, practices —
+        invisible to deterministic atom checks). Returns a list of
+        {"claim", "why"} dicts; empty list = faithful.
+        """
+        system_prompt = """You are a strict fact-checker for job applications. You are
+given a candidate's SOURCE OF TRUTH (CV plus their own stated preferences)
+and a TAILORED document derived from it. List every claim about this
+person in the tailored document that the source does not support —
+invented employers, shifted dates, upgraded titles, invented credentials,
+inflated metrics, invented work authorization, technologies or duties they
+have not had. Translation is legitimate (an English CV may be tailored
+into Swedish); fabrication is not. Respond with ONLY valid JSON:
+{"unsupported": [{"claim": "...", "why": "..."}]}
+An empty list means the document is faithful."""
+        user_message = (
+            f"## SOURCE OF TRUTH\n{source_of_truth[:9000]}\n\n"
+            f"## TAILORED DOCUMENT\n{tailored_text[:9000]}\n\n"
+            "List every unsupported claim."
+        )
+        parsed = self._parse_json(
+            self._complete(system_prompt, user_message))
+        unsupported = parsed.get("unsupported", [])
+        return unsupported if isinstance(unsupported, list) else []
+
     # ------------------------------------------------------------------
     # Prompt versioning
     # ------------------------------------------------------------------

@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.timeutil import utc_now
 from app.models import Application, ApplicationDraft, JobPosting, MatchResult, Profile
 from app.services import pdf_service
@@ -32,6 +33,14 @@ logger = logging.getLogger(__name__)
 # high-confidence finding is the model REPEATEDLY asserting something
 # the CV does not support — block, don't retry again.
 MAX_FABRICATION_RETRIES = 2
+
+
+def get_ai_service_with_judge():
+    """The AI service when the production judge is enabled; None when
+    FABRICATION_JUDGE=off (emergency cost lever — Layer A still guards)."""
+    if getattr(settings, "FABRICATION_JUDGE", "on") == "off":
+        return None
+    return get_ai_service()
 
 DRAFT_DIR = "uploads/drafts"
 
@@ -152,6 +161,26 @@ def create_draft_for_job(
                 allowed_names=[n for n in (job.company, job.title) if n],
             )
             high, advisory = split_tiers(findings)
+
+            # WO-02: the production judge — semantic evidence Layer A
+            # cannot see. Runs after Layer A is clean (no point judging a
+            # document Layer A already rejected); a finding joins the
+            # high-confidence path: regenerate with the claim named, block
+            # after MAX retries. Kill switch: FABRICATION_JUDGE=off.
+            if not high and get_ai_service_with_judge():
+                judge_claims = get_ai_service_with_judge().judge_fabrication(
+                    model_input,
+                    f"{result.get('cover_letter', '')}\n{result.get('tailored_cv', '')}",
+                )
+                if judge_claims:
+                    high = [
+                        type("JudgeClaim", (), {
+                            "value": c.get("claim", "?"),
+                            "kind": "judge", "tier": "high",
+                            "context": c.get("why", ""),
+                        })() for c in judge_claims
+                    ]
+                    advisory = advisory  # unchanged
 
             if not high:
                 from app.schemas.common import dump_json_list as _dumps

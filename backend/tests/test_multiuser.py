@@ -995,3 +995,111 @@ class TestGuardSourceAlignment:
             f"a USER-ENTERED preference flagged: {findings} — the guard "
             "must not flag target roles the user themselves asked for"
         )
+
+
+class TestProductionJudge:
+    """WO-02: the judge — the only mechanism with demonstrated catches —
+    runs IN PRODUCTION on every draft (not just the opt-in harness),
+    inside the same regenerate-then-block loop as Layer A."""
+
+    CLEAN_TAILOR = {"cover_letter": "Hej, jag bygger betaltjanster i Python.",
+                    "tailored_cv": "Erik. Python pa Svenska Spel.",
+                    "changes_summary": []}
+
+    @staticmethod
+    def _seed(client, db):
+        from app.services import draft_service
+        from app.services.ai_service import AIService
+
+        email = f"pj-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik. Python developer at Svenska Spel."
+        db.commit()
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         description="A Python role.")
+        db.add(job); db.flush()
+        db.add(MatchResult(user_id=uid, job_id=job.id, score=61,
+                           tier="good_match", decision="approved"))
+        db.commit()
+        return draft_service, AIService, p, job, uid
+
+    @staticmethod
+    def _script(monkeypatch, ds, AIS, tailor_outputs, judge_outputs):
+        t_calls = {"n": 0}
+        j_calls = {"n": 0}
+
+        def fake_tailor(self, profile_context, cv_text, job_description,
+                        correction=None):
+            i = min(t_calls["n"], len(tailor_outputs) - 1)
+            t_calls["n"] += 1
+            return dict(tailor_outputs[i])
+
+        def fake_judge(self, source_of_truth, tailored_text):
+            i = min(j_calls["n"], len(judge_outputs) - 1)
+            j_calls["n"] += 1
+            return [dict(x) for x in judge_outputs[i]]
+
+        fake = AIS.__new__(AIS)
+        fake.model = "glm-test"
+        monkeypatch.setattr(ds, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(ds, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIS, "tailor_application", fake_tailor)
+        monkeypatch.setattr(AIS, "judge_fabrication", fake_judge)
+        monkeypatch.setattr(ds.settings, "FABRICATION_JUDGE", "on",
+                            raising=False)
+        return t_calls, j_calls
+
+    def test_judge_clean_draft_is_ready(self, client, db, monkeypatch):
+        ds, AIS, p, job, uid = self._seed(client, db)
+        self._script(monkeypatch, ds, AIS, [self.CLEAN_TAILOR], [[]])
+        d = ds.create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "ready", d.error
+
+    def test_judge_finding_regenerates_then_blocks(self, client, db, monkeypatch):
+        """A judge-found unsupported claim is semantic evidence — same
+        loop as Layer A high: regenerate with the claim named, block
+        after MAX retries, and the finding is recorded."""
+        ds, AIS, p, job, uid = self._seed(client, db)
+        catch = [{"claim": "EU citizen with full work rights",
+                  "why": "not in the CV"}]
+        t_calls, j_calls = self._script(
+            monkeypatch, ds, AIS,
+            [self.CLEAN_TAILOR, self.CLEAN_TAILOR, self.CLEAN_TAILOR],
+            [catch, catch, catch])
+        d = ds.create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed", (
+            f"a judge finding surviving retries must block, got {d.status}"
+        )
+        assert d.fabrication_blocked is True
+        assert "work rights" in (d.error or "").lower(), (
+            f"block must NAME the judge's claim: {d.error!r}"
+        )
+        assert j_calls["n"] == 3 and t_calls["n"] == 3, (
+            "judge + tailor both run every attempt"
+        )
+
+    def test_judge_finding_recovers_on_regeneration(self, client, db, monkeypatch):
+        ds, AIS, p, job, uid = self._seed(client, db)
+        catch = [{"claim": "invented metric 40%", "why": "not in the CV"}]
+        self._script(monkeypatch, ds, AIS,
+                     [self.CLEAN_TAILOR, self.CLEAN_TAILOR], [catch, []])
+        d = ds.create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "ready", d.error
+        assert d.fabrication_retries == 1
+
+    def test_judge_kill_switch(self, client, db, monkeypatch):
+        """FABRICATION_JUDGE=off disables the extra call (emergency cost
+        lever) — Layer A still guards."""
+        ds, AIS, p, job, uid = self._seed(client, db)
+        t_calls, j_calls = self._script(
+            monkeypatch, ds, AIS, [self.CLEAN_TAILOR], [[]])
+        # _script opted in; now flip the switch off for this test
+        monkeypatch.setattr(ds.settings, "FABRICATION_JUDGE", "off",
+                            raising=False)
+        d = ds.create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "ready"
+        assert j_calls["n"] == 0, "judge ran despite the kill switch"
