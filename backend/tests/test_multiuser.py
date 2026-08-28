@@ -1171,3 +1171,31 @@ class TestJudgeFailClosed:
             f"judge temperature {captured.get('temp')!r} — verdicts must be "
             "deterministic (retry semantics + reproducible baselines)"
         )
+
+
+class TestJudgeWrongTypeFailsClosed:
+    """WO-02 review follow-up: '{"unsupported": null}' / '"none"' / a dict
+    all passed the key check, failed isinstance, and returned [] —
+    FAITHFUL -> ships. Wrong type is the same transport/format failure
+    as a missing key: never a verdict."""
+
+    def test_non_list_unsupported_raises(self):
+        from app.services.ai_service import AIService
+
+        svc = AIService.__new__(AIService)
+        for raw in ('{"unsupported": null}', '{"unsupported": "none"}',
+                    '{"unsupported": {"claim": "invented degree"}}'):
+            AIService._complete = staticmethod(
+                lambda s, u, temperature=0.0, _r=raw: _r)
+            try:
+                out = AIService.judge_fabrication(svc, "cv", "doc")
+                raise AssertionError(
+                    f"{raw!r} read as verdict {out!r} — wrong type must "
+                    "fail closed, not ship as faithful"
+                )
+            except ValueError:
+                pass  # the required behaviour
+        # valid shapes still work
+        AIService._complete = staticmethod(
+            lambda s, u, temperature=0.0: '{"unsupported": []}')
+        assert AIService.judge_fabrication(svc, "cv", "doc") == []

@@ -492,7 +492,15 @@ An empty list means the document is faithful."""
                 "(truncated/malformed response)"
             )
         unsupported = parsed["unsupported"]
-        return unsupported if isinstance(unsupported, list) else []
+        if not isinstance(unsupported, list):
+            # Wrong type is the same transport/format failure as a missing
+            # key (review follow-up): null/string/dict all read as [] and
+            # shipped. Never a verdict.
+            raise ValueError(
+                "Malformed fabrication-judge response: 'unsupported' is "
+                f"{type(unsupported).__name__}, expected a list"
+            )
+        return unsupported
 
     # ------------------------------------------------------------------
     # Prompt versioning
