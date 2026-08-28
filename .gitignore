@@ -32,6 +32,8 @@ out/
 .playwright-mcp/
 # agent tooling (skills, session state)
 .agent/
-.claude/
+.agents/
+agent/
 agents/
+.claude/
 skills-lock.json
