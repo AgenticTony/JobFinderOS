@@ -2206,10 +2206,11 @@ class TestMigrationAdvisoryLock:
 
         dbmod.init_db()
 
-        assert len(calls) == 3, f"expected lock/upgrade/unlock, got {calls}"
-        assert "pg_advisory_lock" in calls[0][1], calls[0]
-        assert calls[1] == ("upgrade", "head"), calls[1]
-        assert "pg_advisory_unlock" in calls[2][1], calls[2]
+        assert len(calls) == 4, f"expected timeout/lock/upgrade/unlock, got {calls}"
+        assert "lock_timeout" in calls[0][1], calls[0]
+        assert "pg_advisory_lock" in calls[1][1], calls[1]
+        assert calls[2] == ("upgrade", "head"), calls[2]
+        assert "pg_advisory_unlock" in calls[3][1], calls[3]
 
     def test_unlock_runs_even_when_upgrade_fails(self, monkeypatch):
         """A crashed migration must not leak the lock (it would block the
@@ -2327,3 +2328,37 @@ class TestWorkerProductionPostgresGuard:
         monkeypatch.setattr(worker, "init_db", lambda: None)
 
         assert worker.main(["--once"]) == 0
+
+
+class TestCORSProductionGuard:
+    """Review r4 (WO-07 round): an EMPTY CORS_ORIGINS at blueprint-prompt
+    time deploys successfully and serves an app no origin can call —
+    "".split(",") == [""] allows nothing, and the wildcard guard never
+    fires. Production must refuse empty or malformed origins."""
+
+    def _settings_kwargs(self):
+        return {"DEBUG": False,
+                "AUTH_SECRET": "x" * 48,
+                "CORS_ORIGINS": ""}
+
+    def test_empty_cors_rejected_in_production(self):
+        import pytest
+
+        from app.core.config import Settings
+        with pytest.raises(ValueError):
+            Settings(**self._settings_kwargs())
+
+    def test_malformed_origin_rejected_in_production(self):
+        import pytest
+
+        from app.core.config import Settings
+        with pytest.raises(ValueError):
+            Settings(**{**self._settings_kwargs(),
+                        "CORS_ORIGINS": "https://good.example,jobfinderos.pages.dev"})
+
+    def test_valid_origins_pass(self):
+        from app.core.config import Settings
+        s = Settings(**{**self._settings_kwargs(),
+                        "CORS_ORIGINS": "https://jobfinderos.pages.dev,http://localhost:3000"})
+        assert s.get_cors_origins() == ["https://jobfinderos.pages.dev",
+                                        "http://localhost:3000"]

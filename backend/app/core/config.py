@@ -156,6 +156,19 @@ class Settings(BaseSettings):
                 )
             if "*" in self.get_cors_origins():
                 raise ValueError("CORS_ORIGINS=* is not allowed when DEBUG=false")
+            # r4: an EMPTY prompt deploys fine and serves an app no origin
+            # can call ("".split(",") == [""]); a scheme-less entry does
+            # the same per-origin. Refuse both at boot, not in the browser.
+            origins = self.get_cors_origins()
+            if not origins or any(
+                    not o or not o.startswith(("http://", "https://"))
+                    for o in origins):
+                raise ValueError(
+                    "CORS_ORIGINS must be a non-empty list of http(s):// "
+                    "origins when DEBUG=false (got "
+                    f"{self.CORS_ORIGINS!r}) — e.g. "
+                    "https://jobfinderos.pages.dev"
+                )
         else:
             logging.getLogger(__name__).warning(
                 "DEBUG=true — development mode (relaxed auth/CORS guards)"

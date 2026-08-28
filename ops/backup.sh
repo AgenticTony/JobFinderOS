@@ -8,7 +8,6 @@ set -euo pipefail
 
 PROJECT="/Users/anthonyforan/Desktop/JobFinderOS"
 BACKUP_DIR="$HOME/backups/jobfinderos"
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 KEEP_DAYS=30
 
 mkdir -p "$BACKUP_DIR/cvs" "$BACKUP_DIR/drafts"
@@ -101,8 +100,15 @@ if [ -z "$DATABASE_URL" ]; then
     # Review r3: `cut -d= -f2` truncated at the inner '=' and kept the
     # opening quote — the quoted form fails the ^postgre grep and silently
     # reverts to the SQLite branch (the exact r2 bug, restored by formatting).
-    DATABASE_URL=$(grep '^DATABASE_URL=' "$PROJECT/backend/.env" | head -1 | cut -d= -f2- \
-        | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+    # `|| true` (review r4): this is a bare assignment in an if-body — a
+    # missing .env or missing line made the substitution's exit status
+    # kill the whole script under set -e, BEFORE rotation and the
+    # off-site sync (the sibling of the pg_dump hazard three blocks down).
+    DATABASE_URL=$(grep '^DATABASE_URL=' "$PROJECT/backend/.env" 2>/dev/null | head -1 | cut -d= -f2- \
+        | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//" || true)
+    if [ -z "$DATABASE_URL" ]; then
+        echo "$(date -Iseconds) WARNING: DATABASE_URL not in env or $PROJECT/backend/.env — falling back to the SQLite branch (is the checkout relocated?)" >&2
+    fi
 fi
 
 # A database failure must NOT gate the off-site sync (review r3): the
@@ -119,12 +125,18 @@ if [ -x "$PG_DUMP" ] && \
     # pg_dump sits in the if-CONDITION: set -e would otherwise kill the
     # script at this line on a crash — before the failure handler, and
     # before the off-site block (the r3 finding was worse than reported).
+    # stderr is CAPTURED per-run (r4): the script now survives a failed
+    # dump, so the log is the only record — "FAILED" without a reason
+    # can't distinguish a transient pooler blip from a rotated password.
+    # On success the .err file is removed; on failure it is KEPT.
     if "$PG_DUMP" --no-owner --no-privileges --dbname "${DATABASE_URL/postgresql+psycopg/postgresql}" \
-        --file "$BACKUP_DIR/db-$STAMP.sql" 2>/dev/null && \
+        --file "$BACKUP_DIR/db-$STAMP.sql" 2> "$BACKUP_DIR/db-$STAMP.dump.err" && \
        [ -s "$BACKUP_DIR/db-$STAMP.sql" ]; then
+        rm -f "$BACKUP_DIR/db-$STAMP.dump.err"
         echo "$(date -Iseconds) pg_dump OK: db-$STAMP.sql ($(du -h "$BACKUP_DIR/db-$STAMP.sql" | cut -f1))"
     else
-        echo "$(date -Iseconds) pg_dump FAILED (non-zero exit or empty file) — continuing to off-site sync" >&2
+        echo "$(date -Iseconds) pg_dump FAILED (non-zero exit or empty file) — continuing to off-site sync; reason in $BACKUP_DIR/db-$STAMP.dump.err:" >&2
+        tail -3 "$BACKUP_DIR/db-$STAMP.dump.err" >&2 2>/dev/null || true
         rm -f "$BACKUP_DIR/db-$STAMP.sql"  # never leave a fresh-stamped empty/half dump
         DB_FAILED=1
     fi
@@ -132,7 +144,10 @@ if [ -x "$PG_DUMP" ] && \
 else
     # SQLite (dev / pre-migration): the .backup choreography
     NOW=$(date +%Y%m%d-%H%M%S)
-    if sqlite3 "$PROJECT/backend/jobfinderos.db" ".backup '$BACKUP_DIR/db-$NOW.db'"; then
+    if [ ! -f "$PROJECT/backend/jobfinderos.db" ]; then
+        echo "$(date -Iseconds) WARNING: no database at $PROJECT/backend/jobfinderos.db (and DATABASE_URL unresolved — see warning above)" >&2
+        DB_FAILED=1
+    elif sqlite3 "$PROJECT/backend/jobfinderos.db" ".backup '$BACKUP_DIR/db-$NOW.db'"; then
         echo "$(date -Iseconds) sqlite backup OK: db-$NOW.db"
     else
         echo "$(date -Iseconds) sqlite backup FAILED — continuing to off-site sync" >&2

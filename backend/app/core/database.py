@@ -88,6 +88,16 @@ def init_db():
         # death between lock and unlock releases it with the connection.
         _MIGRATION_LOCK_KEY = 821371
         with engine.connect() as lock_conn:
+            # Bounded wait (review r4): without a timeout, a wedged holder
+            # (stuck migration, orphaned session) blocks every boot forever
+            # with no error. Verified on PG17: lock_timeout aborts an
+            # advisory-lock wait with 'canceling statement due to lock
+            # timeout' — boot then FAILS LOUDLY instead of hanging.
+            # SET LOCAL (not SET): scoped to this transaction so the
+            # pooled connection doesn't carry lock_timeout into later
+            # application queries; the pg_advisory_lock below runs in
+            # the same transaction, so the bounded wait still applies.
+            lock_conn.execute(sa_text("SET LOCAL lock_timeout = '120s'"))
             lock_conn.execute(sa_text(
                 f"SELECT pg_advisory_lock({_MIGRATION_LOCK_KEY})"))
             try:
