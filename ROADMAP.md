@@ -208,7 +208,7 @@ shared pool + match-time gates + watermarks; embeddings layer; match queue
 with reserved slots + login ordering; per-country cron scheduler; frontend
 account flows.
 
-**Phase 2 — SaaS operations:** Dockerfile + Render + Vercel deploy, domain/TLS,
+**Phase 2 — SaaS operations:** Dockerfile + Render (web + worker) + Cloudflare Pages deploy, domain/TLS,
 CORS lockdown; Composio MailSender (send from user's Gmail); Stripe
 (closed beta behind invite codes first, payments on public launch).
 
