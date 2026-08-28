@@ -49,10 +49,19 @@ UUID_COLS = {"users": {"id"}, "profiles": {"user_id"},
              "applications": {"user_id"}}
 
 
-def main(snapshot_path: str) -> int:
+def main(snapshot_path: str, force: bool = False) -> int:
     from dotenv import load_dotenv
-    load_dotenv(BACKEND / ".env", override=True)
+    # env WINS over .env for the destination (review finding: override=True
+    # stomped an explicit DATABASE_URL=... on the command line, making it
+    # impossible to target a scratch database for a rehearsal run)
+    load_dotenv(BACKEND / ".env", override=False)
     dst_url = os.environ["DATABASE_URL"]
+    # route through the ONE normalizer (WO-11's fifth call site rule):
+    # a bare postgresql:// URL resolves to psycopg2 (not installed) here
+    # exactly as it would in the app — this must not be a sixth path
+    sys.path.insert(0, str(BACKEND))
+    from app.core.dburl import normalize_postgres_url
+    dst_url = normalize_postgres_url(dst_url)
 
     src = sqlite3.connect(snapshot_path)
     src.row_factory = sqlite3.Row
@@ -74,6 +83,19 @@ def main(snapshot_path: str) -> int:
     src.close()
 
     dst = create_engine(dst_url, connect_args={"sslmode": "require"})
+
+    # Refuse to re-run against a populated database without --force
+    # (a re-run INSERTs duplicate rows — the snapshot is the truth, not
+    # the live state, so there is no idempotency to lean on)
+    if not force:
+        with dst.connect() as conn:
+            existing = conn.execute(
+                text("SELECT COUNT(*) FROM users")).scalar()
+        if existing > 0:
+            print(f"REFUSING: destination already has {existing} users. "
+                  "Re-run with --force to wipe and re-migrate.")
+            return 2
+
     with dst.begin() as conn:
         for t in TABLES:
             rows = data[t]
@@ -138,7 +160,10 @@ def main(snapshot_path: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(__doc__)
-        sys.exit(2)
-    sys.exit(main(sys.argv[1]))
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("snapshot", help="path to the pre-migration SQLite snapshot")
+    ap.add_argument("--force", action="store_true",
+                    help="wipe destination tables and re-migrate (destructive)")
+    args = ap.parse_args()
+    sys.exit(main(args.snapshot, force=args.force))
