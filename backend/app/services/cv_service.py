@@ -39,7 +39,7 @@ def _store_cv_file(content: bytes, filename: str) -> Tuple[str, str]:
     return key, safe
 
 
-def build_profile_context(profile: Profile) -> str:
+def build_profile_context(profile: Profile, include_derived: bool = True) -> str:
     """Compact text summary of the profile + preferences fed to the matcher."""
     skills = parse_json_list(profile.skills)
     preferred = parse_json_list(profile.preferred_roles)
@@ -53,8 +53,14 @@ def build_profile_context(profile: Profile) -> str:
         for r in roles
     ]
 
+    # include_derived=False renders ONLY user-entered fields: the
+    # fabrication guard verifies against this (WO-01 review r5). Derived
+    # fields (title, skills) are extraction-model OUTPUT — 'REST API
+    # Design' absent from the CV was silently blessed when the whole
+    # context was guard truth. The model still sees them (its prompt
+    # uses the default); the guard must not trust them.
     lines = []
-    if profile.professional_title:
+    if include_derived and profile.professional_title:
         lines.append(f"Professional title: {profile.professional_title}")
     # NOTE: experience_years is DELIBERATELY not rendered. The CV says
     # '20 years in regulated operations'; a bare 'Years of experience: 20'
@@ -62,7 +68,7 @@ def build_profile_context(profile: Profile) -> str:
     # hands the model '20 years of development' — the root cause of the
     # judge's competence-inflation findings (WO-01 review, 2026-08-28).
     # The full CV text is included in every prompt and states it truthfully.
-    if skill_names:
+    if include_derived and skill_names:
         lines.append(f"Skills: {', '.join(skill_names[:40])}")
     if profile.location:
         lines.append(f"Location: {profile.location}")

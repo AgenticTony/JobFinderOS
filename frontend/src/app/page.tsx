@@ -1375,9 +1375,11 @@ function ProfileView({
                   {profile.professional_title}
                 </span>
               )}
-              {profile.experience_years != null && (
-                <span className="num text-sm text-low">{profile.experience_years} yrs exp</span>
-              )}
+              {/* WO-01 review r5: the bare years badge is gone — a flat
+                  "20 yrs exp" under an aspirational title strips the CV's
+                  domain qualifier ("20 years in regulated operations"),
+                  the same flattening removed from the model's input. The
+                  CV text itself (shown below) states it truthfully. */}
             </div>
             {profile.ai_summary && <p className="mt-2 text-sm text-mid">{profile.ai_summary}</p>}
             {profile.skills.length > 0 && (

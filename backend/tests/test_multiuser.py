@@ -910,7 +910,48 @@ class TestGuardSourceAlignment:
     via the summary (preferred roles, location) — feeding a lossy
     summary, then flagging the model for using it."""
 
-    def test_profile_sourced_fact_is_not_flagged(self, client, db, monkeypatch):
+    def test_derived_skill_assertion_is_flagged_not_blessed(self, client, db, monkeypatch):
+        """r5: profile.skills is AI-DERIVED — 'REST API Design' absent from
+        the CV was silently blessed by the aligned source. Derived fields
+        must NOT be guard truth: assert one, and the banner shows it (the
+        user is the one positioned to correct a bad extraction)."""
+        from app.services import draft_service
+        from app.services.ai_service import AIService
+
+        email = f"derive-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik Lindberg. Skills: Python."
+        p.skills = '["Python", "Kubernetes"]'   # derived; not in the CV
+        db.commit()
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         description="A role.")
+        db.add(job); db.flush()
+        db.add(MatchResult(user_id=uid, job_id=job.id, score=61,
+                           tier="good_match", decision="approved"))
+        db.commit()
+        output = {"cover_letter": "I deploy Kubernetes clusters.",
+                  "tailored_cv": "Erik. Kubernetes.", "changes_summary": []}
+
+        def fake(self, profile_context, cv_text, job_description, correction=None):
+            return dict(output)
+
+        fake_svc = AIService.__new__(AIService); fake_svc.model = "glm-test"
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: fake_svc)
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "tailor_application", fake)
+        d = draft_service.create_draft_for_job(db, job, profile=p, user_id=uid)
+        import json as _json
+        findings = _json.loads(d.fabrication_findings or "[]")
+        assert any("kubernetes" in f["value"].lower() for f in findings), (
+            f"AI-derived skill blessed as truth: {findings} — extraction "
+            "fabrications must surface to the user, not hide in the source"
+        )
+
+    def test_user_entered_preference_is_not_flagged(self, client, db, monkeypatch):
         from app.services import draft_service
         from app.services.ai_service import AIService
 
@@ -919,7 +960,7 @@ class TestGuardSourceAlignment:
         _auth_client(client, email)
         p = db.query(Profile).filter(Profile.user_id == uid).first()
         p.cv_text = "Erik Lindberg. Skills: Python."   # Kubernetes NOT here
-        p.skills = '["Python", "Kubernetes"]'          # but the summary has it
+        p.preferred_roles = '["Kubernetes Developer"]'  # USER-entered target
         db.commit()
         job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
                          title="Dev", company="Acme",
@@ -951,7 +992,6 @@ class TestGuardSourceAlignment:
         assert d.status == "ready", d.error
         assert not any("kubernetes" in f["value"].lower()
                        for f in findings), (
-            f"facts sourced from the PROFILE summary flagged against the "
-            f"CV-only source: {findings} — the guard must verify against "
-            "the model's actual input"
+            f"a USER-ENTERED preference flagged: {findings} — the guard "
+            "must not flag target roles the user themselves asked for"
         )

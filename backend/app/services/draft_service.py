@@ -144,7 +144,8 @@ def create_draft_for_job(
             # it via the summary. After the lossy-years fix, the summary
             # is safe to include — aligning before that fix would have
             # laundered the bad summary into 'supported'.
-            model_input = (f"{profile.cv_text}\n{build_profile_context(profile)}")
+            model_input = (f"{profile.cv_text}\n"
+                           f"{build_profile_context(profile, include_derived=False)}")
             findings = unsupported_claims(
                 model_input,
                 f"{result.get('cover_letter', '')}\n{result.get('tailored_cv', '')}",
