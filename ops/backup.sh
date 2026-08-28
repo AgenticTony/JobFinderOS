@@ -1,5 +1,6 @@
 #!/bin/bash
-# Scheduled backup of backend/jobfinderos.db + backend/uploads/ (CV PDFs).
+# Scheduled backup of the database (Supabase pg_dump; sqlite3 .backup for
+# dev SQLite) + backend/uploads/ (CV PDFs).
 # Runs via launchd (com.jobfinderos.backup) at 04:30 daily.
 # Timestamped copies, rotated (30 days kept), stored off the working directory.
 
@@ -11,14 +12,6 @@ TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 KEEP_DAYS=30
 
 mkdir -p "$BACKUP_DIR/cvs" "$BACKUP_DIR/drafts"
-
-# --- SQLite database: use sqlite3 .backup (safe against concurrent writes) ---
-if [ -f "$PROJECT/backend/jobfinderos.db" ]; then
-    sqlite3 "$PROJECT/backend/jobfinderos.db" ".backup '$BACKUP_DIR/db-$TIMESTAMP.db'"
-    echo "$(date -Iseconds) db backed up: db-$TIMESTAMP.db ($(du -h "$BACKUP_DIR/db-$TIMESTAMP.db" | cut -f1))"
-else
-    echo "$(date -Iseconds) WARNING: no database at $PROJECT/backend/jobfinderos.db"
-fi
 
 # --- CV uploads: sync + absence-date-based retention ---
 # The retention window must be measured from when a file was FIRST DETECTED
@@ -103,34 +96,53 @@ fi
 # wrong database is discovered at restore time.)
 DATABASE_URL="${DATABASE_URL:-}"
 if [ -z "$DATABASE_URL" ]; then
-    DATABASE_URL=$(grep '^DATABASE_URL=' "$PROJECT/backend/.env" | head -1 | cut -d= -f2)
+    # f2- keeps everything after the FIRST '=' (sslmode params, passwords
+    # containing '='); sed strips the surrounding quotes a .env may carry.
+    # Review r3: `cut -d= -f2` truncated at the inner '=' and kept the
+    # opening quote — the quoted form fails the ^postgre grep and silently
+    # reverts to the SQLite branch (the exact r2 bug, restored by formatting).
+    DATABASE_URL=$(grep '^DATABASE_URL=' "$PROJECT/backend/.env" | head -1 | cut -d= -f2- \
+        | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
 fi
+
+# A database failure must NOT gate the off-site sync (review r3): the
+# off-site copy of the CV mirror is independent of the dump, and the
+# script's own comment below calls it "the only unrecoverable-risk
+# item". Record the failure, still sync off-site, exit non-zero at the
+# end — a bad dump costs the dump, not the whole run.
+DB_FAILED=0
 
 PG_DUMP=$(command -v pg_dump || echo /opt/homebrew/opt/libpq/bin/pg_dump)
 if [ -x "$PG_DUMP" ] && \
    echo "$DATABASE_URL" | grep -q "^postgre"; then
     STAMP=$(date +%Y%m%d-%H%M%S)
-    "$PG_DUMP" --no-owner --no-privileges --dbname "${DATABASE_URL/postgresql+psycopg/postgresql}" \
-        --file "$BACKUP_DIR/db-$STAMP.sql" 2>/dev/null
-    if [ $? -eq 0 ] && [ -s "$BACKUP_DIR/db-$STAMP.sql" ]; then
+    # pg_dump sits in the if-CONDITION: set -e would otherwise kill the
+    # script at this line on a crash — before the failure handler, and
+    # before the off-site block (the r3 finding was worse than reported).
+    if "$PG_DUMP" --no-owner --no-privileges --dbname "${DATABASE_URL/postgresql+psycopg/postgresql}" \
+        --file "$BACKUP_DIR/db-$STAMP.sql" 2>/dev/null && \
+       [ -s "$BACKUP_DIR/db-$STAMP.sql" ]; then
         echo "$(date -Iseconds) pg_dump OK: db-$STAMP.sql ($(du -h "$BACKUP_DIR/db-$STAMP.sql" | cut -f1))"
     else
-        echo "$(date -Iseconds) pg_dump FAILED (exit $? or empty file)" >&2
-        exit 1
+        echo "$(date -Iseconds) pg_dump FAILED (non-zero exit or empty file) — continuing to off-site sync" >&2
+        rm -f "$BACKUP_DIR/db-$STAMP.sql"  # never leave a fresh-stamped empty/half dump
+        DB_FAILED=1
     fi
-    # Retain the SQLite era's .db snapshots alongside; prune .sql by age below
     find "$BACKUP_DIR" -maxdepth 1 -name "db-*.sql" -mtime +$KEEP_DAYS -delete 2>/dev/null || true
 else
     # SQLite (dev / pre-migration): the .backup choreography
     NOW=$(date +%Y%m%d-%H%M%S)
-    sqlite3 "$PROJECT/backend/jobfinderos.db" ".backup '$BACKUP_DIR/db-$NOW.db'" \
-        && echo "$(date -Iseconds) sqlite backup OK: db-$NOW.db" \
-        || { echo "$(date -Iseconds) sqlite backup FAILED" >&2; exit 1; }
+    if sqlite3 "$PROJECT/backend/jobfinderos.db" ".backup '$BACKUP_DIR/db-$NOW.db'"; then
+        echo "$(date -Iseconds) sqlite backup OK: db-$NOW.db"
+    else
+        echo "$(date -Iseconds) sqlite backup FAILED — continuing to off-site sync" >&2
+        DB_FAILED=1
+    fi
 fi
 
 # --- Rotation: remove database backups older than KEEP_DAYS ---
 find "$BACKUP_DIR" -maxdepth 1 -name "db-*.db" -mtime +$KEEP_DAYS -delete 2>/dev/null || true
-DB_COUNT=$(find "$BACKUP_DIR" -maxdepth 1 -name "db-*.db" | wc -l | tr -d ' ')
+DB_COUNT=$(find "$BACKUP_DIR" -maxdepth 1 \( -name "db-*.sql" -o -name "db-*.db" \) | wc -l | tr -d ' ')
 echo "$(date -Iseconds) rotation complete: $DB_COUNT db backups retained (keeping $KEEP_DAYS days)"
 
 # --- MIG-WO0: OFF-SITE copy (the only unrecoverable-risk item) ---
@@ -176,4 +188,11 @@ if [ -n "$OFFSITE_BACKUP_TARGET" ]; then
     echo "$(date -Iseconds) off-site OK: $SRC_COUNT files at $OFFSITE_BACKUP_TARGET"
 else
     echo "$(date -Iseconds) WARNING: OFFSITE_BACKUP_TARGET not set — backups exist on ONE disk only (MIG-WO0 incomplete)" >&2
+fi
+
+# The database failure deferred from above (r3): the off-site sync has now
+# run regardless, so surface the failure to launchd only at the very end.
+if [ "$DB_FAILED" -ne 0 ]; then
+    echo "$(date -Iseconds) BACKUP INCOMPLETE: database dump failed (off-site sync ran; CV mirror is safe)" >&2
+    exit 1
 fi
