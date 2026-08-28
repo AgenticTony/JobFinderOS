@@ -21,10 +21,12 @@ services:
     name: jobfinderos-api
     runtime: docker
     rootDir: backend
-    # dockerfilePath/dockerContext resolve from the REPO ROOT regardless
-    # of rootDir (blueprint spec) — spell both out
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    # dockerfilePath/dockerContext resolve relative to ROOTDIR (observed on
+    # the first real deploy: repo-root paths made Render look for
+    # /src/backend/backend — the blueprint spec's "relative to the repo
+    # root" does not hold when rootDir is set)
+    dockerfilePath: ./Dockerfile
+    dockerContext: ./
     plan: free
     # Same side of the pond as Supabase eu-west-1 (Frankfurt) — keeps the
     # data path intra-EU (GDPR/WO-06 residency). If unavailable at
@@ -83,8 +85,8 @@ services:
     name: jobfinderos-hunt
     runtime: docker
     rootDir: backend
-    dockerfilePath: ./backend/Dockerfile.hunt
-    dockerContext: ./backend
+    dockerfilePath: ./Dockerfile.hunt
+    dockerContext: ./
     plan: 0.5c-512mb          # metered per-second, ~$1-2/mo at hourly hunts
     schedule: "0 * * * *"     # hourly, UTC (render.com/docs/cronjobs)
     envVars:

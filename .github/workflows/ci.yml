@@ -164,9 +164,11 @@ jobs:
           assert api["healthCheckPath"] == "/health"
           assert api["plan"] == "free"
           assert hunt["type"] == "cron" and hunt["schedule"] == "0 * * * *"
-          # dockerfilePath resolves from the REPO ROOT (blueprint spec) —
-          # a path that silently assumed rootDir would build the wrong image
-          assert hunt["dockerfilePath"] == "./backend/Dockerfile.hunt"
+          # docker paths resolve relative to ROOTDIR (observed on the first
+          # real Render deploy — repo-root paths produced /src/backend/backend)
+          assert api["rootDir"] == "backend"
+          assert api["dockerfilePath"] == "./Dockerfile"
+          assert hunt["dockerfilePath"] == "./Dockerfile.hunt"
           # No secret may carry a literal value (render.com/docs/blueprint-spec:
           # sync:false prompts at creation; generateValue makes one)
           for s in spec["services"]:
