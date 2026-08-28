@@ -145,7 +145,7 @@ jobs:
       - name: Build hunt image (WO-07 cron shape)
         run: docker build -f backend/Dockerfile.hunt -t jobfinderos-hunt:ci backend/
       - name: Hunt image smoke (--once CLI parses, exits clean)
-        run: docker run --rm --entrypoint python jobfinderos-hunt:ci -m app.services.worker --help
+        run: docker run --rm --entrypoint python -e DEBUG=true jobfinderos-hunt:ci -m app.services.worker --help
 
   blueprint:
     name: Render blueprint (render.yaml valid)
@@ -213,5 +213,7 @@ jobs:
         run: |
           test -f out/index.html
           test -f out/login.html
-          grep -q 'jobfinderos-api.onrender.com' out/index.html
-          echo "static export OK: out/ with baked API URL"
+          # NEXT_PUBLIC_* inlines into the CLIENT BUNDLE (chunks), not the
+          # HTML — assert the API URL actually reached the emitted JS
+          grep -rq 'jobfinderos-api.onrender.com' out/_next/static/
+          echo "static export OK: out/ with API URL inlined in the bundle"
