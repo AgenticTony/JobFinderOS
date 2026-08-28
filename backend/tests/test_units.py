@@ -2489,3 +2489,125 @@ class TestJobtechPlaceFilter:
         monkeypatch.setattr(jt.httpx, "get", fake_get)
         jt.JobtechScraper().fetch({"queries": ["dev"]})
         assert all("municipality" not in dict(p) for p in captured)
+
+
+class TestFuzzyDuplicateGate:
+    """The Pågen incident: the SAME job as an agency ad ('Integration
+    Developer till Pågen' via Cabeza rekrytering) AND a direct ad
+    ('Integration Developer' at PÅGEN AKTIEBOLAG). The exact dedupe key
+    differs in every component — title, company — so only a fuzzy gate
+    with an EMPLOYER LINK catches it without collapsing generic titles."""
+
+    def test_pagen_agency_vs_direct_is_duplicate(self):
+        from app.core.dedupe import likely_same_job
+        assert likely_same_job(
+            title_a="Integration Developer till Pågen",
+            company_a="Cabeza rekrytering och konsulting AB",
+            location_a="Malmö, Skåne län",
+            title_b="Integration Developer",
+            company_b="PÅGEN AKTIEBOLAG",
+            location_b="Malmö, Skåne län",
+        ) is True
+
+    def test_generic_titles_unrelated_companies_not_duplicate(self):
+        from app.core.dedupe import likely_same_job
+        assert likely_same_job(
+            title_a="Software Developer",
+            company_a="Knowit Aktiebolag",
+            location_a="Malmö, Skåne län",
+            title_b="Software Developer",
+            company_b="Edument AB",
+            location_b="Malmö, Skåne län",
+        ) is False
+
+    def test_seniority_variant_same_company_not_duplicate(self):
+        from app.core.dedupe import likely_same_job
+        assert likely_same_job(
+            title_a="Integration Developer",
+            company_a="PÅGEN AKTIEBOLAG",
+            location_a="Malmö, Skåne län",
+            title_b="Senior Integration Developer",
+            company_b="PÅGEN AKTIEBOLAG",
+            location_b="Malmö, Skåne län",
+        ) is False
+
+    def test_identical_title_and_company_is_duplicate(self):
+        from app.core.dedupe import likely_same_job
+        assert likely_same_job(
+            title_a="QA Engineer",
+            company_a="Axis Communications",
+            location_a="Lund, Skåne län",
+            title_b="QA Engineer",
+            company_b="Axis Communications AB",
+            location_b="Lund, Skåne län",
+        ) is True
+
+    def test_different_cities_not_duplicate(self):
+        from app.core.dedupe import likely_same_job
+        assert likely_same_job(
+            title_a="Integration Developer till Pågen",
+            company_a="Cabeza rekrytering AB",
+            location_a="Malmö, Skåne län",
+            title_b="Integration Developer",
+            company_b="PÅGEN AKTIEBOLAG",
+            location_b="Göteborg, Västra Götalands län",
+        ) is False
+
+
+class TestFuzzyDedupeWiring:
+    """The gate wired into the matcher: agency re-posts collapse against
+    both this batch and the user's existing undecided matches — and a
+    stored AGENCY copy is dismissed in favor of a NEWER direct ad."""
+
+    U1 = None
+
+    def _job(self, db, title, company, location="Malmö, Skåne län"):
+        import uuid as _uuid
+
+        from app.models import JobPosting
+        j = JobPosting(
+            source="jobtech", source_id=_uuid.uuid4().hex[:10], title=title,
+            company=company, location=location,
+            url=f"https://x/{_uuid.uuid4().hex[:8]}", status="new",
+        )
+        db.add(j)
+        db.commit()
+        return j
+
+    def test_batch_pair_collapses_agency_copy(self, db):
+        import uuid as _uuid
+
+        from app.services.matcher_service import _dismiss_fuzzy_duplicates
+        direct = self._job(db, "Integration Developer", "PÅGEN AKTIEBOLAG")
+        agency = self._job(db, "Integration Developer till Pågen",
+                           "Cabeza rekrytering och konsulting AB")
+        dropped = _dismiss_fuzzy_duplicates(db, _uuid.uuid4(), [direct, agency], "test")
+        assert [j.id for j in dropped] == [agency.id]
+
+    def test_stored_agency_copy_flipped_for_new_direct_ad(self, db):
+        import uuid as _uuid
+
+        from app.core.timeutil import utc_now
+        from app.models import MatchResult
+        from app.services.matcher_service import _dismiss_fuzzy_duplicates
+        stored_job = self._job(db, "Integration Developer till Pågen",
+                               "Cabeza rekrytering och konsulting AB")
+        m = MatchResult(user_id=_uuid.uuid4(), job_id=stored_job.id, score=53,
+                        tier="good_match", recommendation="apply",
+                        reasoning="r", decision=None)
+        m.created_at = utc_now()  # production rows are tz-aware (timeutil)
+        db.add(m)
+        db.commit()
+        fresh_direct = self._job(db, "Integration Developer", "PÅGEN AKTIEBOLAG")
+        dropped = _dismiss_fuzzy_duplicates(db, m.user_id, [fresh_direct], "test")
+        assert dropped == []  # the direct ad is KEPT
+        db.refresh(m)
+        assert m.dismissed_reason == "duplicate"  # stored agency copy flipped
+
+    def test_unrelated_generic_titles_pass_through(self, db):
+        import uuid as _uuid
+
+        from app.services.matcher_service import _dismiss_fuzzy_duplicates
+        a = self._job(db, "Software Developer", "Knowit Aktiebolag")
+        b = self._job(db, "Software Developer", "Edument AB")
+        assert _dismiss_fuzzy_duplicates(db, _uuid.uuid4(), [a, b], "test") == []

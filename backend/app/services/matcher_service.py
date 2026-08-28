@@ -241,6 +241,19 @@ def _run_matching_inner(
         logger.info("Dedupe gate: dismissed %d cross-board duplicates", len(deduped))
     unmatched = [j for j in unmatched if j not in deduped]
 
+    # Fuzzy second gate (the Pågen incident): the same job as an agency
+    # ad ('... till Pågen' via Cabeza) AND a direct ad (PÅGEN AKTIEBOLAG)
+    # differs in every exact component. High-precision pair rule from
+    # app.core.dedupe.likely_same_job — same municipality + >=0.6 title
+    # overlap (employer suffix stripped) + an employer link + no
+    # seniority split. The AGENCY copy is the one dismissed.
+    fuzzy_duped = _dismiss_fuzzy_duplicates(db, user_id, unmatched, service.model)
+    if fuzzy_duped:
+        db.commit()
+        logger.info("Fuzzy dedupe gate: dismissed %d agency/direct re-posts",
+                    len(fuzzy_duped))
+    unmatched = [j for j in unmatched if j not in fuzzy_duped]
+
     deadline = time.time() + max_seconds
     matches_created = 0
     try:
@@ -436,6 +449,96 @@ def _dismiss_for_user(db, user_id, job: JobPosting, reason: str, model: str) -> 
             prompt_version=AIService.matching_prompt_version(),
         )
     )
+
+
+_AGENCY_MARKERS = ("rekryter", "konsult", "staffing", "recruit", "bemanning")
+
+
+def _is_agency_posting(job) -> bool:
+    return any(m in (job.company or "").lower() for m in _AGENCY_MARKERS)
+
+
+def _dismiss_fuzzy_duplicates(db, user_id, unmatched, model: str):
+    """Pågen-pattern gate: collapse the same job posted directly AND via an
+    agency. Compares each candidate against (a) the user's undecided
+    matches from the last 14 days and (b) earlier candidates in this
+    batch; the AGENCY copy is dismissed; if both sides look direct (or
+    both agency), the LATER one (the candidate) is dismissed.
+    """
+    from datetime import timedelta
+
+    from app.core.dedupe import likely_same_job
+    from app.core.timeutil import utc_now
+
+    cutoff = utc_now() - timedelta(days=14)
+    existing = (
+        db.query(MatchResult, JobPosting)
+        .join(JobPosting, MatchResult.job_id == JobPosting.id)
+        .filter(
+            MatchResult.user_id == user_id,
+            MatchResult.decision.is_(None),
+            MatchResult.dismissed_reason.is_(None),
+            MatchResult.created_at >= cutoff,
+        )
+        .all()
+    )
+
+    def same(a, b) -> bool:
+        return likely_same_job(
+            title_a=a.title, company_a=a.company, location_a=a.location,
+            title_b=b.title, company_b=b.company, location_b=b.location,
+        )
+
+    dismissed = []
+    flipped = 0
+    kept_batch = []
+    for job in unmatched:
+        # against existing undecided matches
+        flip = None
+        drop = False
+        for match_row, other in existing:
+            if other.id == job.id:
+                continue
+            if same(job, other):
+                if _is_agency_posting(other) and not _is_agency_posting(job):
+                    # the stored copy is the agency re-post: dismiss IT,
+                    # keep this direct copy
+                    flip = match_row
+                else:
+                    drop = True
+                break
+        if flip is not None:
+            flip.dismissed_reason = "duplicate"
+            flip.decision = "rejected"
+            flip.reasoning = "Not shown: duplicate (agency re-post of a newer direct ad)."
+            flipped += 1
+            kept_batch.append(job)
+            continue
+        if drop:
+            _dismiss_for_user(db, user_id, job, "duplicate", model)
+            dismissed.append(job)
+            continue
+        # against earlier candidates in this batch
+        dupe_of = next((k for k in kept_batch if same(job, k)), None)
+        if dupe_of is not None:
+            if _is_agency_posting(job) and not _is_agency_posting(dupe_of):
+                _dismiss_for_user(db, user_id, job, "duplicate", model)
+                dismissed.append(job)
+            else:
+                _dismiss_for_user(db, user_id, dupe_of, "duplicate", model)
+                dismissed.append(dupe_of)
+                kept_batch = [k for k in kept_batch if k.id != dupe_of.id]
+                kept_batch.append(job)
+            continue
+        kept_batch.append(job)
+
+    # Commit OUR OWN changes (review catch): the caller commits only when
+    # new dismissals are returned, so a FLIP-ONLY outcome (stored agency
+    # copy dismissed for a newer direct ad, nothing new dropped) would
+    # never commit — the queue kept both copies.
+    if dismissed or flipped:
+        db.commit()
+    return dismissed
 
 
 def _job_text(job: JobPosting) -> str:
