@@ -24,6 +24,14 @@ Swedish corporate income tax on profit is separate and unaffected. The cost is
 administrative, not fiscal: two foreign registrations and two filing cadences
 before there is meaningful revenue.
 
+> **PRICING SUPERSEDED (2026-08-28).** Every €19 figure below is stale.
+> Pricing is now €24.99/month and €59.97 quarterly (€19.99/mo) with unused
+> months refunded on hire — see **WO-16-pricing-and-plans.md**, which owns
+> the price. This document owns only the TAX POSTURE and the MoR decision.
+> At €24.99 the Paddle fee is €1.71 (6.8%), ~€2.08 (8.3%) with FX; the
+> fixed 50¢ is 1.8% rather than 2.4%. The MoR conclusion is unchanged —
+> it rests on the UK zero-threshold rule, not on the price point.
+
 ## The decision
 
 **Use a Merchant of Record.** Paddle becomes the legal seller: we sell to
@@ -104,7 +112,8 @@ Chargebee **+ Stripe + accountant**, not against Paddle alone.
    for us than Sweden's 25%).
 2. **Flat €19 gross across markets**, rather than per-market pricing. Simpler,
    and the net variance is small enough not to matter at this scale.
-3. **Billing period — decide against the product's actual shape.** The fixed
+3. **Billing period — DECIDED in WO-16** (monthly + quarterly, no annual).
+   The original reasoning, kept because it drove the decision: The fixed
    50¢ is charged per transaction, so twelve monthly payments pay it twelve
    times (~€20.40/user/year) against an annual plan's single charge
    (~€10.00/user/year).
