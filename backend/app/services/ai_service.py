@@ -28,6 +28,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# WO-04: request-context for per-user cost attribution. The middleware
+# sets this per request; scheduler/worker calls leave it None (system).
+from contextvars import ContextVar
+
+current_user_id: ContextVar = ContextVar("current_user_id", default=None)
+
 # WO-05: verified per-token prices (docs.z.ai, 2026-08-27; re-verify
 # before signing anything — prices moved once already). (input, cached, output) USD/M.
 AI_PRICES_USD_PER_M = {
@@ -44,7 +50,7 @@ def compute_cost_usd(model: str, prompt: int, cached: int, completion: int) -> i
     return int(round(usd * 1_000_000))
 
 
-def record_ai_usage(kind: str, model: str, response) -> None:
+def record_ai_usage(kind: str, model: str, response) -> None:  # noqa: C901
     """Insert one ai_usage row on a short-lived session.
 
     Deliberately independent of caller sessions (works for matcher,
@@ -70,6 +76,7 @@ def record_ai_usage(kind: str, model: str, response) -> None:
         db = SessionLocal()
         try:
             db.add(AIUsage(
+                user_id=current_user_id.get(),
                 kind=kind, model=model, endpoint=endpoint,
                 request_id=getattr(response, "id", None),
                 prompt_tokens=prompt, cached_tokens=min(cached, prompt),

@@ -18,6 +18,7 @@ from sqlalchemy import text as sa_text
 
 from app import users
 from app.api import deps
+from app.api.deps import set_user_context_middleware
 from app.api.v1 import account, applications, jobs, matches, pipeline, profiles
 from app.api.v1 import settings as settings_api
 from app.core.config import settings
@@ -42,6 +43,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
     init_db()  # raises on failure — boot stops, deploy fails loudly
     logger.info("Database initialized successfully")
+    # WO-04: the scheduler runs in the WORKER process (python -m
+    # app.worker), never the API — two API replicas used to mean two
+    # racing hunt cycles (D3). ENABLE_SCHEDULER stays as the dev-mode
+    # single-process convenience (default false = production shape).
     start_scheduler()
     yield
     stop_scheduler()
@@ -97,6 +102,9 @@ app.include_router(
     prefix="/api/v1/users",
     tags=["Auth"],
 )
+
+
+app.middleware("http")(set_user_context_middleware)
 
 
 @app.get("/health", tags=["Ops"])

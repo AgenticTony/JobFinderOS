@@ -1201,3 +1201,75 @@ class TestJudgeWrongTypeFailsClosed:
             AIService, "_complete", staticmethod(
                 lambda s, u, temperature=0.0, kind=None: '{"unsupported": []}'))
         assert AIService.judge_fabrication(svc, "cv", "doc") == []
+
+
+class TestUserIdOnCostRows:
+    """WO-05's deferral, landed with WO-04: ai_usage rows carry the
+    CALLER's user_id via request-context — the trial budget's meter."""
+
+    def test_request_ai_calls_attributed_to_user(self, client, db, monkeypatch):
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        email = f"uid-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik. Python developer at Svenska Spel."
+        db.commit()
+
+        calls = {"n": 0}
+
+        class _U:
+            prompt_tokens = 100
+            completion_tokens = 20
+            model_dump = lambda self: {"prompt_tokens": 100,
+                                       "completion_tokens": 20}
+
+        class _R:
+            usage = _U()
+            id = "req_uid_test"
+            choices = [type("C", (), {"message": type("M", (), {
+                "content": '{"score": 80, "reasoning": "ok", '
+                '"recommendation": "apply", "confidence": "high", '
+                '"matched_skills": ["Python"], "missing_skills": [], '
+                '"transferable_skills": [], "cover_note": null}',
+                "reasoning_content": None})()})()]
+
+        def fake_complete(self, system_prompt, user_message,
+                          temperature=0.3, kind="unknown"):
+            from app.services.ai_service import record_ai_usage
+            record_ai_usage(kind, "glm-5.1", _R())
+            return _R().choices[0].message.content
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-5.1"
+        svc.max_tokens = 2000
+        svc.thinking = {"type": "disabled"}
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+        monkeypatch.setattr(AIService, "_complete", fake_complete)
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="new",
+                         description="A Python role with substance.")
+        db.add(job); db.commit()
+
+        from app.models import AIUsage
+        before = db.query(AIUsage).filter(AIUsage.user_id == uid).count()
+        r = client.post("/api/v1/matches/run?limit=5")
+        assert r.status_code == 200, r.text[:200]
+        import time as _t
+        _t.sleep(2)  # BackgroundTasks run after the response
+        from app.core.database import SessionLocal as _SL
+        _db = _SL()
+        try:
+            jobs = _db.query(JobPosting).filter(JobPosting.status == "matched").count()
+        finally:
+            _db.close()
+        assert jobs >= 1, "matching did not run via the route"
+        after = db.query(AIUsage).filter(AIUsage.user_id == uid).count()
+        assert after > before, (
+            f"ai_usage rows not attributed to the caller ({before}->{after}) — "
+            "trial budgets cannot meter per-user spend without user_id"
+        )

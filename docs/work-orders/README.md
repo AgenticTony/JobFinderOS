@@ -69,7 +69,11 @@ change). **WO-05 is DONE (2026-08-28)**: ai_usage cost rows on every AI call
 (cost + price-drift + residency audit in one table), Sentry gated and
 PII-scrubbed (F7), and MIG-WO0's off-site backup step verified locally
 (remaining human step: point OFFSITE_BACKUP_TARGET at the real target).
-Next: **WO-04 (worker split)**, then WO-03.
+**WO-04 is DONE (2026-08-28)**: worker entrypoint + portable claim
+lock (TTL-stealable, PK-collision-safe, always released), API
+replicas scheduler-free by default, user_id on ai_usage rows. Next:
+**WO-03 (Supabase migration — absorbs MIGRATION.md)**, then WO-07
+(deploy).
 
 **WO-11 and WO-12 are new P0s from the 2026-08-27 stack audit** and block the
 entire deploy path. They are cheap (WO-11 is a driver swap on a stack that

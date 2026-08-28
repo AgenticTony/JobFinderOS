@@ -100,13 +100,16 @@ def db(_client):
     session = SessionLocal()
     # Clean per-user data between tests (schema stays — Alembic owns it)
     from app.models import (
+        AIUsage,
         Application,
         ApplicationDraft,
         JobPosting,
         MatchResult,
         Profile,
+        SystemLock,
     )
-    for model in (Application, ApplicationDraft, MatchResult, Profile, JobPosting):
+    for model in (Application, ApplicationDraft, MatchResult, Profile,
+                  JobPosting, AIUsage, SystemLock):
         session.query(model).delete()
     session.commit()
     yield session
@@ -1972,4 +1975,122 @@ class TestScrubCollectionPoint:
         assert len(str(crumb["data"]["payload"])) < 2100, (
             f"breadcrumb data bypassed even the truncation cap: "
             f"{len(str(crumb['data']['payload']))} chars"
+        )
+
+
+class TestHuntClaimLock:
+    """WO-04 / D3: two processes running the scheduler must not
+    double-fire a hunt. DB claim lock — portable, stale-TTL stealable,
+    always released."""
+
+    def test_exactly_one_claimant_wins(self, db):
+        from app.services.worker import claim_hunt, release_hunt
+
+        assert claim_hunt(db) is True, "first claimant must win"
+        assert claim_hunt(db) is False, "second concurrent claimant must skip"
+        release_hunt(db)
+        assert claim_hunt(db) is True, "released claim is claimable again"
+
+    def test_stale_claim_is_stealable(self, db):
+        """A crashed holder self-heals: once the TTL passes, the claim
+        is stealable — the lock must never deadlock the hunt forever."""
+        import datetime
+
+        from app.core.timeutil import utc_now
+        from app.models import SystemLock
+
+        db.add(SystemLock(name="hunt", locked_until=utc_now() - datetime.timedelta(minutes=30)))
+        db.commit()
+        from app.services.worker import claim_hunt
+
+        assert claim_hunt(db) is True, "stale claim must be stealable"
+
+    def test_release_is_idempotent(self, db):
+        from app.services.worker import claim_hunt, release_hunt
+
+        claim_hunt(db)
+        release_hunt(db)
+        release_hunt(db)  # crashed-after-release path must not raise
+        assert claim_hunt(db) is True
+
+
+class TestWorkerEntrypoint:
+    """WO-04: the worker owns the hunt, claim-locked. The API lifespan
+    keeps ENABLE_SCHEDULER (default false = production shape: no
+    scheduler in API replicas; dev may opt into single-process)."""
+
+    def test_api_default_has_no_scheduler(self):
+        """The CLASS DEFAULT (an env override is legitimate local-dev
+        convenience; the shipped default is the production shape)."""
+        from app.core.config import Settings
+
+        assert Settings.model_fields["ENABLE_SCHEDULER"].default is False, (
+            "default must be false — an API replica with a live scheduler "
+            "is the D3 defect"
+        )
+
+    def test_worker_module_has_entrypoint(self):
+        from app.services import worker
+
+        assert callable(worker.main)
+        assert callable(worker.claim_hunt)
+        assert callable(worker.release_hunt)
+
+    def test_run_scheduled_hunt_releases_on_no_users(self, db):
+        """The claim is ALWAYS released — even the nothing-to-do path."""
+        from unittest.mock import patch
+
+        from app.services import worker
+
+        with patch.object(worker, "claim_hunt", return_value=True), \
+             patch.object(worker.SessionLocal, "__call__", side_effect=[db, db]):
+            summary = worker.run_scheduled_hunt()
+        assert summary["status"] == "ran"
+        # claim released: next claim succeeds
+        assert worker.claim_hunt(db) is True
+
+
+class TestClaimInsertRace:
+    """RC1 on the claim tests stayed green when the PK-collision guard
+    was removed — those tests never race. This one forces the collision
+    deterministically: a row inserted AFTER the query but BEFORE the
+    commit is exactly what two processes produce."""
+
+    def test_pk_collision_loses_cleanly(self, db):
+        from app.services import worker
+
+        # Simulate the race: claim_hunt queries (row absent), we sneak
+        # the row in behind its back, then its INSERT must lose cleanly
+        import datetime
+
+        from app.core.timeutil import utc_now
+        from app.models import SystemLock
+
+        original_query = db.query
+
+        class SneakyQuery:
+            def __init__(self, *a, **kw):
+                self._q = original_query(*a, **kw)
+
+            def filter(self, *a, **kw):
+                self._q = self._q.filter(*a, **kw)
+                return self
+
+            def first(self):
+                result = self._q.first()
+                if result is None:
+                    # the other process inserts HERE
+                    db.add(SystemLock(name="hunt", locked_until=utc_now()
+                                      + datetime.timedelta(minutes=45)))
+                    db.commit()
+                return result
+
+        db.query = SneakyQuery
+        try:
+            won = worker.claim_hunt(db)
+        finally:
+            db.query = original_query
+        assert won is False, (
+            "the losing inserter must return False, not raise — a PK "
+            "collision is another process winning the claim"
         )

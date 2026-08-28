@@ -298,7 +298,15 @@ The first live measurement found real fabrications in 4/5 tailored
 documents — the prompt-side fix is WO-02's, with the snapshots as
 evidence.
 
-**D3 — In-process scheduler blocks horizontal scaling.** WO-04.
+**D3 — In-process scheduler blocks horizontal scaling — FIXED 2026-08-28 (WO-04).**
+Dedicated worker entrypoint (`python -m app.services.worker`) owns the hunt; the
+API lifespan keeps ENABLE_SCHEDULER whose shipped default is false, so
+API replicas never schedule. Every scheduled cycle claims a portable
+DB lock (`system_locks` row, TTL-stealable, always released) — even a
+double-started worker skips harmlessly. Deploy shape (Render): web
+service = uvicorn, worker service = `python -m app.services.worker`.
+Also landed: user_id on every ai_usage row (request-context contextvar)
+— per-user cost attribution for trial budgets.
 
 **D4 — No observability, no off-site backups, never deployed.** WO-05, WO-07.
 
