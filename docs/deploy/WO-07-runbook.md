@@ -71,21 +71,23 @@ services and persists across deploys.
 3. Apply. The API must pass `/health` (DB connectivity) before traffic
    routes; a failed check fails the deploy (render.com/docs/health-checks).
 
-## Step 3 — Cloudflare Pages
+## Step 3 — Cloudflare Pages — ✅ DONE (2026-08-28, via wrangler)
 
-1. Cloudflare dashboard → **Workers & Pages → Create → Pages → Import an
-   existing Git repository** → pick the repo, production branch `main`.
-2. Build settings (official static-export preset):
-   - Framework preset: **Next.js (Static HTML Export)**
-   - Build command: `npx next build`
-   - Build output directory: `out`
-   - Root directory (advanced): `frontend`
-3. Environment variables (Settings → Variables):
-   - `NEXT_PUBLIC_API_URL` = `https://jobfinderos-api.onrender.com`
-   - `NODE_VERSION` = `20`
-4. Save & Deploy. Note the project URL (`https://<project>.pages.dev`).
-   If it differs from `jobfinderos.pages.dev`, update `CORS_ORIGINS` on the
-   Render API (dashboard → Environment) to match.
+Deployed by direct upload (not Git integration): wrangler OAuth login →
+`wrangler pages project create jobfinderos` → static build with
+`NEXT_PUBLIC_API_URL=https://jobfinderos-api.onrender.com` →
+`wrangler pages deploy out`. Live at **https://jobfinderos.pages.dev**
+(200 verified, API URL confirmed inlined in the served bundle).
+
+Because the project is direct-upload, pushes do NOT auto-deploy —
+redeploy frontend changes with:
+
+```sh
+bash ops/deploy_frontend.sh
+```
+
+(Switching to Git integration later would mean recreating the project
+in the dashboard; not needed while deploys are this cheap.)
 
 ## Step 4 — post-deploy verification
 

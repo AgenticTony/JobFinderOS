@@ -66,12 +66,19 @@ echo "== Frontend: $FRONTEND =="
 fcode=$(curl -s -m 30 -o /dev/null -w "%{http_code}" -L "$FRONTEND" || true)
 if [ "$fcode" = "200" ]; then
     ok "site serves 200"
-    bundle=$(curl -s -m 30 -L "$FRONTEND" | grep -o '/_next/static/chunks/[^"]*\.js' | head -1 || true)
-    if [ -n "$bundle" ] && curl -s -m 30 "$FRONTEND$bundle" | grep -q "$(echo "$API" | sed 's|https://||')"; then
+    # scan EVERY chunk referenced by the page — the API URL lives in
+    # whichever chunk compiled src/lib/api.ts, not necessarily the first
+    found=0
+    for c in $(curl -s -m 30 -L "$FRONTEND" | grep -o '/_next/static/chunks/[^"]*\.js' | sort -u); do
+        if curl -s -m 30 "$FRONTEND$c" | grep -q "$(echo "$API" | sed 's|https://||')"; then
+            found=1; break
+        fi
+    done
+    if [ "$found" = "1" ]; then
         ok "API URL inlined in the client bundle"
     else
-        bad "API URL not found in bundle ($bundle)"
-        echo "  -> fix: CF Pages env NEXT_PUBLIC_API_URL=$API, then redeploy."
+        bad "API URL not found in any chunk"
+        echo "  -> fix: rebuild with NEXT_PUBLIC_API_URL=$API and redeploy (ops/deploy_frontend.sh)."
     fi
 else
     bad "site (code=$fcode)"
