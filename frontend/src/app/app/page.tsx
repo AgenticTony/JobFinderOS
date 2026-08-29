@@ -88,11 +88,11 @@ export default function Home() {
   useEffect(() => {
     setRailCollapsed(localStorage.getItem('jfos-rail-collapsed') === '1');
   }, []);
-  // No token -> no session: land on /login instead of firing a wall of
-  // 401s. The api.ts interceptor only handles EXPIRY of a token that
-  // exists — it can't help a visitor who never logged in.
+  // No token -> no session and never signed in here: straight to the
+  // create-account form. Expired tokens still land on plain /login via
+  // the 401 interceptor in api.ts.
   useEffect(() => {
-    if (!getAuthToken()) window.location.href = '/login';
+    if (!getAuthToken()) window.location.href = '/login?mode=register';
   }, []);
   const toggleRail = () =>
     setRailCollapsed((c) => {

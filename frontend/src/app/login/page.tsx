@@ -5,7 +5,7 @@
 // request and redirects here on 401. The create-account mode posts to the
 // fastapi-users register endpoint, then signs straight in.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Radar, Loader2 } from 'lucide-react';
 import { api, apiErrorMessage, setAuthToken } from '@/lib/api';
@@ -17,6 +17,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // /login?mode=register — every "Get started" entry point lands new
+  // users on the create-account form, not a sign-in wall.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('mode') === 'register') {
+      setMode('register');
+    }
+  }, []);
 
   const signIn = async (username: string, pwd: string) => {
     const body = new URLSearchParams({ username, password: pwd });

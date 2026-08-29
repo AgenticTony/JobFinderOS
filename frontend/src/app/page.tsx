@@ -81,12 +81,20 @@ export default function LandingPage() {
               Fact guard
             </a>
           </nav>
-          <Link
-            href="/login"
-            className="rounded-full border border-paper/20 px-4 py-1.5 text-sm font-medium text-paper transition hover:border-paper/50 active:scale-[0.97]"
-          >
-            Sign in
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/login"
+              className="hidden text-sm font-medium text-paper/60 transition hover:text-paper sm:block"
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/login?mode=register"
+              className="rounded-full bg-signal px-4 py-1.5 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.97]"
+            >
+              Get started
+            </Link>
+          </div>
         </div>
         <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
       </header>
