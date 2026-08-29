@@ -6,7 +6,8 @@ import { Check, X } from 'lucide-react';
 const rows = [
   { ok: true, claim: 'Five years of bakery production', note: 'In your CV' },
   { ok: true, claim: 'Food-safety certificate', note: 'In your CV' },
-  { ok: false, claim: 'Managed a team of twelve', note: 'Not in your CV. Removed.' },
+  // The canonical AI fabrication: a credential that was never pursued.
+  { ok: false, claim: 'PMP certification', note: 'Not in your CV. Removed.' },
 ];
 
 export default function GuardReceipt() {

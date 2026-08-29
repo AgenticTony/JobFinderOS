@@ -183,6 +183,28 @@ export default function LandingPage() {
             </div>
           </div>
 
+          {/* The anti-volume argument: the market data, inverted. */}
+          <div className="border-t border-paper-line">
+            <div className="mx-auto max-w-6xl px-6 py-24 sm:py-28">
+              <Reveal>
+                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em]">
+                  Volume is not a strategy.
+                </h2>
+                <p className="mt-5 max-w-2xl text-lg leading-relaxed text-ink/65">
+                  The mass-apply era made recruiters numb: two thirds of hiring
+                  managers say AI-written CVs make your skills harder to
+                  verify. More applications, less signal. We send fewer
+                  matches, and we tell you when a job is not worth applying
+                  for.
+                </p>
+                <p className="num mt-8 text-xs uppercase tracking-[0.14em] text-ink/45">
+                  65% of hiring managers say AI-optimized CVs make skills
+                  harder to verify. Forbes, March 2026.
+                </p>
+              </Reveal>
+            </div>
+          </div>
+
           {/* Sources: momentum gallery, snap-aligned. */}
           <div id="sources" className="scroll-mt-24 border-t border-paper-line bg-paper-deep">
             <div className="mx-auto max-w-6xl px-6 py-24">
@@ -216,7 +238,8 @@ export default function LandingPage() {
               </Reveal>
               <Reveal delay={150}>
                 <p className="num mt-10 text-xs uppercase tracking-[0.14em] text-ink/45">
-                  Public APIs only. No logins, no grey scraping.
+                  Public APIs only. No logins, no grey scraping. Your data
+                  stays in the EU.
                 </p>
               </Reveal>
             </div>
@@ -235,12 +258,42 @@ export default function LandingPage() {
                   Ever.
                 </h2>
                 <p className="mt-5 max-w-md text-lg leading-relaxed text-paper/60">
-                  Every draft is checked line by line against your CV. If a
-                  claim is not in your history, it does not ship.
+                  Every claim in your tailored CV is checked against your real
+                  CV before it&apos;s sent. If a claim is not in your history,
+                  it does not ship.
                 </p>
               </Reveal>
               <Reveal delay={120}>
                 <GuardReceipt />
+              </Reveal>
+            </div>
+          </div>
+
+          {/* Billing complaints, inverted into terms. In beta there is no
+              billing at all; the status line keeps that honest. */}
+          <div className="border-t border-line">
+            <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 lg:grid-cols-2 lg:gap-20">
+              <Reveal>
+                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
+                  No credits.
+                  <br />
+                  No surprises.
+                </h2>
+                <p className="num mt-6 max-w-xs text-xs uppercase leading-relaxed tracking-[0.14em] text-paper/45">
+                  In beta it is free. Whenever we charge, these are the terms.
+                </p>
+              </Reveal>
+              <Reveal delay={120}>
+                <ul className="divide-y divide-line text-[17px] leading-relaxed text-paper/80">
+                  <li className="py-4">
+                    No credits and no surprise charges. The price is the price.
+                  </li>
+                  <li className="py-4">The trial never auto-renews.</li>
+                  <li className="py-4">Cancel in one click.</li>
+                  <li className="py-4">
+                    Get hired, and we refund the months you have not used.
+                  </li>
+                </ul>
               </Reveal>
             </div>
           </div>
