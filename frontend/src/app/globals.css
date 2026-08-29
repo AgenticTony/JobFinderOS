@@ -99,7 +99,8 @@ body {
 
 /* ---- Landing page ---- */
 
-/* Radar sweep: one slow amber rotation, the hunt made visible. */
+/* Radar sweep: one slow amber rotation, the hunt made visible.
+   16s per cycle sits well below the ~0.2 Hz vestibular threshold. */
 @keyframes radar-sweep {
   to {
     transform: rotate(1turn);
@@ -131,4 +132,12 @@ body {
 }
 .landing-rise-3 {
   animation-delay: 0.26s;
+}
+
+/* Horizontal snap gallery: momentum without chrome. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
