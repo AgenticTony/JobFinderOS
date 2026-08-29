@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 const steps = [
   {
     title: 'Upload once',
-    body: 'Your CV, your municipalities, your minimum score. Malmö and Lund, or all of Skåne.',
+    body: 'Your CV, your cities and regions, your minimum score. One city, or a whole region.',
   },
   {
     title: 'The hunt runs twice a day',
@@ -48,7 +48,7 @@ const sources = [
   },
   {
     tag: 'Precision',
-    title: 'Your municipalities.',
+    title: 'Your cities and regions.',
     body: 'Scoped by official region codes, not fuzzy text matching. Your commute, your rules.',
   },
 ];
