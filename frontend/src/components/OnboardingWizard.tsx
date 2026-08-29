@@ -277,7 +277,7 @@ export default function OnboardingWizard({
                         <span className="text-3xl" aria-hidden>{c.flag}</span>
                         <p className="mt-2 font-medium text-hi">{c.name}</p>
                         <p className="text-xs text-low">
-                          {c.code === 'SE' ? 'Platsbanken + remote boards' : 'Reed + Adzuna + remote boards'}
+                          {c.code === 'SE' ? 'Platsbanken — every public listing' : 'Reed.co.uk — every sector'}
                         </p>
                       </button>
                     ))}

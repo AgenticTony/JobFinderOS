@@ -1,16 +1,15 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowDown, ChevronDown, Radar, ShieldCheck } from 'lucide-react';
-import CockpitPreview from '@/components/landing/CockpitPreview';
 import GuardReceipt from '@/components/landing/GuardReceipt';
 import RadarScope from '@/components/landing/RadarScope';
 import Reveal from '@/components/landing/Reveal';
 
-// The landing as three cinematic acts, not a section conveyor:
-//   I. Ink opening: the statement, and the hunt as a giant cropped scope.
-//  II. Daylight: the product held still (sticky card + pipeline), then
-//      the sources gallery, snap-scrolling with momentum.
-// III. Ink close: the fact guard receipt, and one way in.
+// The landing as three cinematic acts on one material — the console's ink.
+//   I. The statement, and the hunt as a giant cropped scope.
+//  II. The product, held still: the real hunt pulse beside the pipeline,
+//      the real verdict wide, then the sources gallery.
+// III. The fact guard receipt, the terms, and one way in.
 // Amber appears only on ink. Display type is weight 600, tracking
 // tightens as it grows. Motion is critically damped and dies under
 // prefers-reduced-motion.
@@ -18,7 +17,7 @@ import Reveal from '@/components/landing/Reveal';
 export const metadata: Metadata = {
   title: 'JobFinderOS · Stop refreshing job boards',
   description:
-    'Twice-daily hunts across Platsbanken and Reed, every ad scored against your CV. Applications you approve, drafts that never invent facts.',
+    "Sweden's and the UK's job markets, hunted twice daily and scored against your CV. Applications you approve, drafts that never invent facts.",
 };
 
 const steps = [
@@ -38,19 +37,19 @@ const steps = [
 
 const sources = [
   {
-    tag: 'Sweden · JobTech API',
-    title: 'Platsbanken, all of it.',
-    body: 'Every public job in Sweden, through the official JobTech API.',
+    tag: 'Sweden',
+    title: 'The whole national feed.',
+    body: 'Every public listing in the country, straight from the official source. If it is posted, it is hunted.',
   },
   {
-    tag: 'United Kingdom · Reed API',
-    title: 'Reed.co.uk',
-    body: 'The UK job market, every sector, every day, scored by the same engine.',
+    tag: 'United Kingdom',
+    title: 'Every sector, daily.',
+    body: 'One of the largest job feeds on the market, scored by the same engine as the Swedish hunt.',
   },
   {
-    tag: 'Scope · taxonomy precise',
-    title: 'Your municipalities',
-    body: 'Filtered with JobTech taxonomy codes, not fuzzy text matching.',
+    tag: 'Precision',
+    title: 'Your municipalities.',
+    body: 'Scoped by official region codes, not fuzzy text matching. Your commute, your rules.',
   },
 ];
 
@@ -109,8 +108,8 @@ export default function LandingPage() {
               Stop refreshing <em className="italic">job boards.</em>
             </h1>
             <p className="landing-rise landing-rise-2 mx-auto mt-6 max-w-md text-lg leading-relaxed text-paper/60">
-              Platsbanken and Reed, hunted twice daily and scored against your
-              CV.
+              Sweden&apos;s and the UK&apos;s job markets, hunted twice daily
+              and scored against your CV.
             </p>
             <div className="landing-rise landing-rise-3 mt-9 flex flex-wrap items-center justify-center gap-x-7 gap-y-4">
               <Link
@@ -140,22 +139,34 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ── ACT II · daylight: the product, held still ──────────── */}
-        <section id="how" className="relative z-10 -mt-8 scroll-mt-24 rounded-t-[2.5rem] bg-paper text-ink shadow-[0_-24px_60px_-24px_rgba(12,14,18,0.45)]">
+        {/* ── ACT II · the product, held still ────────────────────── */}
+        <section
+          id="how"
+          className="relative z-10 -mt-8 scroll-mt-24 rounded-t-[2.5rem] border-t border-line bg-surface shadow-[0_-24px_60px_-24px_rgba(0,0,0,0.6)]"
+        >
           <div className="mx-auto max-w-6xl px-6 pb-28 pt-24 sm:pt-28">
-            <div className="grid gap-16 lg:grid-cols-[0.95fr_1.05fr] lg:gap-20">
+            <div className="grid gap-16 lg:grid-cols-[0.9fr_1.1fr] lg:gap-20">
               <div className="lg:sticky lg:top-28 lg:self-start">
                 <Reveal>
-                  <CockpitPreview />
-                  <p className="num mt-4 text-[10px] uppercase tracking-[0.16em] text-ink/40">
-                    A real match, as it lands in the console
+                  <figure className="overflow-hidden rounded-2xl border border-line shadow-[0_24px_60px_-24px_rgba(0,0,0,0.7)]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src="/screenshots/hunt-pulse.png"
+                      alt="The hunt pulse: this morning's ads, funnelled from hunted to matched, each scored against your CV"
+                      className="block w-full"
+                      width={786}
+                      height={1226}
+                    />
+                  </figure>
+                  <p className="num mt-3 text-[10px] uppercase tracking-[0.16em] text-paper/50">
+                    The hunt pulse, as it lands after a run
                   </p>
                 </Reveal>
               </div>
 
               <div>
                 <Reveal>
-                  <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em]">
+                  <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
                     It hunts while
                     <br />
                     you do anything else.
@@ -164,15 +175,15 @@ export default function LandingPage() {
                 <ol className="mt-12">
                   {steps.map((step, i) => (
                     <Reveal key={step.title} delay={i * 90}>
-                      <li className="grid gap-2.5 border-t border-paper-line py-7 sm:grid-cols-[4.5rem_1fr] sm:gap-8">
-                        <p className="num pt-1.5 text-sm text-ink/35">
+                      <li className="grid gap-2.5 border-t border-line py-7 sm:grid-cols-[4.5rem_1fr] sm:gap-8">
+                        <p className="num pt-1.5 text-sm text-paper/35">
                           {String(i + 1).padStart(2, '0')}
                         </p>
                         <div>
-                          <h3 className="font-display text-xl font-semibold tracking-tight">
+                          <h3 className="font-display text-xl font-semibold tracking-tight text-paper">
                             {step.title}
                           </h3>
-                          <p className="mt-2 max-w-md leading-relaxed text-ink/65">
+                          <p className="mt-2 max-w-md leading-relaxed text-paper/70">
                             {step.body}
                           </p>
                         </div>
@@ -184,21 +195,52 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* The anti-volume argument: the market data, inverted. */}
-          <div className="border-t border-paper-line">
+          {/* The verdict, wide: what you have, what's missing, what transfers. */}
+          <div className="border-t border-line">
             <div className="mx-auto max-w-6xl px-6 py-24 sm:py-28">
               <Reveal>
-                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em]">
+                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
+                  Every match explains itself.
+                </h2>
+                <p className="mt-5 max-w-2xl text-lg leading-relaxed text-paper/70">
+                  Not a black-box score. Each verdict shows the skills you
+                  have, the gaps the ad demands, and what transfers — so you
+                  apply to the right jobs, and skip the rest on purpose.
+                </p>
+              </Reveal>
+              <Reveal delay={120}>
+                <figure className="mt-12 overflow-hidden rounded-2xl border border-line shadow-[0_24px_60px_-24px_rgba(0,0,0,0.7)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/screenshots/match-detail.png"
+                    alt="A match verdict: the job, its score, and three columns — what you have, what they want, what transfers"
+                    className="block w-full"
+                    width={776}
+                    height={402}
+                  />
+                </figure>
+                <p className="num mt-4 text-[10px] uppercase tracking-[0.16em] text-paper/40">
+                  A real verdict, unedited
+                </p>
+              </Reveal>
+            </div>
+          </div>
+
+          {/* The anti-volume argument: the market data, inverted. */}
+          <div className="border-t border-line">
+            <div className="mx-auto max-w-6xl px-6 py-24 sm:py-28">
+              <Reveal>
+                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
                   Volume is not a strategy.
                 </h2>
-                <p className="mt-5 max-w-2xl text-lg leading-relaxed text-ink/65">
+                <p className="mt-5 max-w-2xl text-lg leading-relaxed text-paper/70">
                   The mass-apply era made recruiters numb: two thirds of hiring
                   managers say AI-written CVs make your skills harder to
                   verify. More applications, less signal. We send fewer
                   matches, and we tell you when a job is not worth applying
                   for.
                 </p>
-                <p className="num mt-8 text-xs uppercase tracking-[0.14em] text-ink/45">
+                <p className="num mt-8 text-xs uppercase tracking-[0.14em] text-paper/45">
                   65% of hiring managers say AI-optimized CVs make skills
                   harder to verify. Forbes, March 2026.
                 </p>
@@ -206,11 +248,12 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Sources: momentum gallery, snap-aligned. */}
-          <div id="sources" className="scroll-mt-24 border-t border-paper-line bg-paper-deep">
+          {/* Sources: momentum gallery, snap-aligned. Named sites stay out
+              of the copy; the framing is coverage and precision instead. */}
+          <div id="sources" className="scroll-mt-24 border-t border-line bg-surface-2/50">
             <div className="mx-auto max-w-6xl px-6 py-24">
               <Reveal>
-                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em]">
+                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
                   Where we hunt.
                 </h2>
               </Reveal>
@@ -224,23 +267,23 @@ export default function LandingPage() {
                   {sources.map((s) => (
                     <div
                       key={s.title}
-                      className="min-w-[85%] snap-start rounded-2xl border border-paper-line bg-paper p-8 sm:min-w-[340px]"
+                      className="min-w-[85%] snap-start rounded-2xl border border-line bg-surface p-8 sm:min-w-[340px]"
                     >
-                      <p className="num text-[10px] uppercase tracking-[0.16em] text-ink/45">
+                      <p className="num text-[10px] uppercase tracking-[0.16em] text-paper/45">
                         {s.tag}
                       </p>
-                      <h3 className="mt-4 font-display text-2xl font-semibold tracking-tight">
+                      <h3 className="mt-4 font-display text-2xl font-semibold tracking-tight text-paper">
                         {s.title}
                       </h3>
-                      <p className="mt-3 text-sm leading-relaxed text-ink/60">{s.body}</p>
+                      <p className="mt-3 text-sm leading-relaxed text-paper/60">{s.body}</p>
                     </div>
                   ))}
                 </div>
               </Reveal>
               <Reveal delay={150}>
-                <p className="num mt-10 text-xs uppercase tracking-[0.14em] text-ink/45">
-                  Public APIs only. No logins, no grey scraping. Your data
-                  stays in the EU.
+                <p className="num mt-10 text-xs uppercase tracking-[0.14em] text-paper/45">
+                  Official public data only. No logins, no grey scraping. Your
+                  data stays in the EU.
                 </p>
               </Reveal>
             </div>
@@ -248,7 +291,10 @@ export default function LandingPage() {
         </section>
 
         {/* ── ACT III · ink close: the guard, and one way in ──────── */}
-        <section id="guard" className="scroll-mt-24 bg-ink">
+        <section
+          id="guard"
+          className="relative z-10 -mt-8 scroll-mt-24 rounded-t-[2.5rem] border-t border-line bg-ink shadow-[0_-24px_60px_-24px_rgba(0,0,0,0.6)]"
+        >
           <div className="mx-auto max-w-6xl px-6 py-28">
             <div className="grid items-center gap-14 lg:grid-cols-2 lg:gap-20">
               <Reveal>
@@ -328,7 +374,7 @@ export default function LandingPage() {
             JobFinderOS
           </p>
           <p className="num text-[10px] uppercase tracking-[0.16em] text-paper/40">
-            Data: JobTech (Platsbanken) · Reed.co.uk
+            Official job-market data · EU hosted
           </p>
           <p className="num text-[10px] uppercase tracking-[0.16em] text-paper/40">
             Made in Malmö
