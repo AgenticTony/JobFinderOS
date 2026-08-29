@@ -4,11 +4,12 @@
 # Cost floor (user constraint: cheapest credible production):
 #   - API: the ONLY always-on process, on a free instance (512MB, spins
 #     down after 15 min idle, ~1 min cold start — acceptable pre-revenue).
-#   - Hunts: an hourly CRON JOB, not a 24/7 worker. Cron runs are billed
-#     per second of ACTIVE runtime ($1/mo minimum; 0.5c-512mb ≈
-#     $0.00016/min) — hourly ~10-min hunts ≈ $1-2/mo vs $7/mo for a
-#     24/7 worker. worker --once (Dockerfile.hunt) claims the DB hunt
-#     lock, runs one cycle, exits.
+#   - Hunts: a twice-daily CRON JOB (06:00 + 18:00 UTC), not a 24/7
+#     worker. Cron runs are billed per second of ACTIVE runtime
+#     ($1/mo minimum; 0.5c-512mb ≈ $0.00016/min) — two ~10-min hunts a
+#     day sit inside the minimum vs $7/mo for a 24/7 worker.
+#     worker --once (Dockerfile.hunt) claims the DB hunt lock, runs one
+#     cycle, exits.
 #   - Postgres: Supabase (WO-03), not a Render database.
 #   - Frontend: Cloudflare Pages (static export, free) — separate deploy,
 #     see docs/deploy/WO-07-runbook.md.
@@ -79,6 +80,11 @@ services:
       # replicas must never race the scheduler; default false anyway)
       - key: ENABLE_SCHEDULER
         value: "false"
+      # The cron service's hunt times (below) — /api/v1/pipeline/status
+      # uses them to power the dashboard's next-hunt countdown when the
+      # in-process scheduler is off. Keep in sync with the cron schedule.
+      - key: HUNT_TIMES_UTC
+        value: "06:00,18:00"
 
   # ── Hunt cron (one-shot) ─────────────────────────────────────────
   - type: cron
@@ -87,8 +93,10 @@ services:
     rootDir: backend
     dockerfilePath: ./Dockerfile.hunt
     dockerContext: ./
-    plan: 0.5c-512mb          # metered per-second, ~$1-2/mo at hourly hunts
-    schedule: "0 * * * *"     # hourly, UTC (render.com/docs/cronjobs)
+    plan: 0.5c-512mb          # metered per-second; two short runs/day ≈ the
+                              # $1/mo minimum
+    schedule: "0 6,18 * * *"  # twice daily, UTC (render.com/docs/cronjobs);
+                              # keep HUNT_TIMES_UTC on the API in sync
     # EU residency (WO-06 posture): the hunt pulls user CV/profile data
     # from Supabase into memory while matching — it must NOT run in a US
     # region. Region is immutable after creation: recreating the service

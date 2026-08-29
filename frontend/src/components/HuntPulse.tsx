@@ -84,7 +84,7 @@ function PulseSchedule({
     Date.now() - parseUtcDate(lastHuntAt).getTime() > intervalMinutes * 60_000 * 1.5;
 
   if (!schedulerEnabled) {
-    return <p className="text-xs text-low">Automatic hunts off</p>;
+    return <p className="text-xs text-low">Manual hunts only</p>;
   }
 
   return (

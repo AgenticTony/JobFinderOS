@@ -74,14 +74,22 @@ async def status(
 ):
     """Dashboard readiness: source list, stats, recent scrape runs, live match flag."""
     from app.services.matcher_service import is_matching_running
-    from app.services.scheduler import get_next_run_time
+    from app.services.scheduler import get_next_run_time, next_run_from_fixed_times
 
     next_run = get_next_run_time()
+    # In production the in-process scheduler is off (ENABLE_SCHEDULER=false
+    # in render.yaml) and hunts run via the EXTERNAL cron. HUNT_TIMES_UTC
+    # describes that cron so the dashboard counts down to something true
+    # instead of reporting "automatic hunts off".
+    hunts_automated = settings.ENABLE_SCHEDULER
+    if next_run is None and settings.HUNT_TIMES_UTC:
+        next_run = next_run_from_fixed_times(settings.HUNT_TIMES_UTC)
+        hunts_automated = next_run is not None
     runs = list_scrape_runs(db, limit=12)
     return {
         "sources_available": sorted(SCRAPER_REGISTRY.keys()),
         "sources_enabled": settings.get_scrape_sources(),
-        "scheduler_enabled": settings.ENABLE_SCHEDULER,
+        "scheduler_enabled": hunts_automated,
         "scrape_interval_minutes": settings.SCRAPE_INTERVAL_MINUTES,
         "next_run_at": next_run.isoformat() if next_run else None,
         "matching_running": is_matching_running(),

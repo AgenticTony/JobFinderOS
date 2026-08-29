@@ -76,7 +76,7 @@ export default function NextHunt({
     return (
       <p className="mt-1 flex items-center gap-2 text-xs text-mid">
         <span className="h-2 w-2 rounded-full bg-line-2" aria-hidden />
-        Automatic hunts off
+        Manual hunts only
       </p>
     );
   }

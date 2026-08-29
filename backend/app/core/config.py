@@ -122,6 +122,11 @@ class Settings(BaseSettings):
 
     ENABLE_SCHEDULER: bool = False
     SCRAPE_INTERVAL_MINUTES: int = 60
+    # The EXTERNAL cron's hunt times (UTC, comma list "HH:MM") — set when
+    # hunts run via the render.yaml cron job instead of the dev scheduler.
+    # /api/v1/pipeline/status uses it to report an honest next-run time;
+    # empty = cadence unknown (dashboard shows "manual hunts only").
+    HUNT_TIMES_UTC: str = ""
 
     # CORS
     # Explicit origins ONLY. With allow_credentials=True a wildcard origin is

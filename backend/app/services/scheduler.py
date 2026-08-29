@@ -6,6 +6,7 @@ Disabled by default; the pipeline can always be triggered via the API.
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -53,6 +54,33 @@ def get_next_run_time():
         return None
     job = _scheduler.get_job("jobfinder_pipeline")
     return job.next_run_time if job else None
+
+
+def next_run_from_fixed_times(times_csv: str) -> datetime | None:
+    """Next occurrence of fixed daily UTC times ("HH:MM,HH:MM").
+
+    Describes the EXTERNAL cron (render.yaml) when the in-process
+    scheduler is off — the dashboard countdown needs a next-run
+    timestamp the APScheduler cannot provide there.
+    """
+    times: list[tuple[int, int]] = []
+    for part in times_csv.split(","):
+        try:
+            h, m = part.strip().split(":")
+            h, m = int(h), int(m)
+        except ValueError:
+            continue
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            times.append((h, m))
+    if not times:
+        return None
+    now = datetime.now(timezone.utc)
+    today = sorted(
+        now.replace(hour=h, minute=m, second=0, microsecond=0)
+        for h, m in times
+    )
+    future = [t for t in today if t > now]
+    return future[0] if future else today[0] + timedelta(days=1)
 
 
 def stop_scheduler() -> None:
