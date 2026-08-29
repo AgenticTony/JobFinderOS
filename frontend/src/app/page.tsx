@@ -145,7 +145,7 @@ export default function LandingPage() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/screenshots/hunt-pulse.png"
-                alt="The hunt pulse: this morning's ads, funnelled from hunted to matched, each scored against your CV"
+                alt="The hunt pulse: a real run's ads, funnelled from hunted to matched, each scored against your CV"
                 className="block w-full"
                 width={786}
                 height={1226}
@@ -196,14 +196,14 @@ export default function LandingPage() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src="/screenshots/hunt-pulse.png"
-                      alt="The hunt pulse: this morning's ads, funnelled from hunted to matched, each scored against your CV"
+                      alt="The hunt pulse: a real run's ads, funnelled from hunted to matched, each scored against your CV"
                       className="block w-full"
                       width={786}
                       height={1226}
                     />
                   </figure>
                   <p className="num mt-3 text-[10px] uppercase tracking-[0.16em] text-paper/50">
-                    The hunt pulse, as it lands after a run
+                    The hunt pulse, from a real run
                   </p>
                 </Reveal>
               </div>
@@ -211,9 +211,9 @@ export default function LandingPage() {
               <div>
                 <Reveal>
                   <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
-                    It hunts while
+                    You upload once.
                     <br />
-                    you do anything else.
+                    It hunts twice a day.
                   </h2>
                 </Reveal>
                 <ol className="mt-12">
