@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowDown, ChevronDown, Radar, ShieldCheck } from 'lucide-react';
+import { ArrowDown, Radar, ShieldCheck } from 'lucide-react';
 import GuardReceipt from '@/components/landing/GuardReceipt';
 import RadarScope from '@/components/landing/RadarScope';
 import Reveal from '@/components/landing/Reveal';
@@ -92,11 +92,11 @@ export default function LandingPage() {
       </header>
 
       <main>
-        {/* ── ACT I · the statement and the scope ─────────────────── */}
-        <section className="relative flex min-h-[100svh] flex-col overflow-hidden bg-ink">
+        {/* ── ACT I · the promise, the proof, the product ──────────── */}
+        <section className="relative overflow-hidden bg-ink">
           <RadarScope />
 
-          <div className="relative z-10 mx-auto w-full max-w-5xl px-6 pt-[16svh] text-center">
+          <div className="relative z-10 mx-auto w-full max-w-5xl px-6 pt-[12svh] text-center">
             <p className="landing-rise num flex items-center justify-center gap-2.5 text-[11px] uppercase tracking-[0.18em] text-paper/50">
               <span className="relative flex h-2 w-2" aria-hidden>
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal/60" />
@@ -104,19 +104,21 @@ export default function LandingPage() {
               </span>
               Sweden + UK · hunts twice daily
             </p>
-            <h1 className="landing-rise landing-rise-1 mt-6 font-display text-[clamp(3rem,8vw,6.25rem)] font-semibold leading-[1.03] tracking-[-0.025em] text-paper">
-              Stop refreshing <em className="italic">job boards.</em>
+            <h1 className="landing-rise landing-rise-1 mt-6 font-display text-[clamp(2.6rem,6vw,4.5rem)] font-semibold leading-[1.04] tracking-[-0.025em] text-paper">
+              The jobs worth applying to,
+              <br />
+              <em className="italic">found for you.</em>
             </h1>
-            <p className="landing-rise landing-rise-2 mx-auto mt-6 max-w-md text-lg leading-relaxed text-paper/60">
-              Sweden&apos;s and the UK&apos;s job markets, hunted twice daily
-              and scored against your CV.
+            <p className="landing-rise landing-rise-2 mx-auto mt-6 max-w-lg text-lg leading-relaxed text-paper/60">
+              Sweden&apos;s and the UK&apos;s job markets, hunted, deduped and
+              scored against your CV. You approve everything.
             </p>
             <div className="landing-rise landing-rise-3 mt-9 flex flex-wrap items-center justify-center gap-x-7 gap-y-4">
               <Link
                 href="/app"
                 className="rounded-full bg-signal px-7 py-3 text-[15px] font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.97]"
               >
-                Upload your CV
+                Upload your CV — free in beta
               </Link>
               <a
                 href="#how"
@@ -129,14 +131,34 @@ export default function LandingPage() {
                 />
               </a>
             </div>
-            <p className="landing-rise landing-rise-3 num mt-10 text-[10px] uppercase tracking-[0.18em] text-paper/35">
-              Two hunts a day, every day
+            {/* Proof beside the CTA — the category pattern, with only
+                claims we can stand behind. */}
+            <p className="landing-rise landing-rise-3 num mt-6 text-[11px] uppercase tracking-[0.16em] text-paper/50">
+              No card · no credits · nothing sent without you
             </p>
           </div>
 
-          <div className="absolute bottom-12 left-1/2 z-10 -translate-x-1/2" aria-hidden>
-            <ChevronDown className="h-5 w-5 animate-bounce text-paper/50" />
+          {/* The product, rising out of the fold — viewport one, not a
+              scroll away. Melts into the panel below. */}
+          <div className="landing-rise landing-rise-3 relative z-10 mx-auto mt-20 max-w-3xl px-6">
+            <figure className="overflow-hidden rounded-t-2xl border border-b-0 border-line shadow-[0_-24px_80px_-32px_rgba(0,0,0,0.8)] [mask-image:linear-gradient(to_bottom,black_55%,transparent_97%)]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/screenshots/hunt-pulse.png"
+                alt="The hunt pulse: this morning's ads, funnelled from hunted to matched, each scored against your CV"
+                className="block w-full"
+                width={786}
+                height={1226}
+              />
+            </figure>
           </div>
+
+          {/* Deterministic seam: whatever the mask left, ink reclaims it
+              before the Act II panel rises over this edge. */}
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-48 bg-gradient-to-t from-ink via-ink/70 to-transparent"
+            aria-hidden
+          />
         </section>
 
         {/* ── ACT II · the product, held still ────────────────────── */}
@@ -144,7 +166,29 @@ export default function LandingPage() {
           id="how"
           className="relative z-10 -mt-8 scroll-mt-24 rounded-t-[2.5rem] border-t border-line bg-surface shadow-[0_-24px_60px_-24px_rgba(0,0,0,0.6)]"
         >
-          <div className="mx-auto max-w-6xl px-6 pb-28 pt-24 sm:pt-28">
+          {/* The numbers, up front — the category's stats band, with
+              only counts we can defend. */}
+          <div className="border-b border-line">
+            <div className="mx-auto grid max-w-6xl grid-cols-2 gap-x-6 gap-y-10 px-6 pb-14 pt-20 sm:grid-cols-4 sm:pt-24">
+              {[
+                ['2', 'countries hunted'],
+                ['6', 'sources per hunt'],
+                ['2×', 'runs every day'],
+                ['0', 'facts invented'],
+              ].map(([value, label]) => (
+                <Reveal key={label}>
+                  <p className="num font-display text-4xl font-semibold tracking-tight text-paper sm:text-[2.75rem]">
+                    {value}
+                  </p>
+                  <p className="num mt-2 text-[10px] uppercase tracking-[0.16em] text-paper/45">
+                    {label}
+                  </p>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+
+          <div className="mx-auto max-w-6xl px-6 pb-28 pt-16 sm:pt-20">
             <div className="grid gap-16 lg:grid-cols-[0.9fr_1.1fr] lg:gap-20">
               <div className="lg:sticky lg:top-28 lg:self-start">
                 <Reveal>
