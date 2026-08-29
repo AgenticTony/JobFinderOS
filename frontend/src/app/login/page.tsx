@@ -156,7 +156,7 @@ export default function LoginPage() {
         </p>
 
         <p className="mt-2 text-center text-xs text-low">
-          Hunts hourly · scores honestly · nothing sent without you
+          Hunts twice daily · scores honestly · nothing sent without you
         </p>
       </form>
     </div>

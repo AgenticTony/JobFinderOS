@@ -18,7 +18,7 @@ import Reveal from '@/components/landing/Reveal';
 export const metadata: Metadata = {
   title: 'JobFinderOS · Stop refreshing job boards',
   description:
-    'Hourly hunts across Platsbanken and Reed, every ad scored against your CV. Applications you approve, drafts that never invent facts.',
+    'Twice-daily hunts across Platsbanken and Reed, every ad scored against your CV. Applications you approve, drafts that never invent facts.',
 };
 
 const steps = [
@@ -27,7 +27,7 @@ const steps = [
     body: 'Your CV, your municipalities, your minimum score. Malmö and Lund, or all of Skåne.',
   },
   {
-    title: 'The hunt runs hourly',
+    title: 'The hunt runs twice a day',
     body: 'New ads scraped, agency cross-posts merged into the direct ad, every survivor scored. The rest never reach you.',
   },
   {
@@ -103,13 +103,14 @@ export default function LandingPage() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal/60" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-signal" />
               </span>
-              Sweden + UK · hourly hunts
+              Sweden + UK · hunts twice daily
             </p>
             <h1 className="landing-rise landing-rise-1 mt-6 font-display text-[clamp(3rem,8vw,6.25rem)] font-semibold leading-[1.03] tracking-[-0.025em] text-paper">
               Stop refreshing <em className="italic">job boards.</em>
             </h1>
             <p className="landing-rise landing-rise-2 mx-auto mt-6 max-w-md text-lg leading-relaxed text-paper/60">
-              Platsbanken and Reed, hunted hourly and scored against your CV.
+              Platsbanken and Reed, hunted twice daily and scored against your
+              CV.
             </p>
             <div className="landing-rise landing-rise-3 mt-9 flex flex-wrap items-center justify-center gap-x-7 gap-y-4">
               <Link
@@ -130,7 +131,7 @@ export default function LandingPage() {
               </a>
             </div>
             <p className="landing-rise landing-rise-3 num mt-10 text-[10px] uppercase tracking-[0.18em] text-paper/35">
-              Next hunt on the hour
+              Two hunts a day, every day
             </p>
           </div>
 

@@ -20,7 +20,7 @@ const familjen = Familjen_Grotesk({
 export const metadata: Metadata = {
   title: 'JobFinderOS',
   description:
-    'Hourly hunts across Platsbanken and Reed, every ad scored against your CV. Applications you approve, drafts that never invent facts.',
+    'Twice-daily hunts across Platsbanken and Reed, every ad scored against your CV. Applications you approve, drafts that never invent facts.',
 };
 
 export default function RootLayout({
