@@ -275,6 +275,8 @@ export default function Home() {
     </button>
   );
 
+  const huntsAutomated = huntsAreAutomated(pipeStatus);
+
   if (!sessionKnown) {
     return <div className="console-backdrop min-h-dvh bg-ink" />;
   }
@@ -326,7 +328,7 @@ export default function Home() {
           pendingCount={pendingCount}
           reviewCount={openDrafts}
           nextRunAt={pipeStatus?.next_run_at ?? null}
-          schedulerEnabled={pipeStatus?.scheduler_enabled ?? false}
+          schedulerEnabled={huntsAutomated}
           intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
           profile={profile}
           onEditSetup={() => (profile ? setShowWizard(true) : setView('profile'))}
@@ -429,6 +431,22 @@ export default function Home() {
 
 // ---------------- Dashboard ----------------
 
+// Hunts are automated when the API says so (dev scheduler, or the
+// external cron via HUNT_TIMES_UTC) — or when the evidence says so:
+// a completed scrape run in the last two hours means SOMETHING is
+// scheduling hunts (the Render cron), even when the API can't name
+// the next time yet.
+function huntsAreAutomated(pipeStatus: PipelineStatusResponse | null): boolean {
+  return (
+    (pipeStatus?.scheduler_enabled ?? false) ||
+    (pipeStatus?.recent_runs ?? []).some(
+      (r) =>
+        r.status === 'completed' &&
+        Date.now() - parseUtcDate(r.started_at).getTime() < 2 * 60 * 60_000
+    )
+  );
+}
+
 function DashboardView({
   stats,
   pipeStatus,
@@ -477,6 +495,7 @@ function DashboardView({
   // Last hunt = newest scrape-run row; "overdue" when it's been more than
   // ~1.5x the interval (backend asleep or dead — the user should notice)
   const lastHuntAt = pipeStatus?.recent_runs?.[0]?.started_at ?? null;
+  const huntsAutomated = huntsAreAutomated(pipeStatus);
   const hasRailWarnings =
     Boolean(profileStatus && (!profileStatus.has_profile || !profileStatus.ai_enabled)) ||
     matchFailed ||
@@ -489,7 +508,7 @@ function DashboardView({
         openDrafts={openDrafts}
         matchingRunning={matchPolling}
         nextRunAt={pipeStatus?.next_run_at ?? null}
-        schedulerEnabled={pipeStatus?.scheduler_enabled ?? false}
+        schedulerEnabled={huntsAutomated}
         intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
         lastHuntAt={lastHuntAt}
         onOpenMatches={onOpenMatches}

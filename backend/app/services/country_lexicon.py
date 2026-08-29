@@ -1,4 +1,4 @@
-"""Best-effort location → country-set resolution for the location gate.
+r"""Best-effort location → country-set resolution for the location gate.
 
 WO-06 / D1: the gate had no country dimension, so remote jobs located in
 the USA passed Swedish include_remote users — a pool of USA 73 vs Malmö
