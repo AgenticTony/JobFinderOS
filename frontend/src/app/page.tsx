@@ -31,7 +31,7 @@ const steps = [
   },
   {
     title: 'Approve, tailor, send',
-    body: 'One click and GLM writes the CV and cover letter shaped to the ad. The guard rejects anything your history cannot back.',
+    body: 'One click and the AI writes the CV and cover letter shaped to the ad. The guard rejects anything your history cannot back.',
   },
 ];
 

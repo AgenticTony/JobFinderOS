@@ -51,8 +51,8 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
   const statusLine = (() => {
     if (!uploading) return undefined;
     if (elapsed < 12) return 'Extracting & analyzing your CV…';
-    if (elapsed < 45) return `Talking to GLM (${elapsed}s) — first-time analysis can take a minute…`;
-    return `Still working (${elapsed}s) — Z.ai can be slow; the app stays usable, this will finish on its own.`;
+    if (elapsed < 45) return `Talking to the AI (${elapsed}s) — first-time analysis can take a minute…`;
+    return `Still working (${elapsed}s) — the AI can be slow; the app stays usable, this will finish on its own.`;
   })();
 
   return (
