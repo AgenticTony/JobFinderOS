@@ -88,11 +88,20 @@ export default function Home() {
   useEffect(() => {
     setRailCollapsed(localStorage.getItem('jfos-rail-collapsed') === '1');
   }, []);
+  // Gate the shell: render nothing but the console ground until the
+  // token check has run, so anonymous visitors never see the app flash.
+  const [sessionKnown, setSessionKnown] = useState(false);
   // No token -> no session and never signed in here: straight to the
-  // create-account form. Expired tokens still land on plain /login via
-  // the 401 interceptor in api.ts.
+  // create-account form — via replace() so Back from login returns to
+  // the page BEFORE /app (the home page), not back here in a redirect
+  // loop. Expired tokens still land on plain /login via the 401
+  // interceptor in api.ts.
   useEffect(() => {
-    if (!getAuthToken()) window.location.href = '/login?mode=register';
+    if (!getAuthToken()) {
+      window.location.replace('/login?mode=register');
+      return;
+    }
+    setSessionKnown(true);
   }, []);
   const toggleRail = () =>
     setRailCollapsed((c) => {
@@ -265,6 +274,10 @@ export default function Home() {
       {compact && <span className="sr-only">Hunt now — run the pipeline</span>}
     </button>
   );
+
+  if (!sessionKnown) {
+    return <div className="console-backdrop min-h-dvh bg-ink" />;
+  }
 
   return (
     <div className="console-backdrop min-h-dvh bg-ink text-hi">

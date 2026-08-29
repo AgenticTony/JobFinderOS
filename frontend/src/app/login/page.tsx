@@ -6,8 +6,9 @@
 // fastapi-users register endpoint, then signs straight in.
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Radar, Loader2 } from 'lucide-react';
+import { Radar, Loader2, ArrowLeft } from 'lucide-react';
 import { api, apiErrorMessage, setAuthToken } from '@/lib/api';
 
 export default function LoginPage() {
@@ -60,21 +61,29 @@ export default function LoginPage() {
 
   return (
     <div className="console-backdrop flex min-h-dvh items-center justify-center bg-ink px-4">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-sm rounded-2xl border border-line bg-surface p-8"
-      >
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-signal/30 bg-signal/10">
-            <Radar className="h-5 w-5 text-signal" aria-hidden />
-          </div>
-          <div>
-            <h1 className="font-semibold tracking-tight text-hi">JobFinderOS</h1>
-            <p className="num text-[10px] uppercase tracking-widest text-low">
-              {mode === 'signin' ? 'Sign in to the console' : 'Create your account'}
-            </p>
-          </div>
-        </div>
+      <div className="w-full max-w-sm">
+        <Link
+          href="/"
+          className="mb-3 inline-flex items-center gap-1.5 text-sm text-low transition hover:text-hi"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+          Back to home
+        </Link>
+        <form
+          onSubmit={submit}
+          className="w-full rounded-2xl border border-line bg-surface p-8"
+        >
+          <Link href="/" className="mb-6 flex items-center gap-3" aria-label="JobFinderOS home">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-signal/30 bg-signal/10">
+              <Radar className="h-5 w-5 text-signal" aria-hidden />
+            </div>
+            <div>
+              <h1 className="font-semibold tracking-tight text-hi">JobFinderOS</h1>
+              <p className="num text-[10px] uppercase tracking-widest text-low">
+                {mode === 'signin' ? 'Sign in to the console' : 'Create your account'}
+              </p>
+            </div>
+          </Link>
 
         <label className="mb-4 block">
           <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
@@ -166,7 +175,8 @@ export default function LoginPage() {
         <p className="mt-2 text-center text-xs text-low">
           Hunts twice daily · scores honestly · nothing sent without you
         </p>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }
