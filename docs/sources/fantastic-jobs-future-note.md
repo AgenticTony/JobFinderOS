@@ -90,3 +90,30 @@ limit+offset pagination like jobtech. Integration risk is low.
 Revised trigger: worth it from ~50-100 paying users, or earlier if
 UK launches (our thinnest direct coverage) — scoped filters sized
 first via the free-trial count endpoints.
+
+## Build-vs-buy: direct ATS connections (added 2026-08-30)
+
+The underlying ATS job-board APIs are mostly PUBLIC and KEYLESS
+(Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee,
+Teamtailor — per-company endpoints). Fantastic's fee buys the
+200K-company who-uses-which-ATS directory, hourly-scale polling ops,
+expiry/modified tracking, enterprise-ATS grinding (Taleo,
+SuccessFactors, Workday), and LinkedIn data — not API access itself.
+
+**Hybrid strategy recorded:**
+- Phase 1 (free, small, targeted): direct adapters for the top 5-6
+  modern ATS platforms + a curated company list for our launch
+  regions (Skåne/Øresund tech, UK hubs). One adapter per platform,
+  plus a generic schema.org JobPosting sitemap crawler (the
+  Google-for-Jobs route) for any structured career page. Zero
+  recurring cost; exactly our users' missing segment; consistent
+  with the 'official public data' promise (public, keyless
+  endpoints).
+- Phase 2 (Fantastic): breadth — UK-wide, the enterprise long tail,
+  LinkedIn jobs (no public API exists), and 58-country expansion.
+  The fee is for the directory + ops we don't want to own.
+
+ATS board endpoints are keyed by company token — the curation
+burden of Phase 1 is maintaining OUR company list, which is small
+and local. Revisit Phase 1 when the SE-tech coverage gap becomes
+user-visible; it needs no subscription and no third-party spend.
