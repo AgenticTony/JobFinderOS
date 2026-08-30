@@ -21,6 +21,9 @@ class OnboardingRequest(BaseModel):
     remote_only: bool = False
     include_remote: bool = False
     search_queries: List[str] = []
+    # Arbetsförmedlingen occupation-name concept CODES (strings) —
+    # validated server-side; labels rehydrated from the taxonomy.
+    occupation_codes: Optional[List[str]] = None
     languages: List[str] = []
 
 
@@ -63,6 +66,8 @@ class ProfileResponse(BaseModel):
     remote_only: bool = False
     include_remote: bool = False
     search_queries: List[str] = []
+    # [{"code","label"}] — Arbetsförmedlingen occupation-name concepts
+    occupation_codes: List[dict] = []
     languages: List[str] = []
     created_at: datetime
     updated_at: datetime
@@ -101,6 +106,8 @@ class ProfileResponse(BaseModel):
             remote_only=bool(profile.remote_only),
             include_remote=bool(profile.include_remote),
             search_queries=parse_json_list(profile.search_queries),
+            occupation_codes=parse_json_list(
+                getattr(profile, "occupation_codes", None)),
             languages=parse_json_list(profile.languages),
             created_at=profile.created_at,
             updated_at=profile.updated_at,

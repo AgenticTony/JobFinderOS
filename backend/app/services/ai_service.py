@@ -377,10 +377,20 @@ RULES:
 
 {mode_rules}
 
+OCCUPATION CONCEPTS ({country_name} only — omit the field otherwise):
+The Swedish Public Employment Service classifies every ad into a taxonomy
+of standard occupation names. Also list "occupation_names": 3-6 STANDARD
+Swedish occupation names that fit this person's profession and level.
+Use the official standard form exactly — they are often compound or
+qualified, e.g. "Mjukvaruutvecklare", "Systemutvecklare/Programmerare",
+"Frontend-utvecklare", "Sjuksköterska, grundutbildad", "Kassapersonal".
+Non-standard synonyms will be discarded.
+
 Respond with ONLY valid JSON (no markdown):
 {{
   "from_your_experience": ["query1", "query2"],
-  "worth_a_look": [{{"query": "query", "why": "one sentence, second person, citing their CV evidence"}}]
+  "worth_a_look": [{{"query": "query", "why": "one sentence, second person, citing their CV evidence"}}],
+  "occupation_names": ["Standard Occupation Name", "..."]
 }}"""
 
         raw = self._complete(system_prompt, f"## CV\n{cv_text[:6000]}\n\nSuggest search queries.",
@@ -396,7 +406,22 @@ Respond with ONLY valid JSON (no markdown):
                 )
             elif isinstance(item, str) and item.strip():
                 pivot.append({"query": item.strip(), "why": ""})
-        return {"from_your_experience": direct, "worth_a_look": pivot[:7]}
+        result = {"from_your_experience": direct, "worth_a_look": pivot[:7]}
+
+        # Occupation concepts, SE only: the model outputs LABELS; the
+        # taxonomy service is the single authority that turns a label
+        # into a real code — unresolved labels are dropped, never
+        # fabricated. The direct queries are also tried as labels for
+        # free (a good query often IS a standard occupation name).
+        if country.upper() == "SE":
+            from app.services import occupation_taxonomy
+
+            candidate_labels = [str(n) for n in parsed.get("occupation_names", [])]
+            candidate_labels += direct
+            picks = occupation_taxonomy.resolve_labels(candidate_labels)[:8]
+            if picks:
+                result["occupation_suggestions"] = picks
+        return result
 
     def _build_matching_prompt(self) -> str:
         """Job-seeker-direction adaptation of TalentHive's structured screening prompt."""

@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { getGeo, suggestQueries } from '@/lib/api';
-import type { GeoData, OnboardingPayload, SearchMode } from '@/types';
+import type { GeoData, OnboardingPayload, OccupationSuggestion, SearchMode } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -92,6 +92,10 @@ export default function OnboardingWizard({
   const [mode, setMode] = useState<SearchMode>('field');
   const [directQueries, setDirectQueries] = useState<string[]>([]);
   const [pivotSuggestions, setPivotSuggestions] = useState<{ query: string; why: string }[]>([]);
+  // SE taxonomy concepts: validated profession codes — each becomes a
+  // search unit that catches ads whose title never contains the query
+  const [occupationSuggestions, setOccupationSuggestions] = useState<OccupationSuggestion[]>([]);
+  const [occSelected, setOccSelected] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set(initialQueries ?? []));
   const [customQueries, setCustomQueries] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
@@ -126,10 +130,17 @@ export default function OnboardingWizard({
       setSelected(
         new Set([...result.from_your_experience, ...result.worth_a_look.map((p) => p.query)])
       );
+      const occs = result.occupation_suggestions ?? [];
+      setOccupationSuggestions(occs);
+      // Professions default ON — the taxonomy match is the highest
+      // -recall signal; the user can still switch any off.
+      setOccSelected(new Set(occs.map((o) => o.code)));
       fetchedKeyRef.current = `${country}|${mode}`;
     } catch {
       setDirectQueries([]);
       setPivotSuggestions([]);
+      setOccupationSuggestions([]);
+      setOccSelected(new Set());
       setSuggestError(true);
     } finally {
       setLoadingQueries(false);
@@ -185,7 +196,7 @@ export default function OnboardingWizard({
     Boolean(country),
     Boolean(region), // municipality optional (whole region is valid)
     languages.length > 0,
-    selected.size > 0,
+    selected.size > 0 || occSelected.size > 0, // queries OR professions
     true,
   ][step];
 
@@ -201,6 +212,7 @@ export default function OnboardingWizard({
         remote_only: remoteOnly,
         include_remote: includeRemote || remoteOnly,
         search_queries: [...selected],
+        occupation_codes: [...occSelected],
         languages,
       });
     } finally {
@@ -554,6 +566,42 @@ export default function OnboardingWizard({
                           <div className="flex flex-wrap gap-2">
                             {directQueries.map((q) => (
                               <QueryChip key={q} query={q} on={selected.has(q)} onToggle={() => toggle(q)} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {occupationSuggestions.length > 0 && (
+                        <div className="mt-5">
+                          <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-ok/90">
+                            Your professions — official job taxonomy{' '}
+                            <span className="normal-case">
+                              (catches jobs whose title uses other words)
+                            </span>
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {occupationSuggestions.map((o) => (
+                              <button
+                                key={o.code}
+                                type="button"
+                                aria-pressed={occSelected.has(o.code)}
+                                onClick={() =>
+                                  setOccSelected((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(o.code)) next.delete(o.code);
+                                    else next.add(o.code);
+                                    return next;
+                                  })
+                                }
+                                className={cn(
+                                  'rounded-full border px-3 py-1.5 text-sm transition-colors',
+                                  occSelected.has(o.code)
+                                    ? 'border-ok bg-ok/15 text-hi'
+                                    : 'border-line text-mid hover:border-line-2 hover:text-hi'
+                                )}
+                              >
+                                {o.label}
+                              </button>
                             ))}
                           </div>
                         </div>

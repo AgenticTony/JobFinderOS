@@ -31,13 +31,16 @@ def db():
         User,
     )
 
-    session = SessionLocal()
-    # Ensure the schema exists (this file has no _client fixture to
-    # trigger app startup) — create_all adds missing tables only.
+    # The shared sqlite scratch file may predate new columns
+    # (create_all adds tables, never columns). Drop and recreate the
+    # schema IN PLACE — never delete the file: other modules hold
+    # pooled connections to its inode.
     from app.core.database import engine
     from app.core.orm import Base
 
+    Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    session = SessionLocal()
     for model in (Application, ApplicationDraft, MatchResult, Profile,
                   JobPosting, AIUsage, ScrapeRun, ScrapeWatermark, SystemLock,
                   User):

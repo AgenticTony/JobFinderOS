@@ -64,6 +64,10 @@ class Profile(Base):
     remote_only = Column(Integer, default=0, nullable=False)  # 1 = drop on-site jobs
     include_remote = Column(Integer, default=0, nullable=False)  # 1 = opt in to worldwide remote jobs
     search_queries = Column(Text, nullable=True)  # JSON array — AI-suggested, user-approved
+    # JSON array of {"code","label"} — Arbetsförmedlingen occupation-name
+    # concepts (validated server-side against the taxonomy feed). Fetching
+    # by code catches ads whose title never contains the free-text query.
+    occupation_codes = Column(Text, nullable=True)
     languages = Column(Text, nullable=True)  # JSON array — languages the user works in
 
     user_id = Column(Uuid, ForeignKey("users.id"), unique=True, nullable=False, index=True)

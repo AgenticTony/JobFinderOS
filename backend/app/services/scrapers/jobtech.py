@@ -150,13 +150,25 @@ class JobtechScraper(BaseScraper):
                 logger.warning("[jobtech] no taxonomy codes for %s — "
                                "unfiltered fetch, local gate applies", chosen)
 
-        for query in queries:
+        # Search units: free-text queries PLUS one unit per occupation
+        # concept code. Taxonomy units catch ads whose TITLE never
+        # contains the query words — the recall win free text cannot
+        # deliver. Each unit is an independent search (never combined
+        # with q: the API would intersect them and lose recall);
+        # pagination, place and delta params apply identically.
+        search_units: List[tuple] = [("q", q) for q in queries]
+        search_units += [
+            ("occupation-name", str(c))
+            for c in (context or {}).get("occupation_codes") or []
+        ]
+
+        for unit_kind, unit_value in search_units:
             for page in range(max_pages):
                 offset = page * PER_QUERY_LIMIT
                 try:
                     response = httpx.get(
                         API_URL,
-                        params=[("q", query), ("limit", PER_QUERY_LIMIT),
+                        params=[(unit_kind, unit_value), ("limit", PER_QUERY_LIMIT),
                                 ("offset", offset), *place_params, *delta_params],
                         headers=headers,
                         timeout=settings.SCRAPE_TIMEOUT_SECONDS,
@@ -166,7 +178,8 @@ class JobtechScraper(BaseScraper):
                     data = response.json()
                 except Exception as e:
                     logger.warning(
-                        "[jobtech] query '%s' page %d failed: %s", query, page, e
+                        "[jobtech] unit %s=%r page %d failed: %s",
+                        unit_kind, unit_value, page, e,
                     )
                     break
 
@@ -178,9 +191,12 @@ class JobtechScraper(BaseScraper):
                         jobs.append(job)
 
                 if len(hits) < PER_QUERY_LIMIT:
-                    break  # short page = end of results for this query
+                    break  # short page = end of results for this unit
 
-        logger.info("[jobtech] fetched %d jobs from %d queries", len(jobs), len(queries))
+        logger.info("[jobtech] fetched %d jobs from %d search units "
+                    "(%d queries + %d occupation concepts)",
+                    len(jobs), len(search_units), len(queries),
+                    len(search_units) - len(queries))
         return jobs
 
     @staticmethod

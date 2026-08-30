@@ -101,6 +101,7 @@ export interface Profile {
   remote_only: boolean;
   include_remote: boolean;
   search_queries: string[];
+  occupation_codes?: OccupationSuggestion[]; // [{code,label}]
   languages: string[];
   skills: { name: string; level?: string }[];
   recent_roles: { title?: string; company?: string; period?: string; highlights?: string }[];
@@ -120,7 +121,13 @@ export interface OnboardingPayload {
   remote_only: boolean;
   include_remote: boolean;
   search_queries: string[];
+  occupation_codes?: string[];  // taxonomy concept codes (SE) — validated server-side
   languages: string[];
+}
+
+export interface OccupationSuggestion {
+  code: string;
+  label: string;
 }
 
 export interface GeoData {
@@ -135,6 +142,7 @@ export interface QuerySuggestions {
   mode: SearchMode;
   from_your_experience: string[];
   worth_a_look: { query: string; why: string }[];
+  occupation_suggestions?: OccupationSuggestion[]; // SE taxonomy codes
 }
 
 export interface Stats {

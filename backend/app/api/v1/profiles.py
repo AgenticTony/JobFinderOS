@@ -143,6 +143,19 @@ async def save_onboarding(
     profile.remote_only = 1 if payload.remote_only else 0
     profile.include_remote = 1 if (payload.include_remote or payload.remote_only) else 0
     profile.search_queries = dump_json_list(payload.search_queries)
+    # Occupation taxonomy codes: the server is the authority — client
+    # codes are validated against the official concepts feed, unknown
+    # codes dropped (logged), labels rehydrated. SE-only concept; GB
+    # simply passes through an empty list.
+    from app.services import occupation_taxonomy
+
+    valid_picks = occupation_taxonomy.validate_codes(payload.occupation_codes or [])
+    if payload.occupation_codes and not valid_picks:
+        logger.info(
+            "onboarding: %d occupation code(s) submitted, none valid — dropped",
+            len(payload.occupation_codes),
+        )
+    profile.occupation_codes = dump_json_list(valid_picks)
     profile.languages = dump_json_list(payload.languages or ["English"])
     profile.onboarded = 1
     db.add(profile)

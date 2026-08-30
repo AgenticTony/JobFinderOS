@@ -53,7 +53,12 @@ def _scope_key(ctx: Dict) -> str:
 
 
 def _watermark_queries(ctx: Dict) -> List[str]:
+    """Every independent search unit of a fetch: free-text queries (bare,
+    for watermark continuity) plus one 'name:CODE' unit per occupation
+    concept. A new code has no watermark -> deep backfill for its
+    history, exactly like a new query."""
     qs = [str(q).strip() for q in (ctx.get("queries") or []) if str(q).strip()]
+    qs += [f"name:{c}" for c in (ctx.get("occupation_codes") or []) if c]
     return qs or [""]
 
 
@@ -125,6 +130,13 @@ def build_scrape_context(db: Session, *, user_id) -> Optional[Dict]:
         "remote_only": bool(profile.remote_only),
         "include_remote": bool(profile.include_remote),
         "queries": parse_json_list(profile.search_queries),
+        # occupation-name concept CODES (strings) — the scraper turns
+        # each into its own taxonomy-filtered search unit
+        "occupation_codes": [
+            pick["code"]
+            for pick in (parse_json_list(getattr(profile, "occupation_codes", None)) or [])
+            if isinstance(pick, dict) and pick.get("code")
+        ],
         "languages": parse_json_list(profile.languages) or [],
     }
 
@@ -464,6 +476,7 @@ def build_union_contexts(db: Session) -> List[Dict]:
                 "municipality": None,
                 "municipalities": [],
                 "queries": [],
+                "occupation_codes": [],
                 "languages": [],
                 "remote_only": False,
                 "include_remote": False,
@@ -478,6 +491,11 @@ def build_union_contexts(db: Session) -> List[Dict]:
         for q in parse_json_list(p.search_queries) or []:
             if q and q not in g["queries"]:
                 g["queries"].append(q)
+        for pick in parse_json_list(getattr(p, "occupation_codes", None)) or []:
+            if isinstance(pick, dict) and pick.get("code"):
+                g.setdefault("occupation_codes", [])
+                if pick["code"] not in [x["code"] for x in g["occupation_codes"]]:
+                    g["occupation_codes"].append(pick)
         for lang in parse_json_list(p.languages) or []:
             if lang and lang not in g["languages"]:
                 g["languages"].append(lang)
