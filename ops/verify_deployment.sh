@@ -4,8 +4,11 @@
 #
 # Checks: API /health (DB up), CORS preflight from the frontend origin,
 # a full register/login/me roundtrip against the live API (creates one
-# clearly-named probe account), and that the Pages site serves the app
-# with the API URL inlined in its bundle.
+# clearly-named probe account), email-apply provisioning (P0-6:
+# /api/v1/profile/status reports email_apply_enabled from RESEND_API_KEY),
+# and that the Pages site serves the app with the API URL inlined in its
+# bundle. Manual remainder: only a real apply proves APPLY_FROM_EMAIL is
+# a Resend-VERIFIED sender.
 set -uo pipefail
 
 API="${1:-https://jobfinderos-api.onrender.com}"
@@ -79,6 +82,26 @@ if [ -n "$token" ]; then
     echo "$me" | grep -q "$PROBE_EMAIL" && ok "login + /users/me roundtrip" || bad "/users/me ($me)"
 else
     bad "login (no access_token; response: ${login:0:120})"
+fi
+
+# 4. Email apply provisioned (P0-6). The flagship send-with-PDFs loop is
+#    dead without RESEND_API_KEY — profile /status derives
+#    email_apply_enabled from it — and neither key appears anywhere a
+#    health check would notice. Verified through the roundtrip's own
+#    token, so this reads the DEPLOYED env, not the yaml. Needs the
+#    login above; if that failed, fix it first.
+#    URL note: the router is mounted at the SINGULAR /api/v1/profile
+#    (main.py include_router) — profiles/status 404s.
+if [ -n "$token" ]; then
+    pstatus=$(curl -s -m 30 -H "Authorization: Bearer $token" "$API/api/v1/profile/status" || true)
+    if echo "$pstatus" | grep -q '"email_apply_enabled":true'; then
+        ok "email apply enabled (RESEND_API_KEY set on the deployment)"
+    else
+        bad "email apply disabled (RESEND_API_KEY unset: $pstatus)"
+        echo "  -> fix: Render api env — set RESEND_API_KEY and APPLY_FROM_EMAIL (runbook Step 2)."
+    fi
+else
+    echo "  (email-apply check skipped — no token; fix the login failure above first)"
 fi
 
 echo "== Frontend: $FRONTEND =="

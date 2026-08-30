@@ -186,6 +186,35 @@ class Settings(BaseSettings):
                     "missing-secret failure mode: fail at boot, not after "
                     "users sign up."
                 )
+            # OPS-7: the same recreation incident, storage variant. The
+            # blueprint syncs STORAGE_BACKEND=supabase as a LITERAL (it
+            # survives service recreation) while SUPABASE_* are sync:false
+            # secrets (they do NOT — the runbook's documented incident).
+            # Without this guard the app boots green and every CV
+            # upload/delete 500s at runtime, the first time
+            # SupabaseStorage needs the key. Keyed on the SELECTED backend,
+            # not on production itself: local storage stays a legitimate
+            # shape (storage.py: dev and single-user deploys on a real
+            # disk), so DEBUG=false + STORAGE_BACKEND=local must not be
+            # refused here.
+            if self.STORAGE_BACKEND == "supabase" and (
+                not self.SUPABASE_URL or not self.SUPABASE_SERVICE_KEY
+            ):
+                missing = ", ".join(
+                    name
+                    for name, value in (
+                        ("SUPABASE_URL", self.SUPABASE_URL),
+                        ("SUPABASE_SERVICE_KEY", self.SUPABASE_SERVICE_KEY),
+                    )
+                    if not value
+                )
+                raise ValueError(
+                    "STORAGE_BACKEND=supabase requires SUPABASE_URL and "
+                    f"SUPABASE_SERVICE_KEY to be set (missing: {missing}) "
+                    "— a missing sync:false secret after service "
+                    "recreation produces exactly this shape. Fail at "
+                    "boot, not on the first CV upload."
+                )
             if "*" in self.get_cors_origins():
                 raise ValueError("CORS_ORIGINS=* is not allowed when DEBUG=false")
             # r4: an EMPTY prompt deploys fine and serves an app no origin

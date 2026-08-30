@@ -67,6 +67,15 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      # Email apply (Resend) — profiles /status reports email_apply_enabled
+      # from RESEND_API_KEY; without these the flagship send-with-PDFs
+      # loop is dead in production and drafts can only fall back to
+      # 'Apply in browser' (P0-6). APPLY_FROM_EMAIL must be a
+      # Resend-verified sender.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: APPLY_FROM_EMAIL
+        sync: false
       # Scraping + per-source keys (empty keys = source self-disables)
       - key: SCRAPE_SOURCES
         value: arbeitnow,remotive,jobicy,workingnomads,jobtech,reed

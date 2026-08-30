@@ -211,7 +211,8 @@ jobs:
           for s in spec["services"]:
               for v in s.get("envVars", []):
                   if v["key"] in {"DATABASE_URL", "GLM_API_KEY", "SUPABASE_URL",
-                                  "SUPABASE_SERVICE_KEY", "AUTH_SECRET"}:
+                                  "SUPABASE_SERVICE_KEY", "AUTH_SECRET",
+                                  "RESEND_API_KEY"}:
                       assert v.get("sync") is False or v.get("generateValue"), (
                           f"{s['name']}/{v['key']} must be sync:false or generateValue")
                   assert "value" not in v or v["key"] not in {
