@@ -145,18 +145,25 @@ async def save_onboarding(
     profile.search_queries = dump_json_list(payload.search_queries)
     # Occupation taxonomy codes: the server is the authority — client
     # codes are validated against the official concepts feed, unknown
-    # codes dropped (logged), labels rehydrated. SE-only concept; GB
-    # simply passes through an empty list.
+    # codes dropped (logged), labels rehydrated. ENFORCED SE-only
+    # (review finding: the comment used to claim GB passes through an
+    # empty list, but nothing stopped Swedish codes from storing on a
+    # GB profile after an edit-mode country switch).
     from app.services import occupation_taxonomy
 
-    # The taxonomy table is a ~515 KB sync fetch on first use — never
-    # run it on the event loop (review finding: this endpoint
-    # previously did no network I/O and now stalled every concurrent
-    # request on the single-worker deploy until the fetch returned).
-    # Startup warms the table; this covers cold and failed boots.
-    valid_picks = await run_in_threadpool(
-        occupation_taxonomy.validate_codes, payload.occupation_codes or []
-    )
+    valid_picks = []
+    if (country or "").upper() == "SE" and payload.occupation_codes:
+        # The taxonomy table is a ~515 KB sync fetch on first use —
+        # never on the event loop; startup warms it, this covers cold
+        # and failed boots.
+        valid_picks = await run_in_threadpool(
+            occupation_taxonomy.validate_codes, payload.occupation_codes
+        )
+    elif payload.occupation_codes:
+        logger.info(
+            "onboarding: %d occupation code(s) ignored — country %s is not SE",
+            len(payload.occupation_codes), country,
+        )
     if payload.occupation_codes and not valid_picks:
         logger.info(
             "onboarding: %d occupation code(s) submitted, none valid — dropped",

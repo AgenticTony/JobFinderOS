@@ -37,9 +37,12 @@ interface Props {
   initialMunicipality?: string;
   initialMunicipalities?: string[];
   initialSearchRadiusKm?: number;
-  // Saved taxonomy codes — edit mode pre-selections them so re-saving
-  // setup (or a GLM blip during it) never wipes stored professions
-  initialOccupationCodes?: string[];
+  // Saved taxonomy picks ({code,label}) — edit mode pre-renders them
+  // as chips AND pre-selects them, so a stored profession is always
+  // visible and deselectable, never an invisible submit payload
+  // (review finding: codes-only prefill left saved professions active
+  // but unrendered when the fresh suggestion call didn't return them).
+  initialOccupations?: OccupationSuggestion[];
   initialQueries?: string[];
 }
 
@@ -78,7 +81,7 @@ export default function OnboardingWizard({
   initialMunicipality,
   initialMunicipalities,
   initialSearchRadiusKm,
-  initialOccupationCodes,
+  initialOccupations,
   initialQueries,
 }: Props) {
   const [step, setStep] = useState(0);
@@ -104,12 +107,16 @@ export default function OnboardingWizard({
   const [pivotSuggestions, setPivotSuggestions] = useState<{ query: string; why: string }[]>([]);
   // SE taxonomy concepts: validated profession codes — each becomes a
   // search unit that catches ads whose title never contains the query
-  const [occupationSuggestions, setOccupationSuggestions] = useState<OccupationSuggestion[]>([]);
-  // Prefilled with the user's SAVED codes in edit mode — submit always
-  // sends this set, so professions survive setup edits and survive a
-  // failed/changed suggestion fetch (review finding: both used to wipe).
+  // Seeded with the user's SAVED picks so they render as chips from
+  // the first frame (visible, deselectable); fresh suggestions MERGE
+  // on top, never replace.
+  const [occupationSuggestions, setOccupationSuggestions] = useState<OccupationSuggestion[]>(
+    initialOccupations ?? []
+  );
+  // Submit always sends this set — prefilled from storage so professions
+  // survive setup edits and survive a failed/changed suggestion fetch.
   const [occSelected, setOccSelected] = useState<Set<string>>(
-    new Set(initialOccupationCodes ?? [])
+    new Set((initialOccupations ?? []).map((o) => o.code))
   );
   const [selected, setSelected] = useState<Set<string>>(new Set(initialQueries ?? []));
   const [customQueries, setCustomQueries] = useState<string[]>([]);
@@ -146,18 +153,23 @@ export default function OnboardingWizard({
         new Set([...result.from_your_experience, ...result.worth_a_look.map((p) => p.query)])
       );
       const occs = result.occupation_suggestions ?? [];
-      setOccupationSuggestions(occs);
-      // Suggestions default ON, MERGED with anything already saved —
-      // never a replacement: re-running setup must not deselect a
-      // stored profession the fresh call didn't happen to suggest.
+      // MERGE into the rendered list — never a replacement: a stored
+      // profession must stay visible and selectable even when the
+      // fresh call doesn't return it.
+      setOccupationSuggestions((prev) => {
+        const seen = new Set(prev.map((o) => o.code));
+        return [...prev, ...occs.filter((o) => !seen.has(o.code))];
+      });
+      // Suggestions default ON, merged with anything already saved.
       setOccSelected((prev) => new Set([...prev, ...occs.map((o) => o.code)]));
       fetchedKeyRef.current = `${country}|${mode}`;
     } catch {
       setDirectQueries([]);
       setPivotSuggestions([]);
-      setOccupationSuggestions([]);
-      // occSelected deliberately survives: a GLM blip during an
-      // unrelated edit must not wipe the user's saved professions.
+      // occupationSuggestions and occSelected deliberately survive:
+      // saved professions stay rendered and selected through a GLM
+      // blip during an unrelated edit.
+
       setSuggestError(true);
     } finally {
       setLoadingQueries(false);
@@ -316,6 +328,12 @@ export default function OnboardingWizard({
                           setCountry(c.code);
                           setRegion('');
                           setMunicipalityList([]);
+                          // Swedish taxonomy concepts are SE-only —
+                          // switching country must not carry them into
+                          // the new profile (review finding: prefilled
+                          // occSelected survived the switch).
+                          setOccupationSuggestions([]);
+                          setOccSelected(new Set());
                         }}
                         className={cn(
                           'rounded-xl border p-5 text-left transition-colors',

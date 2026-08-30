@@ -328,3 +328,31 @@ class TestSuggestionValidation:
         assert [p["code"] for p in stored] == ["Y8yf_nDR_FkB"], (
             "unknown client codes dropped at the boundary"
         )
+
+    def test_gb_onboarding_ignores_occupation_codes(self, db, taxonomy):
+        """Swedish taxonomy concepts must never store on a GB profile —
+        the country gate is enforced server-side, not trusted to the
+        client (review finding: an edit-mode country switch carried
+        valid SE codes onto a GB profile)."""
+        import asyncio
+        import uuid as _uuid
+
+        from app.api.v1.profiles import save_onboarding
+        from app.models import Profile, User
+        from app.schemas.profile import OnboardingRequest
+
+        uid = _uuid.uuid4()
+        db.add(User(id=uid, email=f"gb-{uid.hex[:8]}@test.example", hashed_password="x"))
+        db.add(Profile(is_active=1, user_id=uid, full_name="T", cv_file_name="c.pdf",
+                       cv_text="dev"))
+        db.commit()
+
+        payload = OnboardingRequest(
+            country="GB", region="Greater London", municipalities=["Manchester"],
+            search_queries=["developer"],
+            occupation_codes=["Y8yf_nDR_FkB"],  # valid SE concept — must still be refused
+        )
+        result = asyncio.run(save_onboarding(payload, db, db.get(User, uid)))
+        assert result.occupation_codes == [], (
+            "SE taxonomy codes on a GB profile: the country gate must drop them"
+        )
