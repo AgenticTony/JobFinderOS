@@ -126,7 +126,10 @@ def run_matching(
 
     Args:
         db: database session
-        limit: max jobs to process this run (default settings.MAX_JOBS_PER_MATCH_RUN)
+        limit: max AI evaluations this run, applied AFTER the cheap gates
+            (default settings.MAX_JOBS_PER_MATCH_RUN — a spend guard, never
+            a candidate-selection limit; selection is the oldest-first
+            MATCH_CANDIDATE_WINDOW fetch)
         profile: the caller's profile (None -> skipped, never re-resolved)
         max_seconds: hard time budget — matching stops and returns partial
             results when exceeded, so pipeline HTTP calls always respond
@@ -176,12 +179,22 @@ def _run_matching_inner(
             "error": "No profile passed — the caller must resolve and provide it",
         }
 
+    # `limit` caps AI EVALUATIONS per run (spend guard). It must never cap
+    # candidate SELECTION: the fetch below is oldest-first through a much
+    # larger window, and the cheap gates (language, dedupe, exclude
+    # keywords, no-description) trim it BEFORE any AI slot is spent — the
+    # original design applied this limit to the raw SQL with freshest-first
+    # order, so plausible ads starved behind junk until the 30-day sweep
+    # dismissed them unevaluated (the dream-job starvation bug).
     limit = limit or settings.MAX_JOBS_PER_MATCH_RUN
 
     # Per-user: jobs THIS user has never evaluated (no match row for
-    # (user, job)), freshest first. Postings globally dismissed as junk
-    # (stale sweep) stay excluded. job.status 'matched' is bookkeeping for
-    # "someone evaluated this" — every user still gets their own evaluation.
+    # (user, job)). OLDEST FIRST — the stale sweep kills postings at
+    # MAX_POSTING_AGE_DAYS, so the ads closest to that wall are evaluated
+    # before fresh ones (which stay eligible for weeks). Postings
+    # globally dismissed as junk (stale sweep) stay excluded; job.status
+    # 'matched' is bookkeeping for "someone evaluated this" — every user
+    # still gets their own evaluation.
     from sqlalchemy import and_
 
     unmatched = (
@@ -194,8 +207,8 @@ def _run_matching_inner(
             MatchResult.id.is_(None),
             JobPosting.status != "dismissed",
         )
-        .order_by(JobPosting.scraped_at.desc())
-        .limit(limit)
+        .order_by(JobPosting.scraped_at.asc())
+        .limit(settings.MATCH_CANDIDATE_WINDOW)
         .all()
     )
 
@@ -256,6 +269,7 @@ def _run_matching_inner(
 
     deadline = time.time() + max_seconds
     matches_created = 0
+    evaluated = 0
     try:
         for job in unmatched:
             # Cheap pre-filter: hard excludes skip the AI call entirely
@@ -273,6 +287,17 @@ def _run_matching_inner(
                 db.commit()
                 continue
 
+            # The evaluation cap counts AI SPEND, not candidates: the
+            # free gates above must never consume a slot.
+            if evaluated >= limit:
+                logger.info(
+                    "Evaluation cap (%d) reached after %d matches — "
+                    "remaining candidates stay queued for the next run",
+                    limit,
+                    matches_created,
+                )
+                break
+
             if time.time() > deadline:
                 logger.info(
                     "Matching time budget (%ss) reached after %d matches — remaining jobs stay 'new'",
@@ -281,6 +306,7 @@ def _run_matching_inner(
                 )
                 break
 
+            evaluated += 1
             started = time.time()
             try:
                 result = service.match_job(

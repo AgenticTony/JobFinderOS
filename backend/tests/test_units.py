@@ -2608,3 +2608,95 @@ class TestFuzzyDedupeWiring:
         a = self._job(db, "Software Developer", "Knowit Aktiebolag")
         b = self._job(db, "Software Developer", "Edument AB")
         assert _dismiss_fuzzy_duplicates(db, owner, [a, b], "test") == []
+
+
+class TestStarvationFix:
+    """The evaluation cap shipped as a raw SQL LIMIT on the candidate
+    query, freshest-first — plausible old ads starved behind newer ones
+    until the stale sweep dismissed them unevaluated (the dream-job
+    starvation bug). Selection is now oldest-first through a window, and
+    the cap counts AI evaluations AFTER the free gates."""
+
+    def _fake_service(self, monkeypatch, score=60):
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        calls = {"n": 0}
+
+        def fake_match(**kwargs):
+            calls["n"] += 1
+            return {
+                "score": score, "tier": AIService._tier_for_score(score),
+                "reasoning": "r", "matched_skills": [], "missing_skills": [],
+                "transferable_skills": [], "recommendation": "apply",
+                "cover_note": "c", "confidence": "medium",
+            }
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        svc.match_job = fake_match
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+        return calls
+
+    def test_oldest_job_gets_the_slot_under_a_tight_cap(self, db, monkeypatch):
+        from datetime import timedelta
+
+        from app.core.timeutil import utc_now
+        from app.models import MatchResult
+        from app.services import matcher_service
+
+        profile = _profile(db)
+        old = _job_row(db, status="new")
+        old.description = "An old but plausible description worth assessing."
+        old.scraped_at = utc_now() - timedelta(days=29)
+        fresh = _job_row(db, status="new")
+        fresh.title = "Backend developer"
+        fresh.company = "Globex"
+        fresh.description = "A fresh description worth assessing."
+        db.commit()
+
+        calls = self._fake_service(monkeypatch)
+        matcher_service.run_matching(
+            db, limit=1, profile=profile, user_id=profile.user_id
+        )
+
+        assert calls["n"] == 3, "one keeper job = triage + 2 keeper samples"
+        assert db.query(MatchResult).filter(MatchResult.job_id == old.id).count() == 1, (
+            "the ad nearest the stale-sweep wall must be evaluated first"
+        )
+        assert db.query(MatchResult).filter(MatchResult.job_id == fresh.id).count() == 0, (
+            "cap=1 queues the fresh ad for the next run — delayed, never lost"
+        )
+
+    def test_cheap_gates_dont_burn_evaluation_slots(self, db, monkeypatch):
+        from datetime import timedelta
+
+        from app.core.timeutil import utc_now
+        from app.models import MatchResult
+        from app.services import matcher_service
+
+        profile = _profile(db)
+        profile.exclude_keywords = '["ninja"]'
+        db.commit()
+
+        excluded = _job_row(db, status="new")
+        excluded.title = "Ninja rockstar developer"
+        excluded.description = "Dropped by the keyword gate, costing no AI call."
+        excluded.scraped_at = utc_now() - timedelta(days=29)
+        plausible = _job_row(db, status="new")
+        plausible.title = "Python developer"
+        plausible.description = "A real description long enough to be assessed."
+        plausible.scraped_at = utc_now() - timedelta(days=28)
+        db.commit()
+
+        self._fake_service(monkeypatch)
+        matcher_service.run_matching(
+            db, limit=1, profile=profile, user_id=profile.user_id
+        )
+
+        ex = db.query(MatchResult).filter(MatchResult.job_id == excluded.id).one()
+        assert ex.dismissed_reason == "excluded_keyword", "keyword gate fired, no AI"
+        assert db.query(MatchResult).filter(
+            MatchResult.job_id == plausible.id, MatchResult.dismissed_reason.is_(None)
+        ).count() == 1, "an excluded job must not consume the plausible job's slot"

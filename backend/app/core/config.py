@@ -54,7 +54,18 @@ class Settings(BaseSettings):
     APPLY_FROM_EMAIL: str = ""
 
     # Matching
-    MAX_JOBS_PER_MATCH_RUN: int = 25
+    # Safety ceiling on AI EVALUATIONS per run — a spend guard, never a
+    # throughput limit. Candidates are selected oldest-first through a
+    # much larger window (MATCH_CANDIDATE_WINDOW) and cheap-gated
+    # (language, dedupe, exclude keywords, no-description) BEFORE this
+    # cap applies, so no plausible ad is starved. History: shipped at 25
+    # as a raw SQL LIMIT placed before the gates with freshest-first
+    # order — combined with the 30-day stale sweep, plausible ads aged
+    # out unevaluated (the dream-job starvation bug).
+    MAX_JOBS_PER_MATCH_RUN: int = 200
+    # Never-evaluated candidates loaded per run (oldest first) for cheap
+    # pre-filtering before AI evaluation.
+    MATCH_CANDIDATE_WINDOW: int = 500
     # WO-02: emergency cost lever — 'off' skips the per-draft
     # fabrication judge (Layer A still guards). Default: on.
     FABRICATION_JUDGE: str = "on"
