@@ -50,3 +50,43 @@ explicitly disclaim semantic matching, which is our layer.
 - UK user growth (our weakest direct-employer coverage), or
 - users reporting jobs we miss that live on LinkedIn/career pages, or
 - scale where a subscription feed beats per-source scraping effort.
+
+## Pricing (added 2026-08-30, from their plans page)
+
+Jobs-credit model: Starter-20k $95/mo (20K jobs, 10K requests),
+Pro-50k $175, Pro-100k $250 (overage $0.0025/job), 600 req/min.
+Modified-jobs endpoint needs Pro; org enrichments need Pro-100k.
+
+**Unit economics vs our model:** ~$0.0025-0.005 per sourced job
+(plan-amortized) lands right next to our per-job AI evaluation cost
+(~$0.0034-0.007 incl. sampling). Adopting Fantastic roughly doubles
+per-job pipeline cost vs free official sources — fine for the margin
+model (~$1-2.50/user/month at 100 users on Starter/Pro-50k), but it
+must BUY real coverage, not duplicate Platsbanken.
+
+**Credit traps to design around:**
+- Credits are per job RETURNED. Two overlapping filter requests pay
+  twice for the same job. Ingest per UNION scope (title+location of
+  all users' professions/regions), never per user.
+- Full-country feeds are the wrong shape: Sweden combined 55-65K/mo
+  fits Pro-100k ($250) but UK combined 560-680K/mo is enterprise
+  territory — scoped filters are mandatory for UK.
+- Their quota headers (x-api-jobs-*) give real-time budgeting; wire
+  into hunt logging on integration.
+
+**Product upgrade hiding in here:** the expired-jobs endpoints give
+REAL closure data — our current 30-day age heuristic retires ads that
+may still be open and keeps some that closed. Matching against
+genuinely-open jobs is a honesty feature, not plumbing. (Caveat:
+expired-jb only re-checks LinkedIn; Wellfound/YC listings need our
+own freshness sweep — keep MAX_POSTING_AGE for those.)
+
+**Mechanics map 1:1 onto the delta-hunt design:** their 24h
+same-hour polling == our hunt cadence; date_created_gte recovery ==
+watermark+overlap (their outage recipe is literally our
+delta_since/backfill logic); 7d/6m backfills == backfill mode;
+limit+offset pagination like jobtech. Integration risk is low.
+
+Revised trigger: worth it from ~50-100 paying users, or earlier if
+UK launches (our thinnest direct coverage) — scoped filters sized
+first via the free-trial count endpoints.
