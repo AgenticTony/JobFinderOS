@@ -18,6 +18,7 @@ Two operations:
 import hashlib
 import json
 import logging
+import math
 import re
 from typing import Any, Dict, Optional
 
@@ -222,9 +223,23 @@ Evaluate this job for me and respond with ONLY valid JSON in the required format
             # treat it as a 0-point match (which would dismiss it forever).
             raise ValueError("Unparseable JSON from model (truncated/malformed response)")
 
+        # AI-10: a missing or non-numeric score is the same format failure.
+        # parsed.get("score", 0) fed garbage into _clamp_score, whose
+        # TypeError/ValueError fallback returned a CONFIDENT 0 — one
+        # below-threshold sample and the matcher dismissed the job forever.
+        # (NaN included: json.loads accepts the bare literal and the clamp
+        # turned it into 0 too.) Raise; the caller leaves the job 'new'.
+        score = parsed.get("score")
+        if (isinstance(score, bool) or not isinstance(score, (int, float))
+                or not math.isfinite(score)):
+            raise ValueError(
+                "Malformed match response: 'score' is missing or "
+                f"non-numeric ({score!r}) — refusing to record a confident 0"
+            )
+
         return {
-            "score": self._clamp_score(parsed.get("score", 0)),
-            "tier": self._tier_for_score(parsed.get("score", 0), parsed.get("tier")),
+            "score": self._clamp_score(score),
+            "tier": self._tier_for_score(score, parsed.get("tier")),
             "reasoning": parsed.get("reasoning", ""),
             "matched_skills": parsed.get("matched_skills", []),
             "missing_skills": parsed.get("missing_skills", []),
@@ -309,9 +324,26 @@ Prepare my tailored application package.
         raw = self._complete(system_prompt, user_message, kind="tailor")
         parsed = self._parse_json(raw)
 
+        # AI-9 (live-confirmed): a malformed response parses to {} (or drops
+        # a document), and the old code returned empty strings — the draft
+        # went 'ready' with a 0-char cover letter + 0-char CV, passed the
+        # fabrication guard vacuously, and dead-ended at submit. The raise
+        # IS the fix, exactly like match_job/judge_fabrication: malformed
+        # output is a format failure, never a package. draft_service's
+        # except marks the draft 'failed' with this error (regenerable).
+        if not self._non_empty_str(parsed.get("cover_letter")) or \
+                not self._non_empty_str(parsed.get("tailored_cv")):
+            truncated = getattr(self, "_last_finish_reason", None) == "length"
+            raise ValueError(
+                "Malformed tailoring response: cover_letter/tailored_cv "
+                "missing or empty"
+                + (" (finish_reason=length — output was truncated)"
+                   if truncated else "")
+            )
+
         return {
-            "cover_letter": parsed.get("cover_letter", ""),
-            "tailored_cv": parsed.get("tailored_cv", ""),
+            "cover_letter": parsed["cover_letter"],
+            "tailored_cv": parsed["tailored_cv"],
             "changes_summary": parsed.get("changes_summary", []),
         }
 
@@ -605,6 +637,16 @@ An empty list means the document is faithful."""
     #: touched — tests/test_calibration.py fails loudly when that happens.
     MATCHING_PROMPT_MAJOR = "m2"
 
+    #: AI-13: bump when the scoring-INPUT COMPOSITION changes — anything
+    #: the model sees besides the system prompt (the profile-context
+    #: rendering in build_profile_context, the cv_text/job_description
+    #: truncation lengths in match_job, the sampling temperature). The
+    #: hash used to cover only the prompt text, so the experience_years
+    #: removal from the profile context changed what the model SAW with
+    #: no version bump and scores silently stopped being comparable.
+    #: 1 = the implicit pre-constant era; 2 = current composition.
+    MATCHING_INPUT_COMPOSITION_VERSION = 2
+
     @classmethod
     def matching_prompt_version(cls) -> str:
         """Stable id for the scoring prompt that produced a score.
@@ -615,7 +657,13 @@ An empty list means the document is faithful."""
         backlog is detectable instead of silently mis-ranked.
         """
         body = cls._build_matching_prompt(cls.__new__(cls))
-        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:8]
+        composition = (
+            "matching-input-composition-v"
+            f"{cls.MATCHING_INPUT_COMPOSITION_VERSION}"
+        )
+        digest = hashlib.sha256(
+            (body + "\n" + composition).encode("utf-8")
+        ).hexdigest()[:8]
         return f"{cls.MATCHING_PROMPT_MAJOR}-{digest}"
 
     # ------------------------------------------------------------------
@@ -629,6 +677,9 @@ An empty list means the document is faithful."""
         kind labels the ai_usage row (WO-05): match | tailor | judge |
         extract | suggest | unknown.
         """
+        # Reset per call: callers (AI-9) read this when a response turns
+        # out malformed, to distinguish truncation from pure garbage.
+        self._last_finish_reason = None
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -644,6 +695,10 @@ An empty list means the document is faithful."""
             max_tokens=self.max_tokens,
             extra_body={"thinking": {"type": self.thinking}},
         )
+        if response.choices:
+            self._last_finish_reason = getattr(
+                response.choices[0], "finish_reason", None
+            )
 
         record_ai_usage(kind, self.model, response)
         result_text = response.choices[0].message.content
@@ -687,6 +742,12 @@ An empty list means the document is faithful."""
                 except json.JSONDecodeError:
                     return {}
             return {}
+
+    @staticmethod
+    def _non_empty_str(value) -> bool:
+        """True for a real str with non-whitespace content (AI-9: a
+        'cover_letter' of '' or '   ' is a missing document)."""
+        return isinstance(value, str) and bool(value.strip())
 
     @staticmethod
     def _clamp_score(score) -> int:

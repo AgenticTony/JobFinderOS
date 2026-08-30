@@ -109,7 +109,7 @@ def create_or_replace_profile_from_pdf(
     cv_text = FileService.extract_text_from_pdf(file_content)
     path, safe_name = _store_cv_file(file_content, filename)
 
-    extracted: dict = {}
+    extracted: Optional[dict] = None
     if ai_service_available():
         try:
             extracted = get_ai_service().extract_profile(cv_text)
@@ -127,7 +127,22 @@ def create_or_replace_profile_from_pdf(
     profile.cv_file_path = path
     profile.cv_file_name = filename.rsplit("/", 1)[-1]
     profile.cv_file_size = len(file_content)
-    _apply_extraction(profile, extracted)
+    if extracted:
+        _apply_extraction(profile, extracted)
+    else:
+        # AI-11 (live-confirmed): a malformed extraction parses to {} (and
+        # a raised one lands here too — the except above leaves it None).
+        # _apply_extraction(profile, {}) NULLs full_name/email/phone/title/
+        # years, so a re-upload during a Z.ai hiccup wiped a previously-good
+        # profile. The write is guarded HERE because raising inside the AI
+        # service does not help — this function swallows it. An empty
+        # extraction is a no-op for the derived fields: the new CV text and
+        # file metadata above still land, and the existing fields survive.
+        logger.warning(
+            "AI profile extraction produced no fields for user %s — keeping "
+            "existing profile fields (extracted=%r)",
+            user_id, extracted,
+        )
     db.add(profile)
     db.commit()
     db.refresh(profile)
