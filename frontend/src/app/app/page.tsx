@@ -81,6 +81,30 @@ export default function Home() {
   const [pipelineResult, setPipelineResult] = useState<PipelineRunResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
+  // P0-4 draft-editor cache: typed cover letters/CVs must survive ANY view
+  // switch. The keyed <motion.div> below remounts the whole view subtree on
+  // every view/sub-tab change (the transition animation depends on the key),
+  // so editor state living inside DraftCard was destroyed on each remount —
+  // minutes of typing vanished by clicking a sub-tab, silently. The cache
+  // lives HERE, above the keyed container, keyed by draft id. Entries hold
+  // ONLY the fields the user actually typed; untouched fields keep deriving
+  // from the server draft, which is also the FE-20 pristine-sync: a
+  // drafting→ready flip under a mounted card now shows the AI's text with
+  // no effect code. An entry existing at all means "dirty"; the entry is
+  // deleted once its edits are flushed to the server.
+  const [draftEdits, setDraftEdits] = useState<Record<number, DraftEdits>>({});
+  const anyDraftDirty = Object.keys(draftEdits).length > 0;
+  const editDraft = useCallback((id: number, patch: DraftEdits) => {
+    setDraftEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }, []);
+  const clearDraftEdits = useCallback((id: number) => {
+    setDraftEdits((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
   // Sidebar rail/expanded choice — persisted so the console opens the way
   // the user left it. Adopted after mount; written only on user toggle
   // (never on mount, so a stray initial render can't clobber the choice).
@@ -109,6 +133,42 @@ export default function Home() {
       localStorage.setItem('jfos-rail-collapsed', next ? '1' : '0');
       return next;
     });
+
+  // P0-4: leaving a view with unsaved draft edits must be a deliberate
+  // act, never a silent loss. window.confirm matches this codebase's
+  // weight class (the design system has no dialog component yet). OK
+  // switches the view — the edits stay in the cache above until saved
+  // or the tab closes; Cancel keeps the user where they are.
+  const switchView = useCallback(
+    (next: View) => {
+      if (next === view) return;
+      if (
+        Object.keys(draftEdits).length > 0 &&
+        !window.confirm(
+          'You have unsaved draft edits. Leave this view? (Cancel to stay and save them.)'
+        )
+      ) {
+        return;
+      }
+      setView(next);
+    },
+    [view, draftEdits]
+  );
+
+  // P0-4: typed work must also survive an accidental tab close —
+  // beforeunload is the browser's only hook for that, and it fires ONLY
+  // while some draft is dirty. (Auto-save deliberately not added: the
+  // review marks it optional and it would complicate the save flow.)
+  useEffect(() => {
+    if (!anyDraftDirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Chrome's legacy requirement — the dialog doesn't show without it
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [anyDraftDirty]);
 
   const refresh = useCallback(async () => {
     const [statusRes, profileRes, pipeRes] = await Promise.allSettled([
@@ -232,7 +292,7 @@ export default function Home() {
 
   const handlePrepare = async (jobId: number) => {
     await prepareDraft(jobId); // tailors CV + cover letter (~5-20s)
-    setView('apps-review'); // take the user straight to the review stage
+    switchView('apps-review'); // take the user straight to the review stage
     await refresh();
   };
 
@@ -303,7 +363,7 @@ export default function Home() {
             return (
             <button
               key={id}
-              onClick={() => setView(id)}
+              onClick={() => switchView(id)}
               aria-current={active ? 'page' : undefined}
               className={cn(
                 'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium',
@@ -327,14 +387,14 @@ export default function Home() {
       <div className="md:flex">
         <Sidebar
           view={view}
-          onNavigate={setView}
+          onNavigate={switchView}
           pendingCount={pendingCount}
           reviewCount={openDrafts}
           nextRunAt={pipeStatus?.next_run_at ?? null}
           schedulerEnabled={huntsAutomated}
           intervalMinutes={pipeStatus?.scrape_interval_minutes ?? 180}
           profile={profile}
-          onEditSetup={() => (profile ? setShowWizard(true) : setView('profile'))}
+          onEditSetup={() => (profile ? setShowWizard(true) : switchView('profile'))}
           collapsed={railCollapsed}
           onToggleCollapsed={toggleRail}
         >
@@ -363,9 +423,9 @@ export default function Home() {
                     matchPolling={matchPolling}
                     profileStatus={status}
                     openDrafts={openDrafts}
-                    onOpenMatches={() => setView('matches')}
-                    onOpenReview={() => setView('apps-review')}
-                    onOpenSent={() => setView('apps-sent')}
+                    onOpenMatches={() => switchView('matches')}
+                    onOpenReview={() => switchView('apps-review')}
+                    onOpenSent={() => switchView('apps-sent')}
                     pendingMatches={matches.filter((m) => !m.decision)}
                     finishApplying={finishApplying}
                     onDecision={handleDecision}
@@ -382,7 +442,7 @@ export default function Home() {
                     appliedJobIds={appliedJobIds}
                     onDecision={handleDecision}
                     onPrepare={handlePrepare}
-                    onSwitch={(v) => setView(v)}
+                    onSwitch={switchView}
                     subTabsAlways={railCollapsed}
                   />
                 )}
@@ -394,8 +454,11 @@ export default function Home() {
                     applications={applications}
                     onChanged={refresh}
                     onPrepare={handlePrepare}
-                    onSwitch={(v) => setView(v)}
+                    onSwitch={switchView}
                     subTabsAlways={railCollapsed}
+                    draftEdits={draftEdits}
+                    onEditDraft={editDraft}
+                    onClearDraftEdits={clearDraftEdits}
                   />
                 )}
 
@@ -795,6 +858,9 @@ function ApplicationsView({
   onChanged,
   onSwitch,
   subTabsAlways = false,
+  draftEdits,
+  onEditDraft,
+  onClearDraftEdits,
 }: {
   page: 'apps-review' | 'apps-sent';
   drafts: ApplicationDraft[];
@@ -803,6 +869,9 @@ function ApplicationsView({
   onPrepare: (jobId: number) => Promise<void>;
   onSwitch: (v: View) => void;
   subTabsAlways?: boolean;
+  draftEdits: Record<number, DraftEdits>;
+  onEditDraft: (id: number, patch: DraftEdits) => void;
+  onClearDraftEdits: (id: number) => void;
 }) {
   const openDrafts = drafts.filter((d) => d.status !== 'submitted');
   // Accordion: one draft open at a time; a single draft opens by itself
@@ -872,6 +941,9 @@ function ApplicationsView({
               expanded={openId === d.id}
               onToggle={() => setOpenId(openId === d.id ? null : d.id)}
               onChanged={onChanged}
+              edits={draftEdits[d.id]}
+              onEdit={(patch) => onEditDraft(d.id, patch)}
+              onClearEdits={() => onClearDraftEdits(d.id)}
             />
           ))}
         </div>
@@ -1040,22 +1112,64 @@ function SentApplicationCard({
   );
 }
 
+// Unsaved draft edits, hoisted above the keyed view container (P0-4).
+// Only fields the user actually typed are present — presence of an entry
+// (or a field in it) means "touched"; absence means pristine, and the
+// displayed value derives straight from the server draft.
+type DraftEdits = { coverLetter?: string; tailoredCv?: string };
+
+// FE-20 empty-clobber guard: the PUT sends exactly what the user sees —
+// EXCEPT a field they never touched that was empty on the server, which
+// is omitted entirely (the backend's save_draft_edits treats an omitted
+// field as "unchanged", so AI text that arrived after mount can never be
+// overwritten with the empty string the card booted with). A field the
+// user deliberately cleared ('') is still sent — that's an intentional
+// edit, not a clobber.
+function draftSavePayload(
+  draft: ApplicationDraft,
+  edits: DraftEdits | undefined,
+): { cover_letter?: string; tailored_cv?: string } {
+  const payload: { cover_letter?: string; tailored_cv?: string } = {};
+  if (edits?.coverLetter !== undefined || draft.cover_letter) {
+    payload.cover_letter = edits?.coverLetter ?? draft.cover_letter ?? '';
+  }
+  if (edits?.tailoredCv !== undefined || draft.tailored_cv) {
+    payload.tailored_cv = edits?.tailoredCv ?? draft.tailored_cv ?? '';
+  }
+  return payload;
+}
+
 // A single draft: read/edit cover letter + tailored CV, then submit
 function DraftCard({
   draft,
   expanded,
   onToggle,
   onChanged,
+  edits,
+  onEdit,
+  onClearEdits,
 }: {
   draft: ApplicationDraft;
   expanded: boolean;
   onToggle: () => void;
   onChanged: () => Promise<void>;
+  /** Unsaved local edits (hoisted cache, P0-4); undefined = pristine */
+  edits: DraftEdits | undefined;
+  onEdit: (patch: DraftEdits) => void;
+  onClearEdits: () => void;
 }) {
-  const [coverLetter, setCoverLetter] = useState(draft.cover_letter ?? '');
-  const [tailoredCv, setTailoredCv] = useState(draft.tailored_cv ?? '');
+  // P0-4 + FE-20: the editor's text no longer lives in component state.
+  // It derives from the hoisted edits cache when the user typed, else
+  // from the server draft — so (a) a remount (any view/sub-tab switch)
+  // can never lose typed text, and (b) a drafting→ready flip under a
+  // mounted card populates the fields by itself: pristine values always
+  // mirror the server, the same pristine-sync idea ProfileView uses,
+  // achieved structurally instead of via an effect. Only transient
+  // busy/error UI state remains local.
+  const coverLetter = edits?.coverLetter ?? draft.cover_letter ?? '';
+  const tailoredCv = edits?.tailoredCv ?? draft.tailored_cv ?? '';
+  const dirty = edits !== undefined;
   const [busy, setBusy] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const job = draft.job;
@@ -1064,8 +1178,8 @@ function DraftCard({
   const save = async () => {
     setBusy('save');
     try {
-      await updateDraft(draft.id, { cover_letter: coverLetter, tailored_cv: tailoredCv });
-      setDirty(false);
+      await updateDraft(draft.id, draftSavePayload(draft, edits));
+      onClearEdits();
       await onChanged();
     } finally {
       setBusy(null);
@@ -1077,7 +1191,8 @@ function DraftCard({
     setBusy(`submit-${method}`);
     try {
       if (dirty) {
-        await updateDraft(draft.id, { cover_letter: coverLetter, tailored_cv: tailoredCv });
+        await updateDraft(draft.id, draftSavePayload(draft, edits));
+        onClearEdits();
       }
       const application = await submitDraft(draft.id, method);
       if (method === 'browser' && application.apply_url) {
@@ -1101,8 +1216,8 @@ function DraftCard({
   // Downloads always reflect saved content — flush pending edits first
   const download = async (kind: 'cover-letter' | 'cv') => {
     if (dirty) {
-      await updateDraft(draft.id, { cover_letter: coverLetter, tailored_cv: tailoredCv });
-      setDirty(false);
+      await updateDraft(draft.id, draftSavePayload(draft, edits));
+      onClearEdits();
     }
     if (kind === 'cover-letter') {
       await downloadDraftCoverLetterPdf(draft.id);
@@ -1224,10 +1339,7 @@ function DraftCard({
             </div>
             <textarea
               value={coverLetter}
-              onChange={(e) => {
-                setCoverLetter(e.target.value);
-                setDirty(true);
-              }}
+              onChange={(e) => onEdit({ coverLetter: e.target.value })}
               rows={10}
               className="w-full rounded-lg border border-line bg-ink p-3 font-mono text-sm leading-relaxed text-hi outline-none transition-colors focus:border-signal"
             />
@@ -1248,10 +1360,7 @@ function DraftCard({
             </div>
             <textarea
               value={tailoredCv}
-              onChange={(e) => {
-                setTailoredCv(e.target.value);
-                setDirty(true);
-              }}
+              onChange={(e) => onEdit({ tailoredCv: e.target.value })}
               rows={16}
               className="w-full rounded-lg border border-line bg-ink p-3 font-mono text-sm leading-relaxed text-hi outline-none transition-colors focus:border-signal"
             />
