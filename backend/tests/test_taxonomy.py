@@ -55,6 +55,7 @@ def db():
 TAXONOMY_HITS = [
     {"taxonomy/id": "Y8yf_nDR_FkB", "taxonomy/preferred-label": "Mjukvaruutvecklare"},
     {"taxonomy/id": "cmp1", "taxonomy/preferred-label": "Systemutvecklare/Programmerare"},
+    {"taxonomy/id": "fin1", "taxonomy/preferred-label": "Chef, Corporate Finance"},
     {"taxonomy/id": "n1", "taxonomy/preferred-label": "Sjuksköterska, grundutbildad"},
     {"taxonomy/id": "n2", "taxonomy/preferred-label": "Sjuksköterska, akutmottagning"},
     {"taxonomy/id": "jjq8_QHL_yGc", "taxonomy/preferred-label": "Kassabiträde",
@@ -115,10 +116,12 @@ class TestResolution:
         picks = taxonomy.resolve_labels(["Systemutvecklare"])
         assert [p["code"] for p in picks] == ["cmp1"]
 
-    def test_ambiguous_prefix_drops(self, taxonomy):
-        """'Sjuksköterska' is the head of TWO compounds - picking one
-        arbitrarily would be fabrication, so it resolves to nothing."""
-        picks = taxonomy.resolve_labels(["Sjuksköterska"])
+    def test_comma_compound_does_not_resolve(self, taxonomy):
+        """Comma compounds NARROW ('Chef, Corporate Finance' is a
+        subtype, not a synonym) — bare 'Chef' must resolve to nothing,
+        never to the finance specialist concept (review finding,
+        verified live). Slash compounds still resolve (test above)."""
+        picks = taxonomy.resolve_labels(["Chef", "Sjuksköterska"])
         assert picks == []
 
 
@@ -200,8 +203,81 @@ class TestUnionCodes:
         db.commit()
 
         ctxs = {c["country"]: c for c in build_union_contexts(db)}
-        merged = sorted(p["code"] for p in ctxs["SE"]["occupation_codes"])
-        assert merged == ["A", "B"], "union of every user's codes, deduped"
+        merged = sorted(ctxs["SE"]["occupation_codes"])
+        assert merged == ["A", "B"], (
+            "union of every user's codes, deduped — PLAIN STRINGS, the "
+            "shape build_scrape_context emits and the scraper consumes "
+            "(this shipped with dicts and no-op'd every scheduled hunt)"
+        )
+
+    def test_union_context_feeds_the_scraper_as_codes(self, db, monkeypatch):
+        """The composition the scheduled hunt actually performs:
+        build_union_contexts -> JobtechScraper.fetch. The taxonomy unit
+        must hit the API as a bare concept code (review finding: a
+        stringified dict returns HTTP 200 with zero hits — silent
+        no-op)."""
+        import uuid as _uuid
+
+        from app.models import Profile, User
+        from app.services.pipeline import build_union_contexts
+        from app.services.scrapers import jobtech
+
+        u = User(id=_uuid.uuid4(), email="comp@test.example", hashed_password="x")
+        db.add(u)
+        db.add(Profile(is_active=1, user_id=u.id, full_name="T", cv_file_name="c.pdf",
+                       cv_text="dev", country="SE", region=None,
+                       occupation_codes='[{"code":"fg7B_yov_smw","label":"X"}]',
+                       search_queries='["utvecklare"]'))
+        db.commit()
+
+        captured = []
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"hits": []}
+
+        monkeypatch.setattr(jobtech.httpx, "get",
+                            lambda url, params=None, **kw: (captured.append(params), _Resp())[1])
+
+        union_ctx = next(c for c in build_union_contexts(db) if c["country"] == "SE")
+        jobtech.JobtechScraper().fetch(union_ctx)
+
+        occ_params = [p for req in captured for p in req if p[0] == "occupation-name"]
+        assert occ_params == [("occupation-name", "fg7B_yov_smw")], (
+            f"taxonomy unit must be a bare code: {occ_params}"
+        )
+
+
+class TestFailureNotCached:
+    def test_transient_feed_failure_is_retried(self, monkeypatch):
+        """One outage must not pin an empty table for the process
+        lifetime (review finding: everyone onboarding during the window
+        silently lost their codes until the next deploy)."""
+        import app.services.occupation_taxonomy as ot
+
+        monkeypatch.setattr(ot, "_BY_LABEL", None)
+        calls = {"n": 0}
+
+        def flaky_get(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise TimeoutError("feed down")
+            return type("R", (), {
+                "raise_for_status": lambda s: None,
+                "json": staticmethod(lambda s=None: [
+                    {"taxonomy/id": "ok1", "taxonomy/preferred-label": "Mjukvaruutvecklare"},
+                ]),
+            })()
+
+        monkeypatch.setattr(ot.httpx, "get", flaky_get)
+        assert ot.resolve_labels(["Mjukvaruutvecklare"]) == [], "first call: outage"
+        assert ot._BY_LABEL is None, "failure must not be cached"
+        assert ot.resolve_labels(["Mjukvaruutvecklare"]) == [
+            {"code": "ok1", "label": "Mjukvaruutvecklare"}
+        ], "second call: retried and resolved"
 
 
 class TestSuggestionValidation:

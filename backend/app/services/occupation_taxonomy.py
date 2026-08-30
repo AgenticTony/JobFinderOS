@@ -54,27 +54,41 @@ def _names() -> Dict[str, Dict[str, str]]:
             follow_redirects=True,
         )
         resp.raise_for_status()
+        # NOTE: this endpoint (verified live) returns exactly four keys
+        # — definition, id, preferred-label, type — and serves CURRENT
+        # concepts only; there is no deprecation flag to filter on. If
+        # a future version starts returning deprecated entries they
+        # must be filtered here, or each one silently costs a zero-hit
+        # search unit per hunt.
         for c in resp.json():
-            if c.get("taxonomy/deprecated"):
-                continue
             label = c.get("taxonomy/preferred-label")
             code = c.get("taxonomy/id")
             if label and code:
                 table[_normalize(label)] = {"code": str(code), "label": str(label)}
     except Exception as e:  # noqa: BLE001 — taxonomy outage must not break hunts
+        # Cache the SUCCESS only: a cached empty table would silently
+        # discard every user's codes for the process lifetime after
+        # one transient outage (review finding). This call returns
+        # empty and the next call retries the fetch.
         logger.warning("[occupation-taxonomy] concepts fetch failed (%s) — "
-                       "falling back to free-text queries only", e)
+                       "free-text queries only this call, will retry", e)
+        return table
     _BY_LABEL = table
     logger.info("[occupation-taxonomy] %d occupation-name concepts loaded", len(table))
     return table
 
 
 def _prefix_match(candidate: str, table: Dict[str, Dict[str, str]]) -> Optional[Dict[str, str]]:
-    """Compound-label resolution: official names are often compound —
-    'Systemutvecklare/Programmerare', 'Sjuksköterska, grundutbildad' —
-    so a candidate that is the HEAD of exactly ONE compound label
-    resolves to it. Multiple hits = ambiguous = dropped (fabrication
-    safety: 'utvecklare' matches many labels and resolves to nothing)."""
+    """Compound-label resolution, SLASH compounds only: 'X/Y' lists
+    synonyms of the same role ('Systemutvecklare/Programmerare' covers
+    Systemutvecklare; 'Bagare/Konditor' covers Bagare), so a candidate
+    that is the head of exactly ONE slash-compound resolves to it.
+
+    Comma/parenthetical compounds are REJECTED deliberately (review
+    finding, verified live): 'Chef, Corporate Finance' is a NARROWING
+    subtype — resolving bare 'Chef' to it searches investment-banking
+    ads for a restaurant manager. Unique is not the same as correct.
+    Multiple hits = ambiguous = dropped, as before."""
     cand = _normalize(candidate)
     if not cand:
         return None
@@ -82,10 +96,8 @@ def _prefix_match(candidate: str, table: Dict[str, Dict[str, str]]) -> Optional[
     for norm, entry in table.items():
         if norm == cand:
             return entry
-        for sep in ("/", ",", " ("):
-            if norm.startswith(cand + sep):
-                hits.append(entry)
-                break
+        if norm.startswith(cand + "/"):
+            hits.append(entry)
     return hits[0] if len(hits) == 1 else None
 
 

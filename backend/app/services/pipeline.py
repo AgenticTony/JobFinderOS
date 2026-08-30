@@ -59,7 +59,10 @@ def _watermark_queries(ctx: Dict) -> List[str]:
     concept. A new code has no watermark -> deep backfill for its
     history, exactly like a new query."""
     qs = [str(q).strip() for q in (ctx.get("queries") or []) if str(q).strip()]
-    qs += [f"name:{c}" for c in (ctx.get("occupation_codes") or []) if c]
+    for c in (ctx.get("occupation_codes") or []):
+        code = c.get("code") if isinstance(c, dict) else c  # defensive: dicts never again
+        if code:
+            qs.append(f"name:{code}")
     return qs or [""]
 
 
@@ -512,11 +515,16 @@ def build_union_contexts(db: Session) -> List[Dict]:
         for q in parse_json_list(p.search_queries) or []:
             if q and q not in g["queries"]:
                 g["queries"].append(q)
+        # PLAIN CODE STRINGS — the exact shape build_scrape_context
+        # emits and the scraper/watermark consume. This shipped once
+        # appending {"code","label"} dicts: the scraper stringified them
+        # into occupation-name={'code': ...} which the live API answers
+        # with 200 and zero hits — the recall feature silently no-op'd
+        # on every SCHEDULED hunt (review finding, verified live).
         for pick in parse_json_list(getattr(p, "occupation_codes", None)) or []:
-            if isinstance(pick, dict) and pick.get("code"):
-                g.setdefault("occupation_codes", [])
-                if pick["code"] not in [x["code"] for x in g["occupation_codes"]]:
-                    g["occupation_codes"].append(pick)
+            code = pick.get("code") if isinstance(pick, dict) else None
+            if code and code not in g["occupation_codes"]:
+                g["occupation_codes"].append(str(code))
         for lang in parse_json_list(p.languages) or []:
             if lang and lang not in g["languages"]:
                 g["languages"].append(lang)

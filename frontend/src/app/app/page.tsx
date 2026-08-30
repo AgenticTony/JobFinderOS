@@ -429,6 +429,7 @@ export default function Home() {
             profile.municipalities ?? (profile.municipality ? [profile.municipality] : [])
           }
           initialSearchRadiusKm={profile.search_radius_km ?? 0}
+          initialOccupationCodes={(profile.occupation_codes ?? []).map((o) => o.code)}
           initialQueries={profile.search_queries}
         />
       )}

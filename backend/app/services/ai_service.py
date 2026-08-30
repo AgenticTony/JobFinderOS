@@ -411,13 +411,15 @@ Respond with ONLY valid JSON (no markdown):
         # Occupation concepts, SE only: the model outputs LABELS; the
         # taxonomy service is the single authority that turns a label
         # into a real code — unresolved labels are dropped, never
-        # fabricated. The direct queries are also tried as labels for
-        # free (a good query often IS a standard occupation name).
+        # fabricated. ONLY the dedicated occupation_names field is
+        # resolved: free-text queries are bare generic words ('Chef',
+        # 'Assistent') that the compound-prefix rule must never see
+        # (review finding — 'Chef' via a query became 'Chef, Corporate
+        # Finance', pre-selected by default).
         if country.upper() == "SE":
             from app.services import occupation_taxonomy
 
             candidate_labels = [str(n) for n in parsed.get("occupation_names", [])]
-            candidate_labels += direct
             picks = occupation_taxonomy.resolve_labels(candidate_labels)[:8]
             if picks:
                 result["occupation_suggestions"] = picks

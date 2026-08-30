@@ -48,6 +48,17 @@ async def lifespan(app: FastAPI):
     # racing hunt cycles (D3). ENABLE_SCHEDULER stays as the dev-mode
     # single-process convenience (default false = production shape).
     start_scheduler()
+    # Warm the occupation taxonomy table off the event loop — the
+    # first onboarding otherwise pays a ~515 KB sync fetch inside a
+    # request (failure tolerated: endpoints retry via threadpool).
+    from fastapi.concurrency import run_in_threadpool
+
+    try:
+        from app.services import occupation_taxonomy
+
+        await run_in_threadpool(occupation_taxonomy._names)
+    except Exception as e:  # noqa: BLE001 — warming is best-effort
+        logger.warning("taxonomy warm-up failed (will retry on use): %s", e)
     yield
     stop_scheduler()
 

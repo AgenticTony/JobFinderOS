@@ -149,7 +149,14 @@ async def save_onboarding(
     # simply passes through an empty list.
     from app.services import occupation_taxonomy
 
-    valid_picks = occupation_taxonomy.validate_codes(payload.occupation_codes or [])
+    # The taxonomy table is a ~515 KB sync fetch on first use — never
+    # run it on the event loop (review finding: this endpoint
+    # previously did no network I/O and now stalled every concurrent
+    # request on the single-worker deploy until the fetch returned).
+    # Startup warms the table; this covers cold and failed boots.
+    valid_picks = await run_in_threadpool(
+        occupation_taxonomy.validate_codes, payload.occupation_codes or []
+    )
     if payload.occupation_codes and not valid_picks:
         logger.info(
             "onboarding: %d occupation code(s) submitted, none valid — dropped",

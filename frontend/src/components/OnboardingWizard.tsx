@@ -37,6 +37,9 @@ interface Props {
   initialMunicipality?: string;
   initialMunicipalities?: string[];
   initialSearchRadiusKm?: number;
+  // Saved taxonomy codes — edit mode pre-selections them so re-saving
+  // setup (or a GLM blip during it) never wipes stored professions
+  initialOccupationCodes?: string[];
   initialQueries?: string[];
 }
 
@@ -75,6 +78,7 @@ export default function OnboardingWizard({
   initialMunicipality,
   initialMunicipalities,
   initialSearchRadiusKm,
+  initialOccupationCodes,
   initialQueries,
 }: Props) {
   const [step, setStep] = useState(0);
@@ -101,7 +105,12 @@ export default function OnboardingWizard({
   // SE taxonomy concepts: validated profession codes — each becomes a
   // search unit that catches ads whose title never contains the query
   const [occupationSuggestions, setOccupationSuggestions] = useState<OccupationSuggestion[]>([]);
-  const [occSelected, setOccSelected] = useState<Set<string>>(new Set());
+  // Prefilled with the user's SAVED codes in edit mode — submit always
+  // sends this set, so professions survive setup edits and survive a
+  // failed/changed suggestion fetch (review finding: both used to wipe).
+  const [occSelected, setOccSelected] = useState<Set<string>>(
+    new Set(initialOccupationCodes ?? [])
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set(initialQueries ?? []));
   const [customQueries, setCustomQueries] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
@@ -138,15 +147,17 @@ export default function OnboardingWizard({
       );
       const occs = result.occupation_suggestions ?? [];
       setOccupationSuggestions(occs);
-      // Professions default ON — the taxonomy match is the highest
-      // -recall signal; the user can still switch any off.
-      setOccSelected(new Set(occs.map((o) => o.code)));
+      // Suggestions default ON, MERGED with anything already saved —
+      // never a replacement: re-running setup must not deselect a
+      // stored profession the fresh call didn't happen to suggest.
+      setOccSelected((prev) => new Set([...prev, ...occs.map((o) => o.code)]));
       fetchedKeyRef.current = `${country}|${mode}`;
     } catch {
       setDirectQueries([]);
       setPivotSuggestions([]);
       setOccupationSuggestions([]);
-      setOccSelected(new Set());
+      // occSelected deliberately survives: a GLM blip during an
+      // unrelated edit must not wipe the user's saved professions.
       setSuggestError(true);
     } finally {
       setLoadingQueries(false);

@@ -157,10 +157,13 @@ class JobtechScraper(BaseScraper):
         # with q: the API would intersect them and lose recall);
         # pagination, place and delta params apply identically.
         search_units: List[tuple] = [("q", q) for q in queries]
-        search_units += [
-            ("occupation-name", str(c))
-            for c in (context or {}).get("occupation_codes") or []
-        ]
+        for c in (context or {}).get("occupation_codes") or []:
+            # Defensive: a {"code","label"} dict here stringifies into
+            # a value the API answers with zero hits (verified live) —
+            # always send the bare concept code.
+            code = c.get("code") if isinstance(c, dict) else c
+            if code:
+                search_units.append(("occupation-name", str(code)))
 
         for unit_kind, unit_value in search_units:
             for page in range(max_pages):
