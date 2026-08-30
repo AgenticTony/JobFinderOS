@@ -5,6 +5,7 @@ import logging
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.ratelimit import enforce
 from app.models import Profile, User
@@ -15,10 +16,41 @@ from app.users import current_active_user
 logger = logging.getLogger(__name__)
 
 
+def _client_ip(request: Request) -> str:
+    """Source IP for the per-IP auth throttles.
+
+    TRUST_PROXY_HEADERS gates header trust, and the default is False:
+    honoring X-Forwarded-For when the peer IS the client lets anyone
+    rotate fake IPs and bypass the buckets. On Render (render.yaml sets
+    it true) the reverse holds — every inbound connection comes from
+    Render's edge, so request.client.host is the PROXY's address and the
+    per-IP buckets would throttle the whole user base as one client.
+
+    When trusted, prefer True-Client-IP (set by Render's Cloudflare
+    edge, matches the real caller): Render APPENDS to client-supplied
+    X-Forwarded-For instead of resetting it
+    (feedback.render.com/p/send-the-correct-x-forwarded-for), so XFF's
+    first hop is client-controllable there — a fallback, not the
+    primary. This is an abuse brake layered over the per-email and
+    per-account buckets, not attribution: a header-rotating attacker
+    still faces those, and every signup remains a real, auditable
+    account."""
+    if settings.TRUST_PROXY_HEADERS:
+        true_ip = request.headers.get("true-client-ip", "").split(",")[0].strip()
+        if true_ip:
+            return true_ip
+        xff = request.headers.get("x-forwarded-for", "")
+        first_hop = xff.split(",")[0].strip()
+        if first_hop:
+            return first_hop
+    return request.client.host if request.client else "unknown"
+
+
 async def register_rate_limit(request: Request) -> None:
-    """Per-address signup throttle. Keyed by the SUBMITTED email, not IP:
-    per-address is the meaningful unit for registration hammering, and
-    every client behind one proxy would otherwise share a bucket.
+    """Signup throttle, two layers (P0-3, live-confirmed: 8 distinct-email
+    signups in ~8s created 8 accounts, zero throttles):
+    per SUBMITTED email (same-address hammering) and per source IP (the
+    account-factory brake — a fresh address is a fresh per-email bucket).
     Pre-reading the body is safe — Starlette caches json()/form()."""
     email = ""
     try:
@@ -27,11 +59,14 @@ async def register_rate_limit(request: Request) -> None:
     except Exception:  # noqa: BLE001 — malformed body falls through to the route's own 422
         pass
     enforce(f"reg:{email.lower()}", "auth_register")
+    enforce(f"regip:{_client_ip(request)}", "auth_register_ip")
 
 
 async def login_rate_limit(request: Request) -> None:
-    """Per-account login throttle — the core brute-force guard. The login
-    form's `username` field carries the email."""
+    """Login throttle, two layers: per ACCOUNT (the core brute-force
+    guard; the login form's `username` field carries the email) and per
+    source IP (P1-8: spraying MANY distinct accounts from one IP never
+    touched the per-account buckets)."""
     username = ""
     try:
         form = await request.form()
@@ -39,6 +74,7 @@ async def login_rate_limit(request: Request) -> None:
     except Exception:  # noqa: BLE001 — malformed form falls through to the route's own 422
         pass
     enforce(f"login:{username.lower()}", "auth_login")
+    enforce(f"loginip:{_client_ip(request)}", "auth_login_ip")
 
 
 def get_authenticated_user(user: UserModel = Depends(current_active_user)) -> User:

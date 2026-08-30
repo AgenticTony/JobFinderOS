@@ -36,6 +36,15 @@ os.environ["DEBUG"] = "true"  # tests run with production guards relaxed
 # default — draft tests script Layer A and must not spend judge calls.
 # TestProductionJudge opts in per-test.
 os.environ.setdefault("FABRICATION_JUDGE", "off")
+# P0-3/P1-8: raise the per-IP auth-throttle limits for the suite. The
+# whole suite drives the app from ONE TestClient source IP ("testclient")
+# — at the shipped 10 signups/IP/day the ~60 registrations in
+# test_multiuser.py would 429 after the first ten. The per-IP tests
+# restore the shipped values per-test by monkeypatching BUCKETS (see
+# TestPerIpAuthThrottles). TRUST_PROXY_HEADERS stays at its False default
+# so the header-spoofing gate is tested in its safe configuration.
+os.environ.setdefault("AUTH_REGISTER_IP_PER_DAY", "1000")
+os.environ.setdefault("AUTH_LOGIN_IP_PER_15MIN", "1000")
 
 
 def stamp_alembic_head() -> None:

@@ -89,6 +89,22 @@ class Settings(BaseSettings):
     AUTH_SECRET: str = "dev-insecure-secret-change-me"
     AUTH_TOKEN_LIFETIME_SECONDS: int = 3600 * 24 * 7  # 7 days
 
+    # Per-IP auth throttles (P0-3/P1-8, live-confirmed): the email/account
+    # auth buckets are keyed by ATTACKER-CHOSEN strings, so distinct-email
+    # signup bursts and distinct-account password sprays needed a per-IP
+    # layer. Limits are settings (not constants) purely so the test suite
+    # — every request from one TestClient source IP — can raise them
+    # (tests/conftest.py); windows are fixed in core/ratelimit.py BUCKETS.
+    AUTH_REGISTER_IP_PER_DAY: int = 10   # signups per source IP per day
+    AUTH_LOGIN_IP_PER_15MIN: int = 30    # logins per source IP per 15 min
+    # Honor proxy-supplied client-IP headers (True-Client-IP, then the
+    # X-Forwarded-For first hop) for those per-IP buckets. Render's edge
+    # proxies EVERY request, so render.yaml sets this true there; the
+    # default stays FALSE because honoring these headers when the peer IS
+    # the client lets attackers rotate fake IPs and bypass the throttle
+    # (see app/api/deps.py _client_ip for the full decision).
+    TRUST_PROXY_HEADERS: bool = False
+
     # CV storage backend: "local" (disk) or "supabase" (official REST, docs:
     # supabase.com/docs/guides/storage/uploads). Vercel Blob was rejected:
     # no officially documented REST API.
