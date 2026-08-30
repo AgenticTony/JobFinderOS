@@ -1611,3 +1611,431 @@ class TestUserIdOnCostRows:
             f"ai_usage rows not attributed to the caller ({before}->{after}) — "
             "trial budgets cannot meter per-user spend without user_id"
         )
+
+
+# ==================================================================
+# P1-1..P1-4 — send-path hardening (beta review, 2026-08-30)
+# ==================================================================
+
+
+def _fake_resend(monkeypatch, sink):
+    """Install a resend module whose Emails.send records params and
+    succeeds — the TestOutboundEmailBoundary pattern, packaged."""
+    import sys as _sys
+
+    class _Emails:
+        @staticmethod
+        def send(params):
+            sink.append(params)
+            return {"id": f"msg_{len(sink)}"}
+
+    fake = type("R", (), {"Emails": _Emails, "api_key": None})
+    monkeypatch.setitem(_sys.modules, "resend", fake)
+    return fake
+
+
+def _live_email_settings(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "RESEND_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "apply@jobfinderos.test")
+
+
+class TestOutboundReplyTo:
+    """P1-1: every application goes out from the SHARED APPLY_FROM_EMAIL.
+    With no reply_to on the payload, an employer's reply — the interview
+    invitation — lands in the operator's shared inbox and never reaches
+    the applicant. Both send paths must set reply_to to the OWNER
+    profile's address."""
+
+    def _seed(self, db, tag):
+        from app.models import User as UserModel
+
+        uid = uuid.uuid4()
+        db.add(UserModel(id=uid, email=f"{tag}-{uid.hex[:6]}@test.example",
+                         hashed_password="test-only"))
+        db.flush()
+        profile = Profile(user_id=uid, is_active=1, full_name="Reply To Tester",
+                          email="applicant@personal.example",
+                          cv_text="REPLY-TO CV", cv_file_name="cv.pdf")
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         application_email="jobs@acme.example")
+        db.add_all([profile, job])
+        db.flush()
+        return uid, profile, job
+
+    def test_submit_payload_replies_to_the_applicant(self, client, db, monkeypatch):
+        from app.models import ApplicationDraft
+        from app.services.draft_service import submit_draft
+
+        uid, profile, job = self._seed(db, "rt1")
+        draft = ApplicationDraft(user_id=uid, job_id=job.id, status="ready",
+                                 cover_letter="Dear Acme", tailored_cv="CV",
+                                 changes_summary="[]")
+        db.add(draft)
+        db.commit()
+
+        _live_email_settings(monkeypatch)
+        monkeypatch.setattr("app.services.storage.read_original_cv", lambda p: None)
+        sent = []
+        _fake_resend(monkeypatch, sent)
+
+        application = submit_draft(db, draft, "email", profile, user_id=uid)
+        assert application.status == "sent", application.error
+        assert sent, "no email payload captured"
+        assert sent[0].get("reply_to") == "applicant@personal.example", (
+            f"employer replies go to {sent[0].get('reply_to')!r} — the "
+            "submission payload has no reply_to pointing at the applicant "
+            "(P1-1: interview invitations land in the shared APPLY_FROM_EMAIL "
+            "inbox)"
+        )
+
+    def test_retry_plain_email_replies_to_the_applicant(self, client, db, monkeypatch):
+        """The legacy path (no draft) sends via apply_service's own
+        payload builder — it needs the same reply_to."""
+        from app.models import Application
+        from app.services.apply_service import retry_application
+
+        uid, profile, job = self._seed(db, "rt2")
+        application = Application(user_id=uid, job_id=job.id, method="email",
+                                  status="failed", error="boom",
+                                  target_email="jobs@acme.example",
+                                  subject="Application: Dev",
+                                  body="Dear Acme")
+        db.add(application)
+        db.commit()
+
+        _live_email_settings(monkeypatch)
+        monkeypatch.setattr("app.services.storage.read_original_cv", lambda p: None)
+        sent = []
+        _fake_resend(monkeypatch, sent)
+
+        retry_application(db, application, profile)
+        assert application.status == "sent", application.error
+        assert sent, "no email payload captured"
+        assert sent[0].get("reply_to") == "applicant@personal.example", (
+            f"employer replies go to {sent[0].get('reply_to')!r} — the "
+            "retry (legacy, no-draft) payload has no reply_to (P1-1)"
+        )
+
+
+class TestRetryIdempotence:
+    """P1-2: a SUCCESSFUL retry left the draft 'ready' while an
+    Application row already existed — submit_draft only blocks
+    'submitted', so the UI kept the package actionable and re-sent the
+    employer a duplicate. A successful retry must complete the state
+    machine exactly like the normal submit path."""
+
+    def _seed_failed_submission(self, client, db, monkeypatch):
+        """Prepare + submit through the real routes, then flip the result
+        into the failed state a retry exists for. Returns
+        (email, draft_id, application_id)."""
+        from app.services import draft_service
+        from app.services.ai_service import AIService
+
+        email = f"p12-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        profile = db.query(Profile).filter(Profile.user_id == uid).first()
+        profile.is_active = 1
+        profile.full_name = "Retry Tester"
+        profile.cv_text = "RETRY CV"
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         application_email="jobs@acme.example")
+        db.add(job)
+        db.flush()
+        db.add(MatchResult(user_id=uid, job_id=job.id, score=80,
+                           tier="good_match", decision="approved"))
+        db.commit()
+
+        def fake_tailor(self, profile_context, cv_text, job_description):
+            return {"cover_letter": "Dear Acme", "tailored_cv": "CV",
+                    "changes_summary": ["n/a"]}
+
+        fake = AIService.__new__(AIService)
+        fake.model = "glm-test"
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "tailor_application", fake_tailor)
+
+        r = client.post(f"/api/v1/applications/draft/{job.id}")
+        assert r.status_code == 201, r.text[:200]
+        draft_id = r.json()["id"]
+        r = client.post(f"/api/v1/applications/draft/{draft_id}/submit",
+                        json={"method": "browser"})
+        assert r.status_code == 201, r.text[:200]
+
+        # The failed-email state retry exists for: send failed, draft
+        # back to 'ready' (what submit_draft does on failure)
+        app_row = db.query(Application).filter(Application.draft_id == draft_id).first()
+        app_row.method = "email"
+        app_row.status = "failed"
+        app_row.error = "boom"
+        draft_row = db.get(ApplicationDraft, draft_id)
+        draft_row.status = "ready"
+        db.commit()
+        return email, draft_id, app_row.id
+
+    def test_successful_retry_marks_the_draft_submitted(self, client, db, monkeypatch):
+        from app.services import draft_service
+
+        email, draft_id, app_id = self._seed_failed_submission(client, db, monkeypatch)
+        sends = {"n": 0}
+
+        def fake_send(db_, app_, draft_, job_, profile_):
+            sends["n"] += 1
+            app_.status = "sent"
+
+        monkeypatch.setattr(draft_service, "_send_with_pdfs", fake_send)
+
+        r = client.post(f"/api/v1/applications/{app_id}/retry")
+        assert r.status_code == 200, r.text[:300]
+        assert r.json()["status"] == "sent", r.text[:200]
+
+        draft_row = db.get(ApplicationDraft, draft_id)
+        assert draft_row.status == "submitted", (
+            f"draft is '{draft_row.status}' after a SUCCESSFUL retry — it "
+            "must leave the sendable pool like the normal submit path, or "
+            "the UI keeps it actionable and emails the employer twice (P1-2)"
+        )
+
+        # A second retry must be refused, and nothing may be re-sent
+        r = client.post(f"/api/v1/applications/{app_id}/retry")
+        assert r.status_code == 400, (
+            f"second retry returned {r.status_code} — a sent application "
+            "must not be re-sendable (P1-2 duplicate-email vector)"
+        )
+        assert sends["n"] == 1, f"the send path ran {sends['n']} times"
+
+        # And the draft itself is no longer submittable either
+        r = client.post(f"/api/v1/applications/draft/{draft_id}/submit",
+                        json={"method": "browser"})
+        assert r.status_code == 400, (
+            f"submit after successful retry returned {r.status_code} — the "
+            "draft must be locked like any submitted one (P1-2)"
+        )
+
+
+class TestSendPathRateLimits:
+    """P1-3: the send/spam chain had NO throttling — job create (with a
+    caller-controlled application_email), draft update, submit and retry
+    were all unlimited, and application_email accepted any string
+    verbatim (live: 25 jobs in one burst, 'not-an-email-at-all <<>>'
+    stored as a send target)."""
+
+    def test_job_create_burst_is_rate_limited(self, client):
+        email = f"jc-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        codes = []
+        for _ in range(21):  # bucket is 20/hour
+            r = client.post("/api/v1/jobs/", json={
+                "title": f"Dev {uuid.uuid4().hex[:6]}",
+                "url": f"https://x/{uuid.uuid4().hex[:8]}",
+            })
+            codes.append(r.status_code)
+        assert codes[0] == 201, f"first create failed: {codes[0]} {codes}"
+        assert 429 in codes, (
+            f"21 job creates in one burst and no 429 ever fired: {codes} — "
+            "POST /jobs/ has no rate limit (P1-3: live 25-job burst, all 201)"
+        )
+
+    def test_job_create_rejects_invalid_application_email(self, client):
+        email = f"je-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        r = client.post("/api/v1/jobs/", json={
+            "title": "Dev", "url": "https://x/1",
+            "application_email": "not-an-email-at-all <<>>",
+        })
+        assert r.status_code == 422, (
+            f"'not-an-email-at-all <<>>' accepted as application_email "
+            f"({r.status_code}) — the field is a future EMAIL SEND TARGET "
+            "and must be validated at the boundary (P1-3)"
+        )
+        # a real address still passes — the gate must not break real use
+        r = client.post("/api/v1/jobs/", json={
+            "title": "Dev 2", "url": "https://x/2",
+            "application_email": "jobs@acme.example",
+        })
+        assert r.status_code == 201, r.text[:200]
+
+    def test_draft_update_burst_is_rate_limited(self, client, db):
+        email = f"du-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="X",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched")
+        db.add(job)
+        db.flush()
+        draft = ApplicationDraft(user_id=uid, job_id=job.id, status="ready",
+                                 cover_letter="x", tailored_cv="y",
+                                 changes_summary="[]")
+        db.add(draft)
+        db.commit()
+
+        codes = []
+        for _ in range(61):  # bucket is 60/hour
+            r = client.put(f"/api/v1/applications/draft/{draft.id}",
+                           json={"cover_letter": "edited"})
+            codes.append(r.status_code)
+        assert codes[0] == 200, f"first update failed: {codes[0]}"
+        assert 429 in codes, (
+            f"61 draft updates in one burst and no 429 ever fired: {codes} — "
+            "PUT /draft/{id} has no rate limit (P1-3)"
+        )
+
+    def test_submit_burst_is_rate_limited(self, client, db):
+        email = f"sb-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        profile = db.query(Profile).filter(Profile.user_id == uid).first()
+        profile.is_active = 1
+        profile.cv_text = "CV"
+        db.commit()
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="X",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched")
+        db.add(job)
+        db.flush()
+        draft = ApplicationDraft(user_id=uid, job_id=job.id, status="ready",
+                                 cover_letter="x", tailored_cv="y",
+                                 changes_summary="[]")
+        db.add(draft)
+        db.commit()
+
+        codes = []
+        for _ in range(21):  # bucket is 20/hour
+            r = client.post(f"/api/v1/applications/draft/{draft.id}/submit",
+                            json={"method": "browser"})
+            codes.append(r.status_code)
+        assert codes[0] == 201, f"first submit failed: {codes[0]} {codes}"
+        assert 429 in codes, (
+            f"21 submits in one burst and no 429 ever fired: {codes} — "
+            "POST /draft/{id}/submit has no rate limit (P1-3)"
+        )
+
+    def test_retry_burst_is_rate_limited(self, client, db):
+        email = f"rb-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="X",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         application_email="jobs@acme.example")
+        db.add(job)
+        db.flush()
+        draft = ApplicationDraft(user_id=uid, job_id=job.id, status="ready",
+                                 cover_letter="x", tailored_cv="y",
+                                 changes_summary="[]")
+        db.add(draft)
+        db.flush()
+        application = Application(user_id=uid, job_id=job.id, draft_id=draft.id,
+                                  method="email", status="failed", error="boom",
+                                  target_email="jobs@acme.example",
+                                  subject="Application: Dev", body="x")
+        db.add(application)
+        db.commit()
+
+        codes = []
+        for _ in range(21):  # bucket is 20/hour
+            r = client.post(f"/api/v1/applications/{application.id}/retry")
+            codes.append(r.status_code)
+        # every attempt stays a failed application (no API key configured
+        # in tests) so each one reaches the retry path and counts
+        assert 429 in codes, (
+            f"21 retries in one burst and no 429 ever fired: {codes} — "
+            "POST /applications/{id}/retry has no rate limit (P1-3)"
+        )
+
+    def test_daily_send_cap_blocks_the_51st_employer_email(self, client, db, monkeypatch):
+        """P1-3(c): even under the hourly buckets, a patient account could
+        email 480 employers/day. A per-account daily cap on the ACTUAL
+        send paths bounds the blast radius of a compromised account."""
+        from fastapi import HTTPException
+
+        from app.models import User as UserModel
+        from app.services import draft_service
+
+        uid = uuid.uuid4()
+        db.add(UserModel(id=uid, email=f"cap-{uid.hex[:6]}@test.example",
+                         hashed_password="test-only"))
+        db.flush()
+        profile = Profile(user_id=uid, is_active=1, full_name="Cap Tester",
+                          email="cap@personal.example", cv_text="CAP CV")
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         application_email="jobs@acme.example")
+        db.add_all([profile, job])
+        db.flush()
+        draft = ApplicationDraft(user_id=uid, job_id=job.id, status="ready",
+                                 cover_letter="Dear Acme", tailored_cv="CV",
+                                 changes_summary="[]")
+        db.add(draft)
+        db.flush()
+        application = Application(user_id=uid, job_id=job.id, draft_id=draft.id,
+                                  method="email", status="queued",
+                                  target_email="jobs@acme.example",
+                                  subject="Application: Dev", body="x")
+        db.add(application)
+        db.commit()
+
+        _live_email_settings(monkeypatch)
+        monkeypatch.setattr("app.services.storage.read_original_cv", lambda p: None)
+        sent = []
+        _fake_resend(monkeypatch, sent)
+
+        for _ in range(50):  # cap is 50/day
+            draft_service._send_with_pdfs(db, application, draft, job, profile)
+        assert application.status == "sent", application.error
+        assert len(sent) == 50
+
+        with pytest.raises(HTTPException) as exc:
+            draft_service._send_with_pdfs(db, application, draft, job, profile)
+        assert exc.value.status_code == 429, (
+            f"the 51st employer email raised {exc.value.status_code}, not "
+            "429 — the daily send cap is not enforced on the send path (P1-3c)"
+        )
+        assert len(sent) == 50, (
+            f"{len(sent)} emails dispatched — the send above the cap must "
+            "be blocked BEFORE dispatch"
+        )
+
+
+class TestSharedPoolEndpointRemoved:
+    """P1-4: PATCH /jobs/{id}/status wrote job_postings.status — a SHARED
+    row — for everyone: one user's 'dismissed' removed the job from every
+    other user's matching queue (matcher filters job.status !=
+    'dismissed' pool-wide), and the re-queue guard was unscoped. The
+    frontend never calls it; per-user dismissal already lives on
+    match_results.dismissed_reason. The route is deleted."""
+
+    def test_patch_job_status_route_is_gone(self, client, db):
+        email = f"ps-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="X",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+        r = client.patch(f"/api/v1/jobs/{job_id}/status",
+                         json={"status": "dismissed"})
+        assert r.status_code in (404, 405), (
+            f"PATCH /jobs/{job_id}/status returned {r.status_code} — the "
+            "shared-pool mutation endpoint must be GONE (P1-4: any user "
+            "could dismiss jobs for every other user)"
+        )
+        # grep-proof companion: the shared row is untouched — there is no
+        # authenticated route left that writes job_postings.status
+        db.expire_all()
+        assert db.get(JobPosting, job_id).status == "matched"
+

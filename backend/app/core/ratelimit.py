@@ -55,6 +55,20 @@ BUCKETS = {
     # belongs to the reverse proxy at deployment.
     "auth_register": (5, 3600),      # signup attempts per address
     "auth_login": (10, 900),         # logins per account per 15 min
+    # P1-3 (beta review): the send/spam chain had NO throttle — job
+    # create (caller-controlled application_email), draft update, submit
+    # and retry were all unlimited (live: 25 jobs in one burst, all 201).
+    # Sized like the AI-budget buckets above: a legitimate power user
+    # never touches them, a scripted burst stops at the boundary.
+    "job_create": (20, 3600),        # manual postings per hour
+    "draft_update": (60, 3600),      # package edits per hour
+    "draft_submit": (20, 3600),      # submissions per hour
+    "application_retry": (20, 3600), # failed-send retries per hour
+    # The hard ceiling on ACTUAL employer emails: hourly buckets alone
+    # still allow a patient (or scripted) account to reach hundreds of
+    # employers a day from the shared APPLY_FROM_EMAIL domain — a
+    # deliverability and spam vector for every other user's applications.
+    "send_daily": (50, 86400),       # employer emails per account per day
 }
 
 

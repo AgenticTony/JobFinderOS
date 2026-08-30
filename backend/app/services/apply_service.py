@@ -61,9 +61,13 @@ def retry_application(db: Session, application: Application, profile) -> Applica
     else:
         _send_email_application(db, application, job, profile)
 
-    # Mirror the submit state machine: a failed retry leaves the draft ready
-    if application.status == "failed" and draft is not None:
-        draft.status = "ready"
+    # Mirror the submit state machine: a failed retry leaves the draft
+    # ready (editable, still actionable); a SUCCESSFUL retry completes the
+    # submission (P1-2) — the draft must leave the sendable pool exactly
+    # like submit_draft() does, or the UI keeps "Finish applying" alive
+    # and re-sends the employer a duplicate.
+    if draft is not None:
+        draft.status = "ready" if application.status == "failed" else "submitted"
         db.add(draft)
     db.commit()
     db.refresh(application)
@@ -86,6 +90,12 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
         application.status = "failed"
         application.error = "APPLY_FROM_EMAIL not configured (verified sender, e.g. you@yourdomain.com)"
         return
+
+    # P1-3(c): the per-account daily ceiling on employer emails — before
+    # any attachment work or dispatch (same cap as the draft send path).
+    from app.core.ratelimit import enforce
+
+    enforce(application.user_id, "send_daily")
 
     try:
         import resend
@@ -117,6 +127,10 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
         }
         if attachments:
             params["attachments"] = attachments
+        # P1-1: replies must reach the APPLICANT, not the shared
+        # APPLY_FROM_EMAIL inbox (same fix as the draft send path).
+        if profile is not None and getattr(profile, "email", None):
+            params["reply_to"] = profile.email
 
         email = resend.Emails.send(params)
         application.status = "sent"
