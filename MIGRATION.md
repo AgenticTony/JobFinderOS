@@ -243,14 +243,52 @@ is Mistral Compute (France), CoreWeave (EEA), Azure (Sweden/Norway).
 Google appears only for the US API endpoint — **the EU endpoint must be
 selected explicitly** or the residency guarantee does not apply.
 
-**Blocker: TIER-GATED (verified 2026-08-27).** `models.list` on all
-three endpoints (HTTP 200) shows no GLM — but a direct one-token probe
-returns **HTTP 403 `tier_not_allowed`** (not 404) for `zai-glm-5-2` on
-BOTH `api.mistral.ai` AND `api.eu.mistral.ai`: the model exists, is
-recognized, and is gated behind a higher La Plateforme tier. Tier-gated
-models do not appear in `models.list` — the list check alone
-under-reports availability (silent-failure trap; caught by re-verifying
-with status codes plus a direct probe).
+**Blocker LIFTED (verified 2026-08-30).** The tier gate was the
+account, not the product: with billing enabled on the correct
+workspace (a new key from the billed workspace; the old TalentHive-era
+key sat on an unbilled workspace and got 402s even after billing was
+switched on elsewhere — keys are workspace-scoped), `models.list`
+shows `glm-5-2` and `zai-glm-5-2` on BOTH `api.mistral.ai` AND
+`api.eu.mistral.ai`, and standard chat completions succeed. Batch API
+access opened with the same billing change (inline batch jobs are
+accepted; no completion SLA — submit-and-harvest design required).
+
+**CALIBRATION PASSED (2026-08-30, bench on live jobs).** GLM 5.2 via
+Mistral scored 10 real jobs the 5.1 thresholds were built on, with
+the active profile's real CV and the exact production prompt:
+- keep/dismiss agreement 10/10 — no flips across the keep-min 25 line
+- score drift mean +3.2, SD 6.0 — inside the ±11 band the dead-band
+  protocol was designed to absorb
+- ordering preserved (75→82, 68→72 ... 36→35, 26→28)
+- latency 1.8–3.0s at full CV payload (5.1 documented 5–10s)
+- JSON parse 10/10 first try
+Verdict: nothing blocks moving scoring to `zai-glm-5-2`. Re-run this
+bench if the model version changes again.
+
+**DECISION (2026-08-30): stay on the Z.ai subscription while in
+beta** — zero marginal cost, quota sufficient at current volume.
+Mistral is the armed next step: the switch is configuration only, no
+code changes (the AI client is OpenAI-compatible):
+
+    # backend/.env (and the same three in Render when the time comes)
+    GLM_BASE_URL=https://api.eu.mistral.ai/v1   # EU endpoint REQUIRED for the residency guarantee
+    GLM_MODEL=zai-glm-5-2
+    GLM_API_KEY=<Mistral key from the billed workspace>
+
+The commented switch block sits in backend/.env ready to uncomment.
+Trigger conditions for flipping: subscription quota starts
+throttling hunts, real-user volume arrives, or the beta ends and the
+GDPR posture must go live. Batch lane (50% off, cron path only)
+remains designed-but-unbuilt until volume justifies it.
+
+Original blocker record (2026-08-27), kept for the lesson:
+`models.list` on all three endpoints (HTTP 200) showed no GLM — but a
+direct one-token probe returned **HTTP 403 `tier_not_allowed`** (not
+404) for `zai-glm-5-2` on BOTH endpoints: the model existed, was
+recognized, and was gated behind a higher La Plateforme tier.
+Tier-gated models do not appear in `models.list` — the list check
+alone under-reports availability (silent-failure trap; caught by
+re-verifying with status codes plus a direct probe).
 
 **DPA comparison (verified 2026-08-27):** Mistral's DPA is a materially
 better posture than Z.ai's — customer is controller, Mistral is
