@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_authenticated_user
 from app.core.database import get_db
-from app.models import Application, ApplicationDraft, MatchResult, Profile, User
+from app.models import (
+    AIUsage,
+    Application,
+    ApplicationDraft,
+    MatchResult,
+    Profile,
+    User,
+)
 from app.services.cv_service import get_active_profile
 
 logger = logging.getLogger(__name__)
@@ -31,13 +38,40 @@ async def delete_account(
     if not user:
         raise HTTPException(status_code=404, detail="Account not found")
     profile = get_active_profile(db, user_id=uid)
+    cv_path = profile.cv_file_path if profile else None
 
-    # CV file removal through the storage backend — works for local paths
-    # AND remote object keys (the os.path.exists version silently skipped
-    # Supabase keys, leaving the CV in the bucket after "erasure")
+    # DELETE ORDER MATTERS (P0-2, live-confirmed): applications reference
+    # drafts AND matches (draft_id, match_id), drafts reference matches
+    # (match_id). Those FKs are NOT DEFERRABLE with no ON DELETE action,
+    # so deleting parents first raises IntegrityError -> 500 -> rollback
+    # that keeps EVERY personal row. Children first, always:
+    # applications -> drafts -> matches -> profiles -> user.
+    applications = db.query(Application).filter(Application.user_id == uid).delete()
+    drafts = db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).delete()
+    matches = db.query(MatchResult).filter(MatchResult.user_id == uid).delete()
+    profiles = db.query(Profile).filter(Profile.user_id == uid).delete()
+
+    # ai_usage rows are user-linked telemetry (no FK — a plain user_id
+    # column), which is why erasure missed them. Retention decision for a
+    # pre-beta product: DELETE them with the account. The table exists for
+    # cost accounting and residency audits of LIVE accounts; once the
+    # account is erased there is no lawful basis to keep per-user call
+    # history, and aggregate cost trends survive via every other user's
+    # rows. Revisit only if a retention obligation (e.g. invoicing law)
+    # appears — until then, account death takes its telemetry.
+    ai_usage = db.query(AIUsage).filter(AIUsage.user_id == uid).delete()
+
+    db.delete(user)
+    db.commit()
+
+    # CV file removal AFTER the commit: doing it before meant a failed
+    # transaction (the IntegrityError above, in production) destroyed the
+    # user's only CV while every PII row survived — the exact live repro.
+    # Goes through the storage backend, so it works for local paths AND
+    # remote object keys (the os.path.exists version silently skipped
+    # Supabase keys, leaving the CV in the bucket after "erasure").
     from app.services.storage import get_storage
 
-    cv_path = profile.cv_file_path if profile else None
     deleted_files = 0
     if cv_path:
         try:
@@ -46,25 +80,18 @@ async def delete_account(
         except Exception:
             logger.warning("GDPR delete: CV removal failed for %s", cv_path)
 
-    matches = db.query(MatchResult).filter(MatchResult.user_id == uid).delete()
-    drafts = db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).delete()
-    applications = db.query(Application).filter(Application.user_id == uid).delete()
-    profiles = db.query(Profile).filter(Profile.user_id == uid).delete()
-
-    db.delete(user)
-    db.commit()
-
     from app.core.ratelimit import clear_user
     clear_user(uid)
     logger.info(
         "GDPR erasure: user=%s (%s) — %d matches, %d drafts, %d applications, "
-        "%d profiles, %d CV file(s)",
+        "%d profiles, %d ai_usage rows, %d CV file(s)",
         uid,
         user_email,
         matches,
         drafts,
         applications,
         profiles,
+        ai_usage,
         deleted_files,
     )
     return {
@@ -90,11 +117,28 @@ async def export_account(
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
 
+    def draft_row(d):
+        # The user's own content: the tailored package they reviewed and
+        # (usually) edited. Portability covers it verbatim.
+        return {
+            "job_id": d.job_id,
+            "status": d.status,
+            "cover_letter": d.cover_letter,
+            "tailored_cv": d.tailored_cv,
+            "changes_summary": d.changes_summary,
+            "created_at": d.created_at.isoformat() if d.created_at else None,
+        }
+
     def app_row(a):
+        # subject/body/target_email are the user's outbound content and the
+        # address they sent it to — core portability data, not internals.
         return {
             "job_id": a.job_id,
             "method": a.method,
             "status": a.status,
+            "subject": a.subject,
+            "body": a.body,
+            "target_email": a.target_email,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         }
 
@@ -117,6 +161,10 @@ async def export_account(
         "matches": [
             match_row(m)
             for m in db.query(MatchResult).filter(MatchResult.user_id == uid).all()
+        ],
+        "drafts": [
+            draft_row(d)
+            for d in db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).all()
         ],
         "applications": [
             app_row(a)
