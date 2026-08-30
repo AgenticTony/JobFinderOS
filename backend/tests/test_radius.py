@@ -195,6 +195,64 @@ class TestReducedRadiusGate:
             self._job(remote=False, location="Lund, Skåne län"), ctx) is True
 
 
+class TestGateWiringInsideScrapeSource:
+    """The WIRING, not just the helper: scrape_source must select the
+    reduced gate for geo-filtered jobtech runs (review finding — the
+    helper tests stay green if the caller reverts to skipping the gate
+    entirely, which is how the original bug shipped)."""
+
+    def _stub_fetch(self, monkeypatch, jobs):
+        from app.services.scrapers import jobtech
+
+        monkeypatch.setattr(jobtech.JobtechScraper, "fetch", lambda self, ctx: jobs)
+
+    def _job(self, remote=False, location=None, source_id="x1"):
+        from app.services.scrapers.base import NormalizedJob
+
+        return NormalizedJob(
+            source="jobtech", source_id=source_id, title="Dev", company="Acme",
+            url=f"https://x/{source_id}", description="d",
+            remote=remote, location=location,
+        )
+
+    def test_remote_only_radius_fetch_drops_on_site_at_store(self, db, monkeypatch):
+        from app.models import JobPosting
+        from app.services.pipeline import scrape_source
+
+        self._stub_fetch(monkeypatch, [self._job(remote=False, location="Lund, Skåne län")])
+        ctx = {**_ctx(["Malmö"], 30), "remote_only": True, "queries": ["dev"]}
+        run = scrape_source(db, "jobtech", ctx)
+        assert run.status == "completed"
+        assert db.query(JobPosting).count() == 0, (
+            "remote_only + radius: the reduced gate must still drop the "
+            "on-site job at store time — this is the wiring that shipped broken"
+        )
+
+    def test_radius_fetch_stores_in_radius_on_site_job(self, db, monkeypatch):
+        from app.models import JobPosting
+        from app.services.pipeline import scrape_source
+
+        self._stub_fetch(monkeypatch, [self._job(remote=False, location="Lund, Skåne län", source_id="x2")])
+        run = scrape_source(db, "jobtech", {**_ctx(["Malmö"], 30), "queries": ["dev"]})
+        assert run.status == "completed"
+        assert db.query(JobPosting).count() == 1, (
+            "a neighbouring-kommun ad inside the radius must store — the "
+            "municipality clause is the ONLY thing waived"
+        )
+
+    def test_scraper_selects_full_gate_without_radius(self, db, monkeypatch):
+        from app.models import JobPosting
+        from app.services.pipeline import scrape_source
+
+        self._stub_fetch(monkeypatch, [self._job(remote=False, location="Stockholm", source_id="x3")])
+        run = scrape_source(db, "jobtech", {**_ctx(["Malmö"], 0), "queries": ["dev"]})
+        assert run.status == "completed"
+        assert db.query(JobPosting).count() == 0, (
+            "no radius: the FULL gate applies and out-of-municipality ads "
+            "never store"
+        )
+
+
 class TestRadiusScopeKey:
     def test_radius_joins_the_watermark_scope(self):
         from app.services.pipeline import _scope_key

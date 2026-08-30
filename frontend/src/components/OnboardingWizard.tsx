@@ -210,13 +210,20 @@ export default function OnboardingWizard({
     setLanguages((prev) => (prev.includes(lang) ? prev.filter((l) => l !== lang) : [...prev, lang]));
 
   // The radius control is honest only where it can anchor: the user's
-  // PRIMARY town has a centroid (server-published list). When false,
-  // any previously-set radius is dropped at save rather than silently
-  // persisting behind a hidden control.
+  // PRIMARY town has a centroid (server-published list). TRI-STATE,
+  // deliberately: geo===null means UNKNOWN (the /geo call failed),
+  // not unsupported — an unknown must never drop a saved radius at
+  // save (review finding: the guard used to conflate the two and a
+  // single failed /geo call wiped the commute zone behind a hidden
+  // control). The server's geo_plan is the real authority anyway: an
+  // anchorless radius harmlessly falls back to municipality codes.
   const radiusAnchorSupported =
     country === 'SE' &&
     municipalityList.length > 0 &&
-    (geo?.radius_supported ?? []).includes(municipalityList[0]);
+    geo !== null &&
+    (geo.radius_supported ?? []).includes(municipalityList[0]);
+  const radiusKnownUnsupported =
+    geo !== null && !radiusAnchorSupported;
 
   const canProceed = [
     Boolean(country),
@@ -234,7 +241,7 @@ export default function OnboardingWizard({
         region: region || null,
         municipalities: municipalityList,
         municipality: municipalityList[0] ?? null, // legacy single, kept in sync
-        search_radius_km: radiusAnchorSupported && searchRadiusKm > 0 ? searchRadiusKm : null,
+        search_radius_km: !radiusKnownUnsupported && searchRadiusKm > 0 ? searchRadiusKm : null,
         remote_only: remoteOnly,
         include_remote: includeRemote || remoteOnly,
         search_queries: [...selected],

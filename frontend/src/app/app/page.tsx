@@ -426,7 +426,13 @@ export default function Home() {
           initialRegion={profile.region ?? ''}
           initialMunicipality={profile.municipality ?? ''}
           initialMunicipalities={
-            profile.municipalities ?? (profile.municipality ? [profile.municipality] : [])
+            // LENGTH check, not ??: the API returns [] (never null) for
+            // a NULL municipalities column, so ?? never fired and a
+            // legacy single-municipality profile prefilled as empty —
+            // then saved as explicit whole-region (review regression).
+            profile.municipalities?.length
+              ? profile.municipalities
+              : (profile.municipality ? [profile.municipality] : [])
           }
           initialSearchRadiusKm={profile.search_radius_km ?? 0}
           initialOccupationCodes={(profile.occupation_codes ?? []).map((o) => o.code)}
