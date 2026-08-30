@@ -37,6 +37,14 @@ DELTA_SOURCES = {"jobtech"}
 # ads re-published with a fresh date. Cheap — dedupe eats the overlap.
 DELTA_OVERLAP_HOURS = 24
 
+# PIPE-21: a worker killed mid-run (OOM, deploy, power loss) never
+# reaches the terminal-status write and its ScrapeRun stays 'running'
+# on dashboards forever. A run this old can no longer be live: the
+# codebase's worst-case hunt budget is the worker's hunt-lock TTL
+# (CLAIM_TTL_MINUTES = 45 — matching time budget 300s + scrape +
+# retries); 2h gives that ~2.7x of headroom before we declare abortion.
+STALE_RUN_ABORT_HOURS = 2
+
 
 def _scope_key(ctx: Dict) -> str:
     from app.services.geo import effective_municipalities, geo_plan
@@ -582,11 +590,30 @@ def match_for_user(db: Session, user_id) -> Dict:
 
 
 def _maintenance_sweeps(db: Session) -> None:
-    """Queue hygiene: expire stale unmatched postings and auto-pass stale
-    pending matches. Runs inside every pipeline run."""
+    """Queue hygiene: expire stale unmatched postings, auto-pass stale
+    pending matches, and abort ScrapeRuns whose worker died mid-run.
+    Runs inside every pipeline run and every scheduled hunt cycle."""
     now = utc_now()
 
     from sqlalchemy import or_
+
+    # PIPE-21: ScrapeRuns stuck 'running' past the max-run budget are
+    # dead workers, not live runs — mark them aborted so dashboards stop
+    # showing a phantom in-flight hunt. FRESH running rows are never
+    # touched: a concurrent scrape in another process is still live.
+    run_cutoff = now - timedelta(hours=STALE_RUN_ABORT_HOURS)
+    stale_runs = (
+        db.query(ScrapeRun)
+        .filter(ScrapeRun.status == "running", ScrapeRun.started_at < run_cutoff)
+        .all()
+    )
+    for r in stale_runs:
+        r.status = "aborted"
+        r.error = f"aborted: run exceeded {STALE_RUN_ABORT_HOURS}h — worker died mid-run (stale-run sweep)"
+        r.finished_at = now
+    if stale_runs:
+        logger.info("Sweep: aborted %d stale running ScrapeRun(s) older than %dh",
+                    len(stale_runs), STALE_RUN_ABORT_HOURS)
 
     stale_cutoff = now - timedelta(days=settings.MAX_POSTING_AGE_DAYS)
     # Postings with a publication date expire by it; date-less postings

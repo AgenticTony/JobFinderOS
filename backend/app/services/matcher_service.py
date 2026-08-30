@@ -261,9 +261,11 @@ def _run_matching_inner(
     # Fuzzy second gate (the Pågen incident): the same job as an agency
     # ad ('... till Pågen' via Cabeza) AND a direct ad (PÅGEN AKTIEBOLAG)
     # differs in every exact component. High-precision pair rule from
-    # app.core.dedupe.likely_same_job — same municipality + >=0.6 title
-    # overlap (employer suffix stripped) + an employer link + no
-    # seniority split. The AGENCY copy is the one dismissed.
+    # app.core.dedupe.likely_same_job — same municipality + titles
+    # differing only by noise tokens (near-identical cores; a one-word
+    # role difference like Engineer/Scientist never collapses —
+    # DEDUPE-FP) + an employer link + no seniority split. The AGENCY
+    # copy is the one dismissed.
     fuzzy_duped = _dismiss_fuzzy_duplicates(db, user_id, unmatched, service.model)
     if fuzzy_duped:
         db.commit()

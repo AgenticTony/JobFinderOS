@@ -598,6 +598,40 @@ class TestStaleSweep:
         assert old.status == "dismissed"
 
 
+class TestStaleScrapeRunSweep:
+    """PIPE-21: a worker killed mid-run (OOM, deploy, power loss) never
+    reached the terminal-status write, so its ScrapeRun stayed 'running'
+    on dashboards forever. The maintenance sweep must abort runs older
+    than the max-run budget — and leave FRESH running rows alone (a
+    concurrent scrape in another process is still live)."""
+
+    def test_stale_running_run_aborted_fresh_left_alone(self, db):
+        from app.core.timeutil import utc_now
+        from app.models import ScrapeRun
+        from app.services.pipeline import _maintenance_sweeps
+
+        stale = ScrapeRun(source="jobtech", status="running",
+                          started_at=utc_now() - timedelta(hours=3))
+        fresh = ScrapeRun(source="jobtech", status="running",
+                          started_at=utc_now() - timedelta(minutes=5))
+        db.add_all([stale, fresh])
+        db.commit()
+
+        _maintenance_sweeps(db)
+        db.refresh(stale)
+        db.refresh(fresh)
+
+        assert stale.status == "aborted", (
+            f"a 3h-old 'running' ScrapeRun is a dead worker, not a live one "
+            f"(got {stale.status!r})"
+        )
+        assert stale.finished_at is not None
+        assert fresh.status == "running", (
+            "a 5-minute-old run may belong to a live concurrent process — "
+            "the sweep must never abort it"
+        )
+
+
 class TestDeadBand:
     """Scores move +/-7 between runs at temp 0 and dismissal is permanent,
     so the keep/dismiss call near the line is re-scored and averaged."""
@@ -2934,6 +2968,67 @@ class TestJobtechPlaceFilter:
         assert all("municipality" not in dict(p) for p in captured)
 
 
+class TestJobtechTaxonomyFailureCache:
+    """PIPE-20: a failed taxonomy fetch used to cache {} for the process
+    lifetime, so one transient outage at boot silently pinned every
+    later hunt to the unfiltered path. Failures must not be cached —
+    the next call retries (occupation_taxonomy's fixed pattern)."""
+
+    def test_failure_does_not_poison_cache(self, monkeypatch):
+        import app.services.scrapers.jobtech as jt
+
+        calls = []
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return [
+                    {"taxonomy/preferred-label": "Malmö", "taxonomy/id": "O5cp"},
+                ]
+
+        def flaky_get(url, params=None, **kw):
+            calls.append(url)
+            if len(calls) == 1:
+                raise ConnectionError("transient taxonomy outage")
+            return _Resp()
+
+        monkeypatch.setattr(jt, "_MUNICIPALITY_CODES", None)
+        monkeypatch.setattr(jt.httpx, "get", flaky_get)
+
+        assert jt._municipality_codes() == {}  # graceful: no codes this call
+        second = jt._municipality_codes()
+        assert second == {"malmö": "O5cp"}, (
+            "the failed fetch was cached — a subsequent successful call "
+            "must repopulate the map"
+        )
+        assert len(calls) == 2, "second call must re-fetch, not read the poisoned cache"
+
+    def test_success_is_cached_once_per_process(self, monkeypatch):
+        import app.services.scrapers.jobtech as jt
+
+        calls = []
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return [{"taxonomy/preferred-label": "Lund", "taxonomy/id": "LuNd"}]
+
+        def ok_get(url, params=None, **kw):
+            calls.append(url)
+            return _Resp()
+
+        monkeypatch.setattr(jt, "_MUNICIPALITY_CODES", None)
+        monkeypatch.setattr(jt.httpx, "get", ok_get)
+
+        assert jt._municipality_codes() == {"lund": "LuNd"}
+        assert jt._municipality_codes() == {"lund": "LuNd"}
+        assert len(calls) == 1
+
+
 class TestFuzzyDuplicateGate:
     """The Pågen incident: the SAME job as an agency ad ('Integration
     Developer till Pågen' via Cabeza rekrytering) AND a direct ad
@@ -2995,6 +3090,58 @@ class TestFuzzyDuplicateGate:
             company_b="PÅGEN AKTIEBOLAG",
             location_b="Göteborg, Västra Götalands län",
         ) is False
+
+
+class TestFuzzyDedupeRoleIdentity:
+    """DEDUPE-FP (found LIVE): the 0.6 title-token Jaccard collapsed
+    genuinely different roles at the SAME employer in the same town —
+    the collapsed postings were among the most relevant in the queue
+    and were hidden before any AI call. A pair whose titles differ by
+    any word outside the noise list is NOT the same job, whatever the
+    overlap ratio: engineer vs scientist, Flask vs FastAPI, assoc vs
+    nothing are role identity, not noise."""
+
+    def _same(self, title_a, title_b):
+        from app.core.dedupe import likely_same_job
+        return likely_same_job(
+            title_a=title_a, company_a="Tetra Pak",
+            location_a="Lund, Skåne län",
+            title_b=title_b, company_b="Tetra Pak",
+            location_b="Lund, Skåne län",
+        )
+
+    # --- the three LIVE false collapses (must NOT collapse) ---
+
+    def test_live_flask_vs_fastapi_not_collapsed(self):
+        assert self._same(
+            "Senior Python Developer (Flask)", "Senior Python Developer (FastAPI)"
+        ) is False
+
+    def test_live_engineer_vs_scientist_not_collapsed(self):
+        assert self._same(
+            "Senior Data Engineer (Python)", "Senior Data Scientist (Python)"
+        ) is False
+
+    def test_live_assoc_principal_not_collapsed(self):
+        assert self._same(
+            "Strategic Finance Assoc Principal", "Strategic Finance Principal"
+        ) is False
+
+    # --- true duplicates (must STILL collapse) ---
+
+    def test_case_difference_collapses(self):
+        assert self._same("Python Developer", "python developer") is True
+
+    def test_reorder_and_punctuation_collapses(self):
+        assert self._same("Senior Python Developer", "Python Developer, Senior") is True
+        assert self._same("Python, Developer!", "Python Developer") is True
+
+    def test_remote_suffix_variant_collapses(self):
+        # the differing token ('Remote') is noise — same role, same employer
+        assert self._same("Python Developer", "Python Developer (Remote)") is True
+
+    def test_remote_vs_hybrid_suffix_collapses(self):
+        assert self._same("Python Developer (Remote)", "Python Developer (Hybrid)") is True
 
 
 class TestFuzzyDedupeWiring:

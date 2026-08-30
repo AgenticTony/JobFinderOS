@@ -16,6 +16,21 @@ _SENIORITY_TOKENS = {"senior", "junior", "lead", "sr", "jr", "chef", "head"}
 # Employer-suffix pattern: "Integration Developer till Pågen" — the client
 # is named in the title (agency re-posts do this constantly on Platsbanken).
 _TILL_SUFFIX = re.compile(r"\s+(?:till|at|for)\s+.+$", re.IGNORECASE)
+# DEDUPE-FP: title tokens that annotate LOGISTICS, not the role. Titles
+# that differ ONLY by these are the same job ('Python Developer' vs
+# 'Python Developer (Remote)'); ANY other differing token is role
+# identity and blocks the collapse. Deliberately tiny — every word here
+# is a word we accept as meaningless for job identity, which is why e.g.
+# 'office' and 'contract' are NOT listed ('Office Manager' is not
+# 'Manager', 'Contract Manager' is not 'Manager').
+_TITLE_NOISE_TOKENS = frozenset(
+    {
+        # work-mode suffixes boards append to titles
+        "remote", "hybrid", "onsite", "distans", "heltid", "deltid",
+        # grammatical filler
+        "the", "a", "an", "and", "of", "to", "for", "with", "at", "och",
+    }
+) | _SENIORITY_TOKENS  # seniority markers — also gated independently below
 
 
 def _norm(value: str | None) -> str:
@@ -44,8 +59,15 @@ def likely_same_job(
     Rule (precision over recall — a wrongly collapsed job is invisible
     forever, a missed duplicate wastes one queue slot):
       1. same municipality (first location segment), AND
-      2. title token overlap >= 0.6 after stripping the employer
-         'till/at/for X' suffix, AND
+      2. titles differ ONLY by NOISE tokens (_TITLE_NOISE_TOKENS:
+         work-mode suffixes, seniority markers, filler words) after
+         stripping the employer 'till/at/for X' suffix, AND the
+         noise-stripped cores are near-identical (Jaccard >= 0.75).
+         DEDUPE-FP: the old >= 0.6 raw overlap was EXACTLY the Jaccard
+         of a 4-token title differing by one word (3/5), so it silently
+         collapsed live pairs like 'Senior Data Engineer (Python)' into
+         'Senior Data Scientist (Python)' — Engineer vs Scientist is
+         role identity, not noise; AND
       3. EMPLOYER LINK — companies equal, OR one company is named in the
          other posting's title (the agency pattern), AND
       4. no seniority divergence (Senior vs plain = different roles).
@@ -56,17 +78,29 @@ def likely_same_job(
     if muni(location_a) != muni(location_b) or not muni(location_a):
         return False
 
-    def core_title(t: str | None) -> set[str]:
-        stripped = _TILL_SUFFIX.sub("", t or "")
-        toks = _tokens(stripped) - _SENIORITY_TOKENS
-        return toks - {"developer", "utvecklare"} if not toks else toks
-
     ta, tb = _tokens(_TILL_SUFFIX.sub("", title_a or "")), _tokens(_TILL_SUFFIX.sub("", title_b or ""))
     if not ta or not tb:
         return False
-    union = ta | tb
-    overlap = len(ta & tb) / len(union) if union else 0.0
-    if overlap < 0.6:
+
+    # ROLE-IDENTITY GUARD: any differing token outside the noise list is
+    # the role itself ('engineer' vs 'scientist', 'flask' vs 'fastapi',
+    # 'assoc' vs nothing) — never the same job, whatever the ratio.
+    differing = (ta | tb) - (ta & tb)
+    if any(t not in _TITLE_NOISE_TOKENS for t in differing):
+        return False
+
+    # Near-identity threshold on the noise-stripped cores. Belt to the
+    # guard above: the guard alone decides today (passing it implies the
+    # cores are equal), but the 0.75 ratio keeps the collapse decision
+    # inside the near-identity envelope as an explicit, testable
+    # invariant — if the guard is ever widened (noise-list growth,
+    # stemming), one-word-off shapes (3/5, 2/4) still refuse.
+    core_a, core_b = ta - _TITLE_NOISE_TOKENS, tb - _TITLE_NOISE_TOKENS
+    if not core_a or not core_b:
+        return False
+    union = core_a | core_b
+    overlap = len(core_a & core_b) / len(union)
+    if overlap < 0.75:
         return False
 
     # Seniority divergence: {senior, junior, lead...} present on one side
