@@ -155,10 +155,49 @@ jobs:
         run: docker build -t jobfinderos-backend:ci backend/
       - name: Image smoke (imports, boots schema)
         run: docker run --rm --entrypoint python -e DEBUG=true jobfinderos-backend:ci -c "import app.main; print('container OK')"
+      # AI-12: the true production-shape typography check. The unit suite
+      # runs on ubuntu runners that already have DejaVu fonts, so only this
+      # step catches "image lost its fonts" — python:3.12-slim ships none,
+      # and before fonts-dejavu-core every em-dash/curly quote rendered as
+      # "?" in employer-facing PDFs. Renders inside the BUILT image and
+      # extracts the text back out with pdfplumber (already a locked dep).
+      - name: Image smoke (PDF curly typography survives render — AI-12)
+        run: |
+          docker run --rm -i --entrypoint python jobfinderos-backend:ci - <<'PY'
+          import io
+          import pdfplumber
+          from app.services import pdf_service
+          text = ("I\u2019m excited \u2014 truly \u2014 about the role; "
+                  "the team\u2019s \u201cfirst principles\u201d culture.")
+          data = pdf_service.cover_letter_pdf(text, "CI Candidate")
+          with pdfplumber.open(io.BytesIO(data)) as pdf:
+              extracted = "\n".join(p.extract_text() or "" for p in pdf.pages)
+          for ch in ("\u2014", "\u2019", "\u201c", "\u201d"):
+              assert ch in extracted, repr(extracted)
+          assert "?" not in extracted, repr(extracted)
+          print("container PDF typography OK:", extracted[:90])
+          PY
       - name: Build hunt image (WO-07 cron shape)
         run: docker build -f backend/Dockerfile.hunt -t jobfinderos-hunt:ci backend/
       - name: Hunt image smoke (--once CLI parses, exits clean)
         run: docker run --rm --entrypoint python -e DEBUG=true jobfinderos-hunt:ci -m app.services.worker --help
+      # Same AI-12 check on the hunt image: it shares the API image's
+      # layers, so this proves the font layer (not just the CMD) is intact.
+      - name: Hunt image smoke (PDF curly typography — AI-12)
+        run: |
+          docker run --rm -i --entrypoint python jobfinderos-hunt:ci - <<'PY'
+          import io
+          import pdfplumber
+          from app.services import pdf_service
+          text = "hunt \u2014 one-shot \u2014 \u201cfonts\u201d check"
+          data = pdf_service.tailored_cv_pdf(text, "CI Candidate")
+          with pdfplumber.open(io.BytesIO(data)) as pdf:
+              extracted = "\n".join(p.extract_text() or "" for p in pdf.pages)
+          for ch in ("\u2014", "\u201c", "\u201d"):
+              assert ch in extracted, repr(extracted)
+          assert "?" not in extracted, repr(extracted)
+          print("hunt container PDF typography OK:", extracted[:90])
+          PY
 
   blueprint:
     name: Render blueprint (render.yaml valid)

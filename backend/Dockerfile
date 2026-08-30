@@ -9,6 +9,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# DejaVu core fonts (AI-12): python:3.12-slim ships NO fonts at all, so
+# pdf_service.py's FONT_CANDIDATES resolved nothing and employer-facing
+# PDFs fell back to latin-1 "replace" — every em-dash/curly quote in live
+# GLM letters rendered as "?" (5 substitutions in one short paragraph).
+# fonts-dejavu-core provides exactly the first Linux candidate
+# (/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf) and nothing else;
+# apt lists cleaned in the same layer to keep the slim image slim.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Locked dependencies only — reproducible builds (lockfile committed)
 COPY requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
