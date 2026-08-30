@@ -455,11 +455,21 @@ def run_pipeline(
                     "error": f"{type(e).__name__}: {e}",
                 }
 
-        # Top recommendations of this run for immediate display
+        # Top recommendations of this run for immediate display.
+        # P0-1 (beta review): MUST scope to the caller — decision IS NULL +
+        # the SHARED job.status == 'matched' flag (set by ANY user's
+        # matcher) is not a user boundary. Unscoped, every hunt returned
+        # the top-10 GLOBALLY-ranked pending matches: other users'
+        # CV-derived reasoning and skills, serialized straight into the
+        # hunt response.
         top_matches = (
             db.query(MatchResult)
             .join(JobPosting, MatchResult.job_id == JobPosting.id)
-            .filter(MatchResult.decision.is_(None), JobPosting.status == "matched")
+            .filter(
+                MatchResult.user_id == user_id,
+                MatchResult.decision.is_(None),
+                JobPosting.status == "matched",
+            )
             .order_by(MatchResult.score.desc())
             .limit(10)
             .all()
