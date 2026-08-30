@@ -180,21 +180,25 @@ def _run_matching_inner(
         }
 
     # `limit` caps AI EVALUATIONS per run (spend guard). It must never cap
-    # candidate SELECTION: the fetch below is oldest-first through a much
+    # candidate SELECTION: the fetch below is newest-first through a much
     # larger window, and the cheap gates (language, dedupe, exclude
     # keywords, no-description) trim it BEFORE any AI slot is spent — the
-    # original design applied this limit to the raw SQL with freshest-first
-    # order, so plausible ads starved behind junk until the 30-day sweep
-    # dismissed them unevaluated (the dream-job starvation bug).
+    # original design applied this limit to the raw SQL, so plausible ads
+    # starved behind junk until the 30-day sweep dismissed them
+    # unevaluated (the dream-job starvation bug).
     limit = limit or settings.MAX_JOBS_PER_MATCH_RUN
 
     # Per-user: jobs THIS user has never evaluated (no match row for
-    # (user, job)). OLDEST FIRST — the stale sweep kills postings at
-    # MAX_POSTING_AGE_DAYS, so the ads closest to that wall are evaluated
-    # before fresh ones (which stay eligible for weeks). Postings
-    # globally dismissed as junk (stale sweep) stay excluded; job.status
-    # 'matched' is bookkeeping for "someone evaluated this" — every user
-    # still gets their own evaluation.
+    # (user, job)). NEWEST FIRST (user decision, 2026-08-30): continuous
+    # recruiting means the first strong applicant often wins, so fresh
+    # ads get the evaluation slots. Starvation safety does not depend on
+    # this order — the post-gate evaluation ceiling plus the time budget
+    # drain a scoped user's daily inflow within a run or two, so backlog
+    # jobs are delayed, not starved; ads that still expire unevaluated at
+    # MAX_POSTING_AGE_DAYS were a month old and past their best
+    # application window anyway. Postings globally dismissed as junk stay
+    # excluded; job.status 'matched' is bookkeeping for "someone
+    # evaluated this" — every user still gets their own evaluation.
     from sqlalchemy import and_
 
     unmatched = (
@@ -207,7 +211,7 @@ def _run_matching_inner(
             MatchResult.id.is_(None),
             JobPosting.status != "dismissed",
         )
-        .order_by(JobPosting.scraped_at.asc())
+        .order_by(JobPosting.scraped_at.desc())
         .limit(settings.MATCH_CANDIDATE_WINDOW)
         .all()
     )

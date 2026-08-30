@@ -2612,10 +2612,11 @@ class TestFuzzyDedupeWiring:
 
 class TestStarvationFix:
     """The evaluation cap shipped as a raw SQL LIMIT on the candidate
-    query, freshest-first — plausible old ads starved behind newer ones
-    until the stale sweep dismissed them unevaluated (the dream-job
-    starvation bug). Selection is now oldest-first through a window, and
-    the cap counts AI evaluations AFTER the free gates."""
+    query — plausible ads starved behind junk until the stale sweep
+    dismissed them unevaluated (the dream-job starvation bug). Selection
+    is newest-first (continuous recruiting: first applicant wins) through
+    a window, and the cap counts AI evaluations AFTER the free gates —
+    starvation safety comes from throughput, not ordering."""
 
     def _fake_service(self, monkeypatch, score=60):
         from app.services import matcher_service
@@ -2639,7 +2640,10 @@ class TestStarvationFix:
         monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
         return calls
 
-    def test_oldest_job_gets_the_slot_under_a_tight_cap(self, db, monkeypatch):
+    def test_freshest_job_gets_the_slot_under_a_tight_cap(self, db, monkeypatch):
+        """Newest-first (user decision, 2026-08-30): continuous recruiting
+        rewards the first strong applicant, so the fresh ad outranks the
+        old one for the evaluation slot. The old ad is queued, not lost."""
         from datetime import timedelta
 
         from app.core.timeutil import utc_now
@@ -2662,11 +2666,11 @@ class TestStarvationFix:
         )
 
         assert calls["n"] == 3, "one keeper job = triage + 2 keeper samples"
-        assert db.query(MatchResult).filter(MatchResult.job_id == old.id).count() == 1, (
-            "the ad nearest the stale-sweep wall must be evaluated first"
+        assert db.query(MatchResult).filter(MatchResult.job_id == fresh.id).count() == 1, (
+            "the fresh ad must be evaluated first — first applicant wins"
         )
-        assert db.query(MatchResult).filter(MatchResult.job_id == fresh.id).count() == 0, (
-            "cap=1 queues the fresh ad for the next run — delayed, never lost"
+        assert db.query(MatchResult).filter(MatchResult.job_id == old.id).count() == 0, (
+            "cap=1 queues the old ad for the next run — delayed, never lost"
         )
 
     def test_cheap_gates_dont_burn_evaluation_slots(self, db, monkeypatch):
