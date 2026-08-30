@@ -159,11 +159,13 @@ export const runPipeline = async (options?: {
   sources?: string[];
   match?: boolean;
   max_matches?: number;
+  backfill?: boolean;
 }): Promise<PipelineRunResponse> => {
   const response = await slowApi.post<PipelineRunResponse>('/api/v1/pipeline/run', {
     sources: options?.sources,
     match: options?.match ?? true,
     max_matches: options?.max_matches,
+    backfill: options?.backfill ?? false,
   });
   return response.data;
 };

@@ -28,6 +28,72 @@ from app.services.scrapers import SCRAPER_REGISTRY, NormalizedJob
 
 logger = logging.getLogger(__name__)
 
+# Sources whose fetchers honor ctx["delta_since"] (published-after
+# fetching). Query-less feeds (remote boards) return date-sorted windows
+# already — local dedupe makes them behave like deltas for free.
+DELTA_SOURCES = {"jobtech"}
+
+# Re-read window on top of the watermark: absorbs API clock skew and
+# ads re-published with a fresh date. Cheap — dedupe eats the overlap.
+DELTA_OVERLAP_HOURS = 24
+
+
+def _scope_key(ctx: Dict) -> str:
+    munis = list(ctx.get("municipalities") or [])
+    if not munis and ctx.get("municipality"):
+        munis = [str(ctx["municipality"])]
+    return ",".join(sorted(m.lower() for m in munis))
+
+
+def _watermark_queries(ctx: Dict) -> List[str]:
+    qs = [str(q).strip() for q in (ctx.get("queries") or []) if str(q).strip()]
+    return qs or [""]
+
+
+def delta_since_for(db: Session, source: str, ctx: Dict):
+    """Cutoff for a published-after fetch, or None = full backfill.
+
+    Keyed on (source, query, scope): ANY query or scope never fetched
+    before forces a deep backfill — a new user's municipalities or a
+    newly added search term automatically gets the full history read,
+    not just the last day.
+    """
+    from datetime import timedelta
+
+    from app.models import ScrapeWatermark
+
+    scope = _scope_key(ctx)
+    stamps = {
+        r.query: r.watermark_at
+        for r in db.query(ScrapeWatermark).filter_by(source=source, scope=scope)
+    }
+    cutoffs = []
+    for q in _watermark_queries(ctx):
+        if q not in stamps:
+            return None  # something new under this scope -> backfill
+        cutoffs.append(stamps[q])
+    oldest = min(cutoffs)
+    return oldest - timedelta(hours=DELTA_OVERLAP_HOURS)
+
+
+def set_watermarks(db: Session, source: str, ctx: Dict) -> None:
+    """Record a successful fetch for every (source, query, scope)."""
+    from app.models import ScrapeWatermark
+
+    scope = _scope_key(ctx)
+    now = utc_now()
+    for q in _watermark_queries(ctx):
+        row = (
+            db.query(ScrapeWatermark)
+            .filter_by(source=source, query=q, scope=scope)
+            .first()
+        )
+        if row is not None:
+            row.watermark_at = now
+        else:
+            db.add(ScrapeWatermark(source=source, query=q, scope=scope, watermark_at=now))
+    db.commit()
+
 
 def build_scrape_context(db: Session, *, user_id) -> Optional[Dict]:
     """Per-user scrape settings from the caller's onboarded profile.
@@ -100,6 +166,17 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
     run = ScrapeRun(source=source_name, status="running")
     db.add(run)
     db.commit()
+
+    # Delta mode: the fetcher gets a published-after cutoff derived from
+    # the last successful fetch of this exact (source, query, scope).
+    # ctx["backfill"] (onboarding, explicit) forces the deep read.
+    ctx = dict(ctx or {})
+    if source_name in DELTA_SOURCES:
+        ctx["delta_since"] = (
+            None if ctx.get("backfill") else delta_since_for(db, source_name, ctx)
+        )
+    else:
+        ctx.pop("delta_since", None)
 
     scraper_cls = SCRAPER_REGISTRY.get(source_name)
     if scraper_cls is None:
@@ -182,7 +259,16 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
         db.commit()
         run.jobs_new = new_count
         run.status = "completed"
-        logger.info("[%s] %d found, %d new", source_name, len(jobs), new_count)
+        if source_name in DELTA_SOURCES:
+            try:
+                set_watermarks(db, source_name, ctx)
+            except Exception as e:  # noqa: BLE001 — a watermark miss degrades
+                # to a re-read next run (overlap absorbs it); never fail the hunt
+                logger.warning("[%s] watermark update failed: %s", source_name, e)
+        logger.info(
+            "[%s] %d found, %d new (delta_since=%s)",
+            source_name, len(jobs), new_count, ctx.get("delta_since"),
+        )
     except Exception as e:
         db.rollback()
         run.status = "failed"
@@ -250,17 +336,22 @@ def run_pipeline(
     sources: Optional[List[str]] = None,
     match: bool = True,
     max_matches: Optional[int] = None,
+    backfill: bool = False,
     *,
     user_id,
 ) -> Dict:
     """
     Run the full pipeline (used by the API and the scheduler).
 
-    Returns a summary dict (also logged by the scheduler).
+    backfill=True forces a deep fetch (no published-after cutoff) — the
+    onboarding flow uses it so a brand-new user's first hunt reads the
+    full history for their queries and municipalities.
     """
     db = SessionLocal()
     try:
         ctx = build_scrape_context(db, user_id=user_id)
+        if ctx and backfill:
+            ctx["backfill"] = True
         # Per-user pack when onboarded; explicit request or global allow-list otherwise
         requested = _select_sources(ctx, sources)
         scrape_summaries = []
@@ -327,6 +418,92 @@ def run_pipeline(
         }
     finally:
         db.close()
+
+
+def build_union_contexts(db: Session) -> List[Dict]:
+    """One scrape context per country, unioned across EVERY onboarded
+    user — the scheduled hunt fetches the union of everyone's queries
+    and municipalities, so the shared pool stops being shaped by whoever
+    triggered the last hunt, and a new user's municipalities join the
+    union (forcing a backfill for the new scope key automatically).
+
+    Union semantics: a job is stored if it fits ANY user's scope;
+    per-user relevance is (still) decided at matching time.
+    """
+    profiles = (
+        db.query(Profile)
+        .filter(Profile.country.isnot(None), Profile.user_id.isnot(None))
+        .all()
+    )
+    by_country: Dict[str, Dict] = {}
+    for p in profiles:
+        c = (p.country or "").upper()
+        g = by_country.setdefault(
+            c,
+            {
+                "country": c,
+                "region": None,
+                "municipality": None,
+                "municipalities": [],
+                "queries": [],
+                "languages": [],
+                "remote_only": False,
+                "include_remote": False,
+            },
+        )
+        munis = parse_json_list(getattr(p, "municipalities", None))
+        if not munis and p.municipality:
+            munis = [p.municipality]
+        for m in munis or []:
+            if m and m not in g["municipalities"]:
+                g["municipalities"].append(m)
+        for q in parse_json_list(p.search_queries) or []:
+            if q and q not in g["queries"]:
+                g["queries"].append(q)
+        for lang in parse_json_list(p.languages) or []:
+            if lang and lang not in g["languages"]:
+                g["languages"].append(lang)
+        if p.include_remote:
+            g["include_remote"] = True
+    return list(by_country.values())
+
+
+def scrape_for_context(db: Session, ctx: Dict) -> List[Dict]:
+    """Scrape every source in ctx's country pack. The scheduled union
+    hunt calls this once per country instead of per user."""
+    summaries = []
+    for source in _select_sources(ctx, None):
+        run = scrape_source(db, source, ctx)
+        summaries.append(
+            {
+                "source": run.source,
+                "status": run.status,
+                "jobs_found": run.jobs_found,
+                "jobs_new": run.jobs_new,
+                "error": run.error,
+            }
+        )
+    return summaries
+
+
+def match_for_user(db: Session, user_id) -> Dict:
+    """One user's matching pass (tenancy layer 1: profile resolved by the
+    caller-side helper and injected — same rule as run_pipeline)."""
+    from app.services.cv_service import get_active_profile
+
+    profile = get_active_profile(db, user_id=user_id)
+    if not profile or not profile.cv_text:
+        return {"status": "skipped", "error": "No active profile with a CV"}
+    try:
+        return matcher_service.run_matching(
+            db,
+            profile=profile,
+            max_seconds=settings.MATCH_TIME_BUDGET_SECONDS,
+            user_id=user_id,
+        )
+    except Exception as e:  # noqa: BLE001 — report, never kill the hunt cycle
+        db.rollback()
+        return {"status": "failed", "error": f"{type(e).__name__}: {e}"}
 
 
 def _maintenance_sweeps(db: Session) -> None:

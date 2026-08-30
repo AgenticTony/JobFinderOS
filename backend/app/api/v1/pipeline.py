@@ -47,6 +47,7 @@ async def run(
         sources=sources,
         match=payload.match,
         max_matches=payload.max_matches,
+        backfill=payload.backfill,
         user_id=user.id,
     )
 

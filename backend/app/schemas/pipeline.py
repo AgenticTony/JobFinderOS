@@ -36,6 +36,11 @@ class PipelineRunRequest(BaseModel):
     max_matches: Optional[int] = Field(
         None, ge=1, le=settings.MAX_JOBS_PER_MATCH_RUN
     )
+    # Deep fetch (no published-after cutoff) — the onboarding flow sets
+    # it so a brand-new user's first hunt reads the full history for
+    # their queries and municipalities. Harmless otherwise: dedupe eats
+    # the overlap; the rate limiter buckets the runs.
+    backfill: bool = False
 
 
 class ScrapeSummary(BaseModel):

@@ -178,12 +178,15 @@ export default function Home() {
     return () => clearInterval(poll);
   }, [matchPolling, refresh]);
 
-  const handleRunPipeline = async () => {
+  const handleRunPipeline = async (backfill = false) => {
     setPipelineBusy(true);
     setPipelineResult(null);
     try {
-      // 1) Scrape only — fast (~10s), returns immediately with results
-      const result = await runPipeline({ match: false });
+      // 1) Scrape only — fast (~10s), returns immediately with results.
+      //    Onboarding passes backfill: the first hunt reads the full
+      //    history for the new queries/municipalities, not just the
+      //    last day's delta.
+      const result = await runPipeline({ match: false, backfill });
       setPipelineResult(result);
       // 2) Kick AI matching into the background and stream results via polling
       await runMatching();
@@ -219,7 +222,7 @@ export default function Home() {
     await saveOnboarding(payload);
     setShowWizard(false);
     await refresh();
-    handleRunPipeline(); // first targeted run, straight away
+    handleRunPipeline(true); // first targeted run: deep backfill, straight away
   };
 
   const handleDecision = async (matchId: number, decision: 'approved' | 'rejected') => {
@@ -252,7 +255,7 @@ export default function Home() {
 
   const huntButton = (compact: boolean) => (
     <button
-      onClick={handleRunPipeline}
+      onClick={() => handleRunPipeline()}
       disabled={hunting}
       aria-busy={hunting}
       title="Scrape all sources and rank new jobs against your CV"

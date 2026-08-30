@@ -28,6 +28,13 @@ PER_QUERY_LIMIT = 100  # API max page size
 # (75% keeper rate vs 13% for the remote aggregators) — walk offset
 # pages per query instead of taking only page one.
 MAX_PAGES_PER_QUERY = 3
+# Delta mode (published-after): the result set is a day's new ads —
+# small by construction, but page through ALL of it so nothing new is
+# ever missed by window depth.
+MAX_PAGES_DELTA = 5
+# Backfill (no watermark yet for this query+scope, or forced by
+# onboarding): the deep one-time read of the profession's history.
+MAX_PAGES_BACKFILL = 10
 
 # name -> taxonomy municipality code (JobTech's search API filters by CODE,
 # not name — 'municipality: One or more municipality codes, code according
@@ -96,6 +103,20 @@ class JobtechScraper(BaseScraper):
 
         queries = self._queries(context)
 
+        # Delta mode: ctx["delta_since"] (set by scrape_source from the
+        # watermark) asks the API for ads PUBLISHED after the cutoff, so
+        # each hunt reads exactly the new arrivals. None = backfill: the
+        # deep one-time read for a query/scope never fetched before.
+        delta_since = (context or {}).get("delta_since")
+        max_pages = MAX_PAGES_BACKFILL if delta_since is None else MAX_PAGES_DELTA
+        delta_params: List[tuple] = []
+        if delta_since is not None:
+            delta_params = [("published-after", delta_since.date().isoformat())]
+            logger.info("[jobtech] delta fetch: ads published after %s",
+                        delta_since.date().isoformat())
+        else:
+            logger.info("[jobtech] backfill fetch: deep read, no date cutoff")
+
         # Fetch-side municipality filtering (official API param): when the
         # user chose municipalities, request ONLY those kommuner instead of
         # fetching all of Sweden and filtering locally. Codes resolve via
@@ -114,13 +135,13 @@ class JobtechScraper(BaseScraper):
                                "unfiltered fetch, local gate applies", chosen)
 
         for query in queries:
-            for page in range(MAX_PAGES_PER_QUERY):
+            for page in range(max_pages):
                 offset = page * PER_QUERY_LIMIT
                 try:
                     response = httpx.get(
                         API_URL,
                         params=[("q", query), ("limit", PER_QUERY_LIMIT),
-                                ("offset", offset), *place_params],
+                                ("offset", offset), *place_params, *delta_params],
                         headers=headers,
                         timeout=settings.SCRAPE_TIMEOUT_SECONDS,
                         follow_redirects=True,

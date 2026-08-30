@@ -82,10 +82,17 @@ def release_hunt(db) -> None:
 
 
 def run_scheduled_hunt() -> dict:
-    """One hunt cycle under the claim lock: every onboarded user gets
-    their per-user pipeline run. The claim is ALWAYS released."""
+    """One hunt cycle under the claim lock: ONE delta scrape per country
+    (the UNION of every onboarded user's queries and municipalities —
+    the pool stops being shaped by whoever last pressed Hunt), then a
+    matching pass per user. The claim is ALWAYS released."""
     from app.models import Profile
-    from app.services.pipeline import run_pipeline
+    from app.services.pipeline import (
+        _maintenance_sweeps,
+        build_union_contexts,
+        match_for_user,
+        scrape_for_context,
+    )
 
     db = SessionLocal()
     try:
@@ -99,6 +106,12 @@ def run_scheduled_hunt() -> dict:
     try:
         db = SessionLocal()
         try:
+            union_ctxs = build_union_contexts(db)
+            for ctx in union_ctxs:
+                for s in scrape_for_context(db, ctx):
+                    if s["status"] == "failed":
+                        summary["errors"] += 1
+            _maintenance_sweeps(db)
             user_ids = [
                 row[0]
                 for row in db.query(Profile.user_id)
@@ -110,7 +123,7 @@ def run_scheduled_hunt() -> dict:
             db.close()
         if not user_ids:
             logger.info("Scheduled hunt: no onboarded users")
-            return {"status": "ran", "users": 0, "errors": 0}
+            return {"status": "ran", "users": 0, "errors": summary["errors"]}
 
         for uid in user_ids:
             # WO-04 review: scheduled hunts carry their user's id onto
@@ -118,8 +131,17 @@ def run_scheduled_hunt() -> dict:
             # trial budget meters it per user
             token = current_user_id.set(uid)
             try:
-                run_pipeline(user_id=uid)
-                summary["users"] += 1
+                db = SessionLocal()
+                try:
+                    result = match_for_user(db, uid)
+                finally:
+                    db.close()
+                if result.get("status") == "failed":
+                    summary["errors"] += 1
+                    logger.error("Scheduled match failed for user %s: %s",
+                                 uid, result.get("error"))
+                else:
+                    summary["users"] += 1
             except Exception as e:  # noqa: BLE001 — one user's failure never kills the cycle
                 summary["errors"] += 1
                 logger.error("Scheduled hunt failed for user %s: %s", uid, e)

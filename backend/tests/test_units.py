@@ -1232,9 +1232,33 @@ class TestJobtechPagination:
             })()
 
         monkeypatch.setattr(jt.httpx, "get", fake_get)
+        # No delta_since = backfill mode: the deep one-time read
         jobs = jt.JobtechScraper().fetch({"queries": ["dev"]})
-        assert len(jobs) == jt.MAX_PAGES_PER_QUERY * 100, (
-            f"cap not respected: {len(jobs)}"
+        assert len(jobs) == jt.MAX_PAGES_BACKFILL * 100, (
+            f"backfill cap not respected: {len(jobs)}"
+        )
+
+    def test_delta_mode_caps_at_delta_pages(self, monkeypatch):
+        """With a published-after cutoff the result set is a day of new
+        ads — small, but still capped so a bad day can't page forever."""
+        from datetime import datetime, timezone
+
+        import app.services.scrapers.jobtech as jt
+
+        def fake_get(url, params=None, **kw):
+            p = dict(params)
+            return type("R", (), {
+                "raise_for_status": lambda s: None,
+                "json": staticmethod(lambda s=None: {
+                    "hits": [{"id": str(p["offset"] + i), "headline": "j",
+                              "removed": False} for i in range(100)]}),
+            })()
+
+        monkeypatch.setattr(jt.httpx, "get", fake_get)
+        since = datetime(2026, 8, 29, tzinfo=timezone.utc)
+        jobs = jt.JobtechScraper().fetch({"queries": ["dev"], "delta_since": since})
+        assert len(jobs) == jt.MAX_PAGES_DELTA * 100, (
+            f"delta cap not respected: {len(jobs)}"
         )
 
 

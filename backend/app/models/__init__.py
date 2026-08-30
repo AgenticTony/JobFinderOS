@@ -7,6 +7,7 @@ from app.models.job import JobPosting
 from app.models.match import MatchResult
 from app.models.profile import Profile
 from app.models.scrape_run import ScrapeRun
+from app.models.scrape_watermark import ScrapeWatermark  # noqa: F401
 from app.models.system_lock import SystemLock  # noqa: F401
 from app.models.user import User
 
