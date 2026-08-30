@@ -35,6 +35,8 @@ interface Props {
   initialCountry?: string;
   initialRegion?: string;
   initialMunicipality?: string;
+  initialMunicipalities?: string[];
+  initialSearchRadiusKm?: number;
   initialQueries?: string[];
 }
 
@@ -71,6 +73,8 @@ export default function OnboardingWizard({
   initialCountry,
   initialRegion,
   initialMunicipality,
+  initialMunicipalities,
+  initialSearchRadiusKm,
   initialQueries,
 }: Props) {
   const [step, setStep] = useState(0);
@@ -80,13 +84,15 @@ export default function OnboardingWizard({
   // STRICT multi-municipality scope: picking Malmö means Malmö; add Lund
   // for the commute belt. Empty selection = explicit whole region.
   const [municipalityList, setMunicipalityList] = useState<string[]>(
-    initialMunicipality ? [initialMunicipality] : []
+    initialMunicipalities ?? (initialMunicipality ? [initialMunicipality] : [])
   );
   const [remoteOnly, setRemoteOnly] = useState(false);
   // Commute zone (km) around the first chosen municipality — 0 = exact
-  // towns only. GEO sources only; silently falls back where no
-  // centroid resolves.
-  const [searchRadiusKm, setSearchRadiusKm] = useState<number>(0);
+  // towns only. Prefilled in edit mode so re-saving setup never
+  // silently nulls an existing radius.
+  const [searchRadiusKm, setSearchRadiusKm] = useState<number>(
+    initialSearchRadiusKm ?? 0
+  );
   const [includeRemote, setIncludeRemote] = useState(Boolean(initialIncludeRemote));
   const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']);
   const [mode, setMode] = useState<SearchMode>('field');
@@ -192,6 +198,15 @@ export default function OnboardingWizard({
   const toggleLanguage = (lang: string) =>
     setLanguages((prev) => (prev.includes(lang) ? prev.filter((l) => l !== lang) : [...prev, lang]));
 
+  // The radius control is honest only where it can anchor: the user's
+  // PRIMARY town has a centroid (server-published list). When false,
+  // any previously-set radius is dropped at save rather than silently
+  // persisting behind a hidden control.
+  const radiusAnchorSupported =
+    country === 'SE' &&
+    municipalityList.length > 0 &&
+    (geo?.radius_supported ?? []).includes(municipalityList[0]);
+
   const canProceed = [
     Boolean(country),
     Boolean(region), // municipality optional (whole region is valid)
@@ -208,7 +223,7 @@ export default function OnboardingWizard({
         region: region || null,
         municipalities: municipalityList,
         municipality: municipalityList[0] ?? null, // legacy single, kept in sync
-        search_radius_km: searchRadiusKm || null,
+        search_radius_km: radiusAnchorSupported && searchRadiusKm > 0 ? searchRadiusKm : null,
         remote_only: remoteOnly,
         include_remote: includeRemote || remoteOnly,
         search_queries: [...selected],
@@ -365,7 +380,7 @@ export default function OnboardingWizard({
                         </div>
                       )}
                     </div>
-                    {country === 'SE' && municipalityList.length > 0 && (
+                    {radiusAnchorSupported && (
                       <div>
                         <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
                           Commute radius around {municipalityList[0]}{' '}

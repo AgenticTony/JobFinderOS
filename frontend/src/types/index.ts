@@ -133,6 +133,7 @@ export interface OccupationSuggestion {
 export interface GeoData {
   countries: { code: string; name: string; flag: string }[];
   geo: Record<string, Record<string, string[]>>;
+  radius_supported?: string[]; // towns with a centroid for the radius control
 }
 
 export type SearchMode = 'field' | 'adjacent' | 'widen';

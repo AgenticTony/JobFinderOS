@@ -207,8 +207,15 @@ async def suggest_queries(
 async def get_geo():
     """Region → city/municipality data for the onboarding wizard dropdowns."""
     from app.data.geo import GEO
+    from app.services.geo import RADIUS_SUPPORTED_MUNICIPALITIES
 
-    return {"countries": available_countries(), "geo": GEO}
+    return {
+        "countries": available_countries(),
+        "geo": GEO,
+        # Where the commute-radius control can honestly anchor (a
+        # centroid exists for the user's PRIMARY town)
+        "radius_supported": RADIUS_SUPPORTED_MUNICIPALITIES,
+    }
 
 
 @router.get("/status")

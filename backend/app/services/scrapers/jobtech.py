@@ -118,21 +118,21 @@ class JobtechScraper(BaseScraper):
             logger.info("[jobtech] backfill fetch: deep read, no date cutoff")
 
         # Fetch-side geo filtering (official API params). Two modes:
-        #   radius (position + position.radius) when the user set a
-        #     commute-zone radius and their municipality resolves to a
-        #     centroid — a true distance search that catches neighbouring
-        #     kommuner without naming them (scrape_source then skips the
-        #     strict local gate: the API already distance-filtered);
+        #   radius (position + position.radius) per the SHARED geo_plan
+        #     — the exact same decision scrape_source's store gate uses,
+        #     so they can never disagree. Strictly anchored on the
+        #     user's PRIMARY town; unresolvable anchor = no plan = the
+        #     municipality-code path below (every chosen town covered).
         #   otherwise municipality codes — request ONLY those kommuner.
         #     Codes resolve via the taxonomy map; unresolved names fall
         #     back to the local gate.
         place_params: List[tuple] = []
-        chosen = (context or {}).get("municipalities") or []
-        from app.services.geo import radius_geo_active, resolve_position
+        from app.services.geo import effective_municipalities, geo_plan
 
-        radius_km = int((context or {}).get("search_radius_km") or 0)
-        if chosen and radius_geo_active(context or {}):
-            lat, lon = resolve_position(chosen)
+        chosen = effective_municipalities(context or {})
+        plan = geo_plan(context or {})
+        if plan is not None:
+            lat, lon, radius_km = plan
             place_params = [
                 ("position", f"{lat},{lon}"),
                 ("position.radius", radius_km),

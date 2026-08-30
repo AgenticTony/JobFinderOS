@@ -74,30 +74,68 @@ MUNICIPALITY_CENTROIDS: dict[str, Tuple[float, float]] = {
 
 
 def resolve_position(municipalities: List[str]) -> Optional[Tuple[float, float]]:
-    """Centroid of the FIRST resolvable municipality, else None.
-
-    First-wins is deliberate: the user's primary choice anchors the
-    commute zone; a 30 km radius around it covers the neighbours (and
-    any second chosen municipality that close) by construction.
+    """Centroid of the user's PRIMARY municipality — municipalities[0]
+    — or None. Strictly the first pick, not 'the first one that
+    resolves': the UI names chosen[0] as the anchor, so silently
+    substituting a resolvable later town would centre the commute zone
+    somewhere the user did not choose and (with the API-side geo filter)
+    exclude their own town entirely. Unresolvable primary -> None ->
+    the fetch falls back to municipality codes for every chosen town.
     """
-    for m in municipalities or []:
-        if not m:
-            continue
-        pos = MUNICIPALITY_CENTROIDS.get(str(m).strip().lower())
-        if pos is not None:
-            return pos
-    return None
+    if not municipalities:
+        return None
+    return MUNICIPALITY_CENTROIDS.get(str(municipalities[0]).strip().lower())
+
+
+def effective_municipalities(ctx: dict) -> List[str]:
+    """The ctx's municipality list with the legacy single-field
+    fallback. SINGLE source for both the scraper's place params and
+    the store gate's geo decision — the two must never read different
+    fields (review finding: municipalities=[] + legacy municipality=
+    used to skip the gate for an unfiltered, whole-of-Sweden fetch).
+    """
+    munis = list(ctx.get("municipalities") or [])
+    if not munis and ctx.get("municipality"):
+        munis = [str(ctx["municipality"])]
+    return munis
+
+
+def geo_plan(ctx: dict) -> Optional[Tuple[float, float, int]]:
+    """The fetch's geo decision, computed ONCE and shared: (lat, lon,
+    km) when API-side radius filtering applies, else None.
+
+    None whenever: no radius, no chosen municipality, or the user's
+    PRIMARY town has no centroid (strict anchoring). The scraper builds
+    its position params from this and the store gate asks the same
+    function — they cannot diverge because neither re-derives anything.
+    """
+    km = int(ctx.get("search_radius_km") or 0)
+    if km <= 0:
+        return None
+    munis = effective_municipalities(ctx)
+    if not munis:
+        return None
+    pos = resolve_position(munis)
+    if pos is None:
+        return None
+    return (pos[0], pos[1], km)
 
 
 def radius_geo_active(ctx: dict) -> bool:
-    """True when this scrape context should use API-side geo filtering:
-    a radius is set AND a centroid resolves. The scraper and the store
-    gate must agree on this — the API already distance-filtered, so the
-    strict local municipality gate must NOT re-restrict those jobs."""
-    from app.services.geo import resolve_position
+    """True when this scrape context uses API-side geo filtering.
+    Kept as the boolean convenience over geo_plan — same single source."""
+    return geo_plan(ctx) is not None
 
-    km = ctx.get("search_radius_km") or 0
-    if int(km) <= 0:
-        return False
-    munis = ctx.get("municipalities") or ([ctx["municipality"]] if ctx.get("municipality") else [])
-    return resolve_position(munis) is not None
+
+# Canonical spellings (the keys minus the diacritic-free lookup
+# variants) — the /geo endpoint exposes these so the wizard only
+# offers the radius where a centroid actually anchors it.
+_RADIUS_LOOKUP_VARIANTS = {
+    "goteborg", "boras", "trollhattan", "jonkoping", "orebro",
+    "vasteras", "linkoping", "norrkoping", "sodertalje", "nykoping",
+    "gavle", "ostersund", "umea", "skelleftea", "lulea",
+}
+RADIUS_SUPPORTED_MUNICIPALITIES = sorted(
+    k.capitalize() for k in MUNICIPALITY_CENTROIDS
+    if k not in _RADIUS_LOOKUP_VARIANTS
+)

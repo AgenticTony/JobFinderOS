@@ -75,11 +75,27 @@ class TestGeoResolution:
         lat, lon = resolve_position(["Malmö"])
         assert 55.4 < lat < 55.8 and 12.8 < lon < 13.2
 
-    def test_first_resolvable_wins(self):
+    def test_strict_primary_anchor(self):
+        """The anchor is the user's FIRST pick or nothing — silently
+        substituting a resolvable later town would centre the commute
+        zone elsewhere and exclude their own town entirely."""
         from app.services.geo import resolve_position
 
-        # Unknown first, known second: the resolvable one anchors
-        assert resolve_position(["Nagonby", "Lund"]) == (55.704, 13.191)
+        assert resolve_position(["Nagonby", "Lund"]) is None
+        assert resolve_position(["Lund", "Nagonby"]) == (55.704, 13.191)
+
+    def test_geo_plan_shared_decision(self):
+        from app.services.geo import effective_municipalities, geo_plan
+
+        # Legacy single-field fallback feeds the SAME decision the
+        # scraper and the store gate make — no divergence possible
+        legacy_ctx = {"municipalities": [], "municipality": "Malmö",
+                      "search_radius_km": 30}
+        assert effective_municipalities(legacy_ctx) == ["Malmö"]
+        assert geo_plan(legacy_ctx) == (55.605, 13.0, 30)
+        # No radius / no anchor -> no plan (falls back to codes)
+        assert geo_plan({"municipalities": ["Malmö"], "search_radius_km": 0}) is None
+        assert geo_plan({"municipalities": ["Nagonby"], "search_radius_km": 30}) is None
 
     def test_unknown_returns_none(self):
         from app.services.geo import resolve_position
@@ -143,6 +159,42 @@ class TestJobtechPositionParams:
         assert all(p[0] != "position" for p in req)
 
 
+class TestReducedRadiusGate:
+    """The radius store gate waives ONLY the municipality clause —
+    remote_only and WO-06 country routing still hold (review finding
+    #1: the original full skip let a remote_only user's radius fetch
+    store and AI-match on-site jobs)."""
+
+    def _job(self, remote=False, location=None):
+        from app.services.scrapers.base import NormalizedJob
+
+        return NormalizedJob(
+            source="jobtech", source_id="x1", title="Dev", company="Acme",
+            url="https://x/1", description="d", remote=remote, location=location,
+        )
+
+    def test_remote_only_still_drops_on_site(self):
+        from app.services.pipeline import passes_radius_gate
+
+        ctx = {**_ctx(["Malmö"], 30), "remote_only": True}
+        assert passes_radius_gate(self._job(remote=False), ctx) is False
+        assert passes_radius_gate(self._job(remote=True), ctx) is True
+
+    def test_country_routing_still_blocks_foreign(self):
+        from app.services.pipeline import passes_radius_gate
+
+        ctx = _ctx(["Malmö"], 30)  # SE user
+        assert passes_radius_gate(
+            self._job(remote=True, location="New York, USA"), ctx) is False
+
+    def test_in_radius_on_site_job_passes(self):
+        from app.services.pipeline import passes_radius_gate
+
+        ctx = _ctx(["Malmö"], 30)
+        assert passes_radius_gate(
+            self._job(remote=False, location="Lund, Skåne län"), ctx) is True
+
+
 class TestRadiusScopeKey:
     def test_radius_joins_the_watermark_scope(self):
         from app.services.pipeline import _scope_key
@@ -152,6 +204,15 @@ class TestRadiusScopeKey:
             "a radius change is a new fetch scope — it must backfill, "
             "not delta-miss its new coverage"
         )
+
+    def test_unanchorable_radius_leaves_scope_key_alone(self):
+        """Vellinge has no centroid: the request is byte-identical to
+        radius=0, so the watermark must not be invalidated (review
+        finding #5: spurious deep backfills returning nothing new)."""
+        from app.services.pipeline import _scope_key
+
+        assert _scope_key(_ctx(["Vellinge"], 0)) == "vellinge"
+        assert _scope_key(_ctx(["Vellinge"], 30)) == "vellinge"
 
     def test_radius_change_forces_backfill(self, db):
         from app.services.pipeline import delta_since_for, set_watermarks

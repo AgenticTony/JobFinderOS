@@ -425,6 +425,10 @@ export default function Home() {
           initialCountry={profile.country ?? ''}
           initialRegion={profile.region ?? ''}
           initialMunicipality={profile.municipality ?? ''}
+          initialMunicipalities={
+            profile.municipalities ?? (profile.municipality ? [profile.municipality] : [])
+          }
+          initialSearchRadiusKm={profile.search_radius_km ?? 0}
           initialQueries={profile.search_queries}
         />
       )}

@@ -39,16 +39,17 @@ DELTA_OVERLAP_HOURS = 24
 
 
 def _scope_key(ctx: Dict) -> str:
-    munis = list(ctx.get("municipalities") or [])
-    if not munis and ctx.get("municipality"):
-        munis = [str(ctx["municipality"])]
-    key = ",".join(sorted(m.lower() for m in munis))
-    # Radius changes the fetch scope entirely (position search replaces
-    # municipality codes) — it belongs in the watermark key so a new
-    # radius deep-backfills rather than delta-misses its new coverage.
-    km = int(ctx.get("search_radius_km") or 0)
-    if km > 0:
-        key += f"|r{km}"
+    from app.services.geo import effective_municipalities, geo_plan
+
+    key = ",".join(sorted(m.lower() for m in effective_municipalities(ctx)))
+    # Key on the radius that ACTUALLY applies, not the raw preference:
+    # a radius that silently falls back to municipality codes (no
+    # centroid for the user's primary town) produces a byte-identical
+    # request and must not invalidate the watermark (review finding:
+    # spurious deep backfills that return nothing new).
+    plan = geo_plan(ctx)
+    if plan is not None:
+        key += f"|r{plan[2]}"
     return key
 
 
@@ -181,6 +182,24 @@ def passes_location_filter(job: NormalizedJob, ctx: Dict) -> bool:
     return bool(ctx.get("include_remote")) and bool(job.remote)
 
 
+def passes_radius_gate(job: NormalizedJob, ctx: Dict) -> bool:
+    """The REDUCED location gate for API-side geo-filtered fetches.
+
+    The API's position+radius filter already decided geography — but it
+    says NOTHING about the rest of the location contract, which still
+    applies (review finding: the original skip bypassed these too):
+      - remote_only users still drop on-site jobs
+      - WO-06 country routing still blocks foreign-only locations
+    Only the strict municipality clause is waived (the radius exists to
+    admit neighbouring kommuner the clause would reject).
+    """
+    if ctx.get("remote_only") and not job.remote:
+        return False
+    if blocked_for_user(location_countries(job.location), ctx.get("country")):
+        return False
+    return True
+
+
 def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> ScrapeRun:
     """Run one scraper, upsert new jobs, record a ScrapeRun audit row."""
     run = ScrapeRun(source=source_name, status="running")
@@ -218,22 +237,24 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
         run.jobs_found = len(jobs)
 
         # Universal location gate — out-of-area jobs are never stored,
-        # so they never consume matching budget. EXCEPT when the source
-        # already geo-filtered this fetch (jobtech position+radius): the
-        # API's distance filter IS the location gate for those jobs, and
-        # the strict local municipality check would wrongly reject the
-        # neighbouring-kommun ads the radius exists to catch.
+        # so they never consume matching budget. When the source
+        # geo-filtered this fetch (jobtech position+radius — decided by
+        # the SAME geo_plan the scraper used, never re-derived
+        # differently), the REDUCED gate applies instead: the API's
+        # distance filter replaces the municipality clause only;
+        # remote_only and country routing still hold.
         if ctx:
-            from app.services.geo import radius_geo_active
+            from app.services.geo import geo_plan
 
-            geo_filtered = source_name == "jobtech" and radius_geo_active(ctx)
-            if not geo_filtered:
-                before = len(jobs)
-                jobs = [nj for nj in jobs if passes_location_filter(nj, ctx)]
-                if before != len(jobs):
-                    logger.info("[%s] location filter: %d -> %d jobs", source_name, before, len(jobs))
-            else:
-                logger.info("[%s] API-side geo filter active (radius) — local gate skipped", source_name)
+            geo_filtered = source_name == "jobtech" and geo_plan(ctx) is not None
+            gate = passes_radius_gate if geo_filtered else passes_location_filter
+            before = len(jobs)
+            jobs = [nj for nj in jobs if gate(nj, ctx)]
+            if geo_filtered:
+                logger.info("[%s] API-side geo filter active (radius) — "
+                            "reduced gate applied: %d -> %d jobs", source_name, before, len(jobs))
+            elif before != len(jobs):
+                logger.info("[%s] location filter: %d -> %d jobs", source_name, before, len(jobs))
 
             # Freshness gate — postings older than MAX_POSTING_AGE_DAYS
             # are almost certainly closed; never store them
