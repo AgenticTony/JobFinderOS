@@ -19,7 +19,7 @@ os.environ.setdefault("DEBUG", "true")  # test env — production guards relaxed
 
 from app.core.database import Base, SessionLocal, engine  # noqa: E402
 from app.crud import set_match_decision  # noqa: E402
-from app.models import JobPosting, MatchResult, Profile  # noqa: E402
+from app.models import JobPosting, MatchResult, Profile, User  # noqa: E402
 from app.services import matcher_service  # noqa: E402
 from app.services.ai_service import AIService  # noqa: E402
 from app.services.draft_service import create_draft_for_job, submit_draft  # noqa: E402
@@ -84,6 +84,11 @@ def main():
     db = SessionLocal()
     try:
         user_id = uuid.uuid4()
+        # Postgres enforces profiles.user_id -> users.id and no
+        # relationship() orders the INSERTs; SQLite never noticed the
+        # missing parent row. Land the user first.
+        db.add(User(id=user_id, email="flow@test.example", hashed_password="x"))
+        db.flush()
         profile = Profile(
             is_active=1,
             user_id=user_id,

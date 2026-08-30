@@ -118,20 +118,33 @@ jobs:
           print("minimal-env migrations: OK")
           EOF
 
-      - name: Unit tests (gates, dedupe, language, state machines)
+      # Full suite, BOTH legs. The three per-module steps that used to
+      # sit here ran test_units/test_multiuser/test_flow only —
+      # test_delta, test_radius, test_taxonomy, test_calibration and the
+      # test_fabrication gate never ran in CI (reviewer finding OPS-3).
+      # conftest.py owns DATABASE_URL from TEST_DATABASE_URL per leg, so
+      # one command covers every module. The opt-in live-API tests stay
+      # free: RUN_CALIBRATION / RUN_FABRICATION are never set here.
+      - name: Test suite (all modules in tests/)
         env:
           TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci' || '' }}
-        run: PYTHONPATH=. python -m pytest tests/test_units.py -q
+        run: PYTHONPATH=. python -m pytest tests/ -q
 
-      - name: Multi-user tests (isolation, IDOR, rate limits, GDPR)
-        env:
-          TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci' || '' }}
-        run: PYTHONPATH=. python -m pytest tests/test_multiuser.py -q
-
-      - name: Flow test (mocked AI)
-        env:
-          TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci' || '' }}
-        run: PYTHONPATH=. python tests/test_flow.py
+      # test_flow.py is a standalone script with no pytest items — under
+      # `pytest tests/` it is imported but its main() never runs. Keep a
+      # dedicated step so the full profile -> match -> decide -> draft ->
+      # submit journey (mocked AI) still executes on both legs. Standalone
+      # it reads DATABASE_URL directly (conftest's TEST_DATABASE_URL
+      # convention postdates it), so export the throwaway CI Postgres on
+      # that leg; on sqlite its own test_flow.db default applies. Never
+      # set DATABASE_URL to '' — pydantic would take the empty string
+      # over the sqlite default.
+      - name: End-to-end flow test (script, mocked AI)
+        run: |
+          if [ "${{ matrix.database }}" = "postgres" ]; then
+            export DATABASE_URL=postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci
+          fi
+          PYTHONPATH=. python tests/test_flow.py
 
   docker:
     name: Docker image builds
@@ -163,7 +176,31 @@ jobs:
           assert api["type"] == "web" and api["runtime"] == "docker"
           assert api["healthCheckPath"] == "/health"
           assert api["plan"] == "free"
-          assert hunt["type"] == "cron" and hunt["schedule"] == "0 * * * *"
+          # Hunt cadence: the runbook documents twice daily (06:00/18:00
+          # UTC) and render.yaml declared hourly until ab69906 aligned it
+          # — this assertion was left at "0 * * * *" and went red on every
+          # push. Assert the DOCUMENTED value so accidental drift in
+          # render.yaml still fails loudly; if you change the cadence on
+          # purpose, update this expectation, HUNT_TIMES_UTC, and
+          # docs/deploy/WO-07-runbook.md in the same commit.
+          DOCUMENTED_SCHEDULE = "0 6,18 * * *"  # twice daily, UTC
+          assert hunt["type"] == "cron", (
+              f"jobfinderos-hunt must stay a cron job, got {hunt.get('type')!r}")
+          assert hunt["schedule"] == DOCUMENTED_SCHEDULE, (
+              f"jobfinderos-hunt schedule drifted: render.yaml declares "
+              f"{hunt.get('schedule')!r} but the documented cadence is "
+              f"{DOCUMENTED_SCHEDULE!r} (twice daily, 06:00/18:00 UTC — "
+              "docs/deploy/WO-07-runbook.md). If intentional, update the "
+              "runbook, HUNT_TIMES_UTC and this assertion together.")
+          # render.yaml's own comments: HUNT_TIMES_UTC powers the API's
+          # next-hunt countdown and must stay in sync with the schedule.
+          api_env = {v["key"]: v for v in api.get("envVars", [])}
+          hunt_times = api_env["HUNT_TIMES_UTC"]["value"]
+          hours = sorted({int(p) for p in hunt["schedule"].split()[1].split(",")})
+          assert hunt_times == ",".join(f"{h:02d}:00" for h in hours), (
+              f"jobfinderos-hunt schedule ({hunt['schedule']!r}) and the API's "
+              f"HUNT_TIMES_UTC ({hunt_times!r}) disagree — the dashboard's "
+              "next-hunt countdown would lie about when hunts run.")
           # docker paths resolve relative to ROOTDIR (observed on the first
           # real Render deploy — repo-root paths produced /src/backend/backend)
           assert api["rootDir"] == "backend"

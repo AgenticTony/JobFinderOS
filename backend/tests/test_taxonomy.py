@@ -8,7 +8,6 @@ unit in the jobtech fetch (recall beyond title words) and its own
 watermark key (a new code deep-backfills its history).
 """
 
-from datetime import datetime, timezone
 
 import pytest
 
@@ -17,6 +16,12 @@ from app.core.database import SessionLocal
 
 @pytest.fixture()
 def db():
+    # The shared sqlite scratch file may predate new columns
+    # (create_all adds tables, never columns). Drop and recreate the
+    # schema IN PLACE — never delete the file: other modules hold
+    # pooled connections to its inode.
+    from app.core.database import engine
+    from app.core.orm import Base
     from app.models import (
         AIUsage,
         Application,
@@ -29,16 +34,16 @@ def db():
         SystemLock,
         User,
     )
-
-    # The shared sqlite scratch file may predate new columns
-    # (create_all adds tables, never columns). Drop and recreate the
-    # schema IN PLACE — never delete the file: other modules hold
-    # pooled connections to its inode.
-    from app.core.database import engine
-    from app.core.orm import Base
+    from tests.conftest import stamp_alembic_head
 
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    # create_all rebuilt the HEAD-shaped schema but left no alembic_version
+    # row — a later app boot in the same session (multiuser's TestClient ->
+    # init_db) would misread the shape and re-run migrations against
+    # existing tables (CircularDependencyError on sqlite, DuplicateTable on
+    # postgres). Stamping head records what create_all actually built.
+    stamp_alembic_head()
     session = SessionLocal()
     for model in (Application, ApplicationDraft, MatchResult, Profile,
                   JobPosting, AIUsage, ScrapeRun, ScrapeWatermark, SystemLock,
@@ -195,6 +200,10 @@ class TestUnionCodes:
         ):
             u = User(id=_uuid.uuid4(), email=f"occ{i}-{i}@test.example", hashed_password="x")
             db.add(u)
+            # No relationship() links User->Profile, so the unit of work
+            # cannot order the two INSERTs itself. SQLite never enforces
+            # the FK; postgres does — flush the user row first.
+            db.flush()
             db.add(Profile(
                 is_active=1, user_id=u.id, full_name="T", cv_file_name="cv.pdf",
                 cv_text="dev", country=country, region=None,
@@ -224,6 +233,9 @@ class TestUnionCodes:
 
         u = User(id=_uuid.uuid4(), email="comp@test.example", hashed_password="x")
         db.add(u)
+        # No relationship() links User->Profile — postgres enforces the
+        # FK at flush time, so the user row must land first.
+        db.flush()
         db.add(Profile(is_active=1, user_id=u.id, full_name="T", cv_file_name="c.pdf",
                        cv_text="dev", country="SE", region=None,
                        occupation_codes='[{"code":"fg7B_yov_smw","label":"X"}]',
@@ -313,6 +325,9 @@ class TestSuggestionValidation:
 
         uid = _uuid.uuid4()
         db.add(User(id=uid, email=f"onb-{uid.hex[:8]}@test.example", hashed_password="x"))
+        # User row must land before the profile: postgres enforces the FK
+        # at flush time and no relationship() orders the two INSERTs.
+        db.flush()
         db.add(Profile(is_active=1, user_id=uid, full_name="T", cv_file_name="c.pdf",
                        cv_text="dev"))
         db.commit()
@@ -343,6 +358,9 @@ class TestSuggestionValidation:
 
         uid = _uuid.uuid4()
         db.add(User(id=uid, email=f"gb-{uid.hex[:8]}@test.example", hashed_password="x"))
+        # User row must land before the profile: postgres enforces the FK
+        # at flush time and no relationship() orders the two INSERTs.
+        db.flush()
         db.add(Profile(is_active=1, user_id=uid, full_name="T", cv_file_name="c.pdf",
                        cv_text="dev"))
         db.commit()

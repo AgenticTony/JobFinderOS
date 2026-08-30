@@ -1,7 +1,8 @@
 # WO-07 — Production Deployment Runbook (Render + Cloudflare Pages)
 
 Status: **DEPLOYED 2026-08-28.** API live (frankfurt, free), hunt cron
-live (frankfurt, hourly), frontend live (https://jobfinderos.pages.dev).
+live (frankfurt, twice daily — 06:00/18:00 UTC), frontend live
+(https://jobfinderos.pages.dev).
 Verifier 6/6. One incident during rollout, worth remembering:
 
 > **sync:false secrets do NOT survive service recreation.** Deleting a
@@ -19,7 +20,7 @@ Verifier 6/6. One incident during rollout, worth remembering:
 | Piece | Where | Plan | Cost |
 |---|---|---|---|
 | API (FastAPI, Docker) | Render web service `jobfinderos-api` | free (512MB, spins down after 15 min idle, ~1 min cold start) | $0 |
-| Hunt (scrape → match → …) | Render cron job `jobfinderos-hunt`, hourly, one-shot `worker --once` | 0.5c-512mb, metered per second ($1/mo minimum) | ~$1–3 |
+| Hunt (scrape → match → …) | Render cron job `jobfinderos-hunt`, twice daily (06:00/18:00 UTC), one-shot `worker --once` | 0.5c-512mb, metered per second ($1/mo minimum) | ~$1–3 |
 | Postgres | Supabase (WO-03), session pooler | free tier | $0 |
 | Frontend | Cloudflare Pages, static export | free | $0 |
 | CV storage | Supabase Storage, private `cvs` bucket | free tier (1GB) | $0 |
@@ -115,10 +116,10 @@ curl https://jobfinderos-api.onrender.com/health        # {"status":"ok","databa
 # In the browser: open the pages.dev URL → register → login → upload CV
 ```
 
-- Render → `jobfinderos-hunt` → check the first hourly run's logs:
+- Render → `jobfinderos-hunt` → check the first run's logs:
   `One-shot hunt complete: {'status': 'ran', 'users': N, 'errors': 0}`.
 - Trigger a manual run from the cron service's dashboard to avoid
-  waiting for the top of the hour.
+  waiting for the next scheduled slot (06:00 or 18:00 UTC).
 - First request after idle takes ~1 min (free-instance cold start) —
   that is the documented free-plan behavior, not an outage.
 
