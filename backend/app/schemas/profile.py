@@ -15,6 +15,9 @@ class OnboardingRequest(BaseModel):
     municipality: Optional[str] = None  # legacy single (kept in sync: first of list)
     # strict multi-municipality scope; empty list = explicit whole-region
     municipalities: Optional[List[str]] = None
+    # commute zone around the first chosen municipality (km); 0/None =
+    # exact municipality match only
+    search_radius_km: Optional[int] = None
     remote_only: bool = False
     include_remote: bool = False
     search_queries: List[str] = []
@@ -56,6 +59,7 @@ class ProfileResponse(BaseModel):
     region: Optional[str] = None
     municipality: Optional[str] = None
     municipalities: List[str] = []
+    search_radius_km: Optional[int] = None
     remote_only: bool = False
     include_remote: bool = False
     search_queries: List[str] = []
@@ -93,6 +97,7 @@ class ProfileResponse(BaseModel):
             municipality=profile.municipality,
             municipalities=parse_json_list(
                 getattr(profile, "municipalities", None)),
+            search_radius_km=getattr(profile, "search_radius_km", None),
             remote_only=bool(profile.remote_only),
             include_remote=bool(profile.include_remote),
             search_queries=parse_json_list(profile.search_queries),

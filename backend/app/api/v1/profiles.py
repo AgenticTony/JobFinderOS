@@ -136,6 +136,10 @@ async def save_onboarding(
     municipalities = payload.municipalities or []
     profile.municipalities = dump_json_list(municipalities)
     profile.municipality = municipalities[0] if municipalities else payload.municipality
+    # Commute-zone radius (km) around the first chosen municipality;
+    # 0/None = exact match. GEO sources only — falls back silently to
+    # municipality codes where no centroid resolves.
+    profile.search_radius_km = payload.search_radius_km if payload.search_radius_km else None
     profile.remote_only = 1 if payload.remote_only else 0
     profile.include_remote = 1 if (payload.include_remote or payload.remote_only) else 0
     profile.search_queries = dump_json_list(payload.search_queries)

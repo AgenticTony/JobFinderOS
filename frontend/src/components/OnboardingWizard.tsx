@@ -83,6 +83,10 @@ export default function OnboardingWizard({
     initialMunicipality ? [initialMunicipality] : []
   );
   const [remoteOnly, setRemoteOnly] = useState(false);
+  // Commute zone (km) around the first chosen municipality — 0 = exact
+  // towns only. GEO sources only; silently falls back where no
+  // centroid resolves.
+  const [searchRadiusKm, setSearchRadiusKm] = useState<number>(0);
   const [includeRemote, setIncludeRemote] = useState(Boolean(initialIncludeRemote));
   const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']);
   const [mode, setMode] = useState<SearchMode>('field');
@@ -193,6 +197,7 @@ export default function OnboardingWizard({
         region: region || null,
         municipalities: municipalityList,
         municipality: municipalityList[0] ?? null, // legacy single, kept in sync
+        search_radius_km: searchRadiusKm || null,
         remote_only: remoteOnly,
         include_remote: includeRemote || remoteOnly,
         search_queries: [...selected],
@@ -348,6 +353,45 @@ export default function OnboardingWizard({
                         </div>
                       )}
                     </div>
+                    {country === 'SE' && municipalityList.length > 0 && (
+                      <div>
+                        <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
+                          Commute radius around {municipalityList[0]}{' '}
+                          <span className="normal-case">
+                            (catches nearby towns without picking them)
+                          </span>
+                        </span>
+                        <div className="flex flex-wrap gap-2" role="group" aria-label="Commute radius">
+                          {[
+                            { km: 0, label: 'Selected towns only' },
+                            { km: 15, label: '+15 km' },
+                            { km: 30, label: '+30 km' },
+                            { km: 50, label: '+50 km' },
+                          ].map(({ km, label }) => (
+                            <button
+                              key={km}
+                              type="button"
+                              aria-pressed={(searchRadiusKm ?? 0) === km}
+                              onClick={() => setSearchRadiusKm(km)}
+                              className={cn(
+                                'rounded-full border px-3 py-1.5 text-sm transition-colors',
+                                (searchRadiusKm ?? 0) === km
+                                  ? 'border-signal bg-signal/15 text-hi'
+                                  : 'border-line text-mid hover:border-line-2 hover:text-hi'
+                              )}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        {(searchRadiusKm ?? 0) > 0 && (
+                          <p className="mt-1.5 text-xs text-low">
+                            Jobs within {searchRadiusKm} km of {municipalityList[0]} — the
+                            neighbouring towns come to you.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <button
                       onClick={() => setIncludeRemote(!includeRemote)}
                       aria-pressed={includeRemote}

@@ -117,13 +117,29 @@ class JobtechScraper(BaseScraper):
         else:
             logger.info("[jobtech] backfill fetch: deep read, no date cutoff")
 
-        # Fetch-side municipality filtering (official API param): when the
-        # user chose municipalities, request ONLY those kommuner instead of
-        # fetching all of Sweden and filtering locally. Codes resolve via
-        # the taxonomy map; unresolved names fall back to the local gate.
+        # Fetch-side geo filtering (official API params). Two modes:
+        #   radius (position + position.radius) when the user set a
+        #     commute-zone radius and their municipality resolves to a
+        #     centroid — a true distance search that catches neighbouring
+        #     kommuner without naming them (scrape_source then skips the
+        #     strict local gate: the API already distance-filtered);
+        #   otherwise municipality codes — request ONLY those kommuner.
+        #     Codes resolve via the taxonomy map; unresolved names fall
+        #     back to the local gate.
         place_params: List[tuple] = []
         chosen = (context or {}).get("municipalities") or []
-        if chosen:
+        from app.services.geo import radius_geo_active, resolve_position
+
+        radius_km = int((context or {}).get("search_radius_km") or 0)
+        if chosen and radius_geo_active(context or {}):
+            lat, lon = resolve_position(chosen)
+            place_params = [
+                ("position", f"{lat},{lon}"),
+                ("position.radius", radius_km),
+            ]
+            logger.info("[jobtech] radius search: %d km around %s",
+                        radius_km, chosen[0])
+        elif chosen:
             code_map = _municipality_codes()
             resolved = [code_map[m.lower()] for m in chosen if m.lower() in code_map]
             if resolved:

@@ -57,6 +57,10 @@ class Profile(Base):
     # picking Malmö means Malmö; add Lund for the commute belt). Empty +
     # no legacy value = explicit whole-region.
     municipalities = Column(Text, nullable=True)  # JSON array of strings
+    # Commute-zone radius around the first chosen municipality (km, 0/NULL
+    # = exact municipality match only). JobTech fetches switch to
+    # position + position.radius when this is set and a centroid resolves.
+    search_radius_km = Column(Integer, nullable=True)
     remote_only = Column(Integer, default=0, nullable=False)  # 1 = drop on-site jobs
     include_remote = Column(Integer, default=0, nullable=False)  # 1 = opt in to worldwide remote jobs
     search_queries = Column(Text, nullable=True)  # JSON array — AI-suggested, user-approved

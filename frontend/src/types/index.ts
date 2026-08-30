@@ -96,6 +96,8 @@ export interface Profile {
   country: string | null;
   region: string | null;
   municipality: string | null;
+  municipalities?: string[];
+  search_radius_km?: number | null;
   remote_only: boolean;
   include_remote: boolean;
   search_queries: string[];
@@ -114,6 +116,7 @@ export interface OnboardingPayload {
   region?: string | null;
   municipality?: string | null; // legacy single (first of the list)
   municipalities?: string[];    // strict scope; empty = whole region
+  search_radius_km?: number | null; // commute zone around the first city (km)
   remote_only: boolean;
   include_remote: boolean;
   search_queries: string[];

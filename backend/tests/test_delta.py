@@ -46,6 +46,11 @@ def db():
     yield session
     session.rollback()
     session.close()
+    # Release pooled connections to the shared sqlite file — other
+    # modules' fixtures DELETE the file between tests; an orphaned
+    # pooled connection turns later writes into readonly errors.
+    from app.core.database import engine
+    engine.dispose()
 
 
 def _ctx(queries, munis=None):

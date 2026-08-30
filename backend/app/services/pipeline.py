@@ -42,7 +42,14 @@ def _scope_key(ctx: Dict) -> str:
     munis = list(ctx.get("municipalities") or [])
     if not munis and ctx.get("municipality"):
         munis = [str(ctx["municipality"])]
-    return ",".join(sorted(m.lower() for m in munis))
+    key = ",".join(sorted(m.lower() for m in munis))
+    # Radius changes the fetch scope entirely (position search replaces
+    # municipality codes) — it belongs in the watermark key so a new
+    # radius deep-backfills rather than delta-misses its new coverage.
+    km = int(ctx.get("search_radius_km") or 0)
+    if km > 0:
+        key += f"|r{km}"
+    return key
 
 
 def _watermark_queries(ctx: Dict) -> List[str]:
@@ -114,6 +121,7 @@ def build_scrape_context(db: Session, *, user_id) -> Optional[Dict]:
         "region": profile.region,
         "municipality": profile.municipality,
         "municipalities": parse_json_list(getattr(profile, "municipalities", None)),
+        "search_radius_km": getattr(profile, "search_radius_km", None) or 0,
         "remote_only": bool(profile.remote_only),
         "include_remote": bool(profile.include_remote),
         "queries": parse_json_list(profile.search_queries),
@@ -198,12 +206,22 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
         run.jobs_found = len(jobs)
 
         # Universal location gate — out-of-area jobs are never stored,
-        # so they never consume matching budget
+        # so they never consume matching budget. EXCEPT when the source
+        # already geo-filtered this fetch (jobtech position+radius): the
+        # API's distance filter IS the location gate for those jobs, and
+        # the strict local municipality check would wrongly reject the
+        # neighbouring-kommun ads the radius exists to catch.
         if ctx:
-            before = len(jobs)
-            jobs = [nj for nj in jobs if passes_location_filter(nj, ctx)]
-            if before != len(jobs):
-                logger.info("[%s] location filter: %d -> %d jobs", source_name, before, len(jobs))
+            from app.services.geo import radius_geo_active
+
+            geo_filtered = source_name == "jobtech" and radius_geo_active(ctx)
+            if not geo_filtered:
+                before = len(jobs)
+                jobs = [nj for nj in jobs if passes_location_filter(nj, ctx)]
+                if before != len(jobs):
+                    logger.info("[%s] location filter: %d -> %d jobs", source_name, before, len(jobs))
+            else:
+                logger.info("[%s] API-side geo filter active (radius) — local gate skipped", source_name)
 
             # Freshness gate — postings older than MAX_POSTING_AGE_DAYS
             # are almost certainly closed; never store them
