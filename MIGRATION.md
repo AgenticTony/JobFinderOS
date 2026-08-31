@@ -1,11 +1,28 @@
-# MIGRATION — Supabase consolidation (DECIDED; not yet started)
+# MIGRATION — Supabase consolidation (EXECUTING: WO1 done, WO2/WO3 remain)
 
-Status: **decided — go** (settled 2026-08-27). Reason: vendor consolidation
-for a solo operator and managed auth we never maintain — explicitly NOT
-for RLS (see the correction below; that backstop is available on any
-managed Postgres). Nothing has been started; MIG-WO0 is the first action.
-The decision gate is kept below as historical context so it isn't
-re-litigated, not as an open question.
+Status: **executing** (refreshed 2026-08-31 — the header previously said
+"not yet started", which stopped being true on 2026-08-28). Reason for the
+move: vendor consolidation for a solo operator and managed auth we never
+maintain — explicitly NOT for RLS (see the correction below; that backstop
+is available on any managed Postgres).
+
+Execution ledger:
+
+- **MIG-WO0** (off-site backups): mechanics done and verified locally; the
+  one human step — pointing `OFFSITE_BACKUP_TARGET` at the real target —
+  remains outstanding.
+- **MIG-WO1** (move to Supabase Postgres): **executed 2026-08-28** — 797
+  rows migrated, counts snapshot-verified, zero invariant violations;
+  details in `docs/work-orders/README.md` under WO-03.
+- **MIG-WO2** (Supabase Auth): **open** — remaining build work.
+- **MIG-WO3** (RLS): **open** — remaining build work.
+- **MIG-WO4**: overtaken by events — the WO-07 deploy shipped without it.
+- **MIG-WO5** (inference residency): **decided 2026-08-30** — stay on the
+  GLM beta; the Mistral EU endpoint stays armed as a config switch.
+
+This file retires when MIG-WO2 and MIG-WO3 land. The decision gate is kept
+below as historical context so it isn't re-litigated, not as an open
+question.
 
 This plan runs to the same standard as the rest of the repo: every work
 order ships with tests that have been seen to fail against the regression
