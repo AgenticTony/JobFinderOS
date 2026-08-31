@@ -14,7 +14,7 @@ python-dotenv>=1.0.0
 fpdf2>=2.7.9
 
 # Phase 0: auth, migrations, storage
-fastapi-users[sqlalchemy]>=15.0
+fastapi-users[sqlalchemy]>=15.0.5
 alembic>=1.19.1
 aiosqlite>=0.21
 psycopg[binary]>=3.3.4
