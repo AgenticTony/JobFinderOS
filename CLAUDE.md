@@ -243,7 +243,13 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
       `m2-62c2452b`, 2 stragglers remain (verified 2026-08-31)
 - [ ] Phase 1a-static: landing page (marketing, pricing, FAQ — no data model deps)
 - [ ] Phase 1c: signup UI, wizard entry from signup, console auth guard polish
-- [ ] Composio: connect Gmail (Settings page ready; needs platform API key)
+- [x] **Composio: connect Gmail** — DONE 2026-08-31: platform key live
+      (least-privilege), service on the OFFICIAL SDK (sessions path per
+      docs.composio.dev; the old v1 REST client is 410 Gone), composio +
+      10 transitive pins added to both locks (superset invariant green),
+      Settings UI de-branded to user language, first real tool call
+      verified twice (GMAIL_GET_PROFILE → live profile + log id).
+      Send-from-own-Gmail as a submit `method` is the follow-up work.
 - [ ] Query-subscription model: designed in ROADMAP. NOT urgent — the old
       ">3 concurrent UK users" trigger was Adzuna-shaped and wrong (Adzuna has
       contributed zero rows; Reed carries the UK). Efficiency/UX win, build on

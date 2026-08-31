@@ -398,7 +398,7 @@ export const getIntegrations = async (): Promise<IntegrationsStatus> => {
 
 export const connectComposio = async (
   appName: string,
-  redirectUri = `${window.location.origin}/`
+  redirectUri = `${window.location.origin}/app`
 ): Promise<{ redirect_url: string }> => {
   const response = await api.post<{ redirect_url: string }>(
     '/api/v1/settings/integrations/composio/connect',
