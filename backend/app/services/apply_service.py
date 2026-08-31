@@ -74,8 +74,11 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
     """Send the application email via Resend and update status."""
     if not settings.RESEND_API_KEY:
         application.status = "failed"
+        # P0-6: environment-neutral — "edit backend/.env" was a dead end
+        # in the Render container, exactly where this error fires.
         application.error = (
-            "RESEND_API_KEY not configured — set it in backend/.env to enable email applications"
+            "RESEND_API_KEY not configured — email apply is not "
+            "configured on this deployment; contact the operator"
         )
         return
 

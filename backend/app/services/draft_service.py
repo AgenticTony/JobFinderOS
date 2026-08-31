@@ -345,9 +345,12 @@ def _send_with_pdfs(
 
     if not settings.RESEND_API_KEY or not settings.APPLY_FROM_EMAIL:
         application.status = "failed"
+        # P0-6: environment-neutral — "edit backend/.env" was a dead end
+        # in the Render container, exactly where this error fires.
         application.error = (
-            "Email apply not configured — set RESEND_API_KEY and APPLY_FROM_EMAIL "
-            "in backend/.env, or use 'Apply in browser'"
+            "Email apply is not configured on this deployment "
+            "(RESEND_API_KEY / APPLY_FROM_EMAIL missing) — contact the "
+            "operator, or use 'Apply in browser'"
         )
         return
 

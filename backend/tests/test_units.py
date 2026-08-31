@@ -2422,6 +2422,103 @@ class TestProductionPostgresGuard:
         assert s.DATABASE_URL.startswith("sqlite")
 
 
+class TestProductionStorageGuard:
+    """OPS-7: the runbook's sync:false recreation incident, storage
+    variant. The blueprint syncs STORAGE_BACKEND=supabase as a LITERAL
+    (survives service recreation) while SUPABASE_* are prompted secrets
+    (they do NOT) — boot went green and every CV upload 500'd at runtime,
+    the first time SupabaseStorage needed the key. The guard keys on the
+    SELECTED backend, not on production itself: local storage stays
+    legitimate (storage.py: dev and single-user deploys on a real disk),
+    which is why the DEBUG=false tests above (default local backend)
+    keep passing untouched."""
+
+    def _kwargs(self):
+        return {"DEBUG": False,
+                "AUTH_SECRET": "x" * 48,
+                "DATABASE_URL": "postgresql+psycopg://u:p@h/db",
+                "CORS_ORIGINS": "https://jobfinderos.pages.dev"}
+
+    def test_supabase_missing_secrets_rejected_in_production(self, monkeypatch):
+        """The recreation-incident shape exactly: backend still supabase
+        (synced literal), both secrets gone. Hermetic — the developer's
+        backend/.env carries real SUPABASE_* values (runbook Step 1) that
+        pydantic would otherwise pick up and make this PASS wrongly."""
+        import pytest
+
+        from app.core.config import Settings
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
+        with pytest.raises(ValueError):
+            Settings(_env_file=None, **self._kwargs(), STORAGE_BACKEND="supabase")
+
+    def test_supabase_half_configured_rejected_in_production(self, monkeypatch):
+        import pytest
+
+        from app.core.config import Settings
+        monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
+        with pytest.raises(ValueError):
+            Settings(_env_file=None, **self._kwargs(), STORAGE_BACKEND="supabase",
+                     SUPABASE_URL="https://example.supabase.co")
+
+    def test_supabase_fully_configured_passes(self):
+        from app.core.config import Settings
+        s = Settings(_env_file=None, **self._kwargs(), STORAGE_BACKEND="supabase",
+                     SUPABASE_URL="https://example.supabase.co",
+                     SUPABASE_SERVICE_KEY="service-key")
+        assert s.STORAGE_BACKEND == "supabase"
+
+    def test_local_backend_needs_no_supabase_in_production(self):
+        """Local is a legitimate production shape (persistent-disk
+        single-user deploy) — the guard must key on the backend choice,
+        not forbid local outright."""
+        from app.core.config import Settings
+        s = Settings(_env_file=None, **self._kwargs(), STORAGE_BACKEND="local")
+        assert s.STORAGE_BACKEND == "local"
+
+    def test_supabase_missing_secrets_fine_in_dev(self):
+        from app.core.config import Settings
+        s = Settings(DEBUG=True, STORAGE_BACKEND="supabase")
+        assert s.STORAGE_BACKEND == "supabase"
+
+
+class TestEmailApplyErrorsAreEnvironmentNeutral:
+    """P0-6: the unconfigured-email-apply errors told users to edit
+    backend/.env — a file that does not exist in the Render container,
+    i.e. a dead end in exactly the deployment where the error fires.
+    The strings must name no path. Both senders check config BEFORE
+    importing resend, so the early-return branch is unit-testable; the
+    send itself needs a live Resend key and stays untested."""
+
+    def test_pdf_sender_error_names_no_env_file(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from app.core.config import settings
+        from app.services import draft_service
+        monkeypatch.setattr(settings, "RESEND_API_KEY", "")
+        monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "")
+
+        application = SimpleNamespace(status=None, error=None)
+        draft_service._send_with_pdfs(None, application, None, None, None)
+        assert application.status == "failed"
+        assert ".env" not in application.error
+        assert "deployment" in application.error
+
+    def test_plain_email_sender_error_names_no_env_file(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from app.core.config import settings
+        from app.services import apply_service
+        monkeypatch.setattr(settings, "RESEND_API_KEY", "")
+        monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "")
+
+        application = SimpleNamespace(status=None, error=None)
+        apply_service._send_email_application(None, application, None, None)
+        assert application.status == "failed"
+        assert ".env" not in application.error
+        assert "deployment" in application.error
+
+
 class TestMunicipalLocationFilter:
     """Product decision (user, post-first-hunt): picking Malmö means Malmö.
     The gate becomes STRICT multi-municipality; region-wide only when the
