@@ -61,10 +61,13 @@ import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
 import {
   apiErrorMessage,
   connectComposio,
+  deleteAccount,
   downloadDraftCoverLetterPdf,
   downloadDraftCvPdf,
+  exportAccountData,
   getAuthToken,
   getIntegrations,
+  setAuthToken,
 } from '@/lib/api';
 import { installGlobalErrorReporter, UNHANDLED_ERROR_EVENT } from '@/lib/globalErrorReporter';
 import type { IntegrationsStatus } from '@/types';
@@ -1761,6 +1764,94 @@ function ProfileView({
 
 // ---------------- Settings ----------------
 
+// OPS-6: the rights surface. The privacy notice (/privacy) and the
+// point-of-collection panels point here for export and erasure — this
+// card is what makes those claims real. Copy must stay in sync with the
+// backend's behaviour (backend/app/api/v1/account.py): erasure removes
+// the profile + CV file, matches, drafts, applications and the account;
+// job postings (shared scraped data) stay.
+function YourDataCard() {
+  const [busy, setBusy] = useState<'export' | 'delete' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const exportData = async () => {
+    setBusy('export');
+    setError(null);
+    try {
+      await exportAccountData();
+    } catch (err) {
+      setError(`Couldn't export your data: ${apiErrorMessage(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const erase = async () => {
+    // Same weight class as the P0-4 unsaved-edits confirm — the design
+    // system has no dialog component and this destroys everything.
+    const confirmed = window.confirm(
+      'Delete your account and ALL personal data?\n\n' +
+        'This permanently removes your profile, the CV file itself, every ' +
+        'match, draft and application, and your account. It cannot be undone. ' +
+        'Export first if you want a copy.'
+    );
+    if (!confirmed) return;
+    setBusy('delete');
+    setError(null);
+    try {
+      await deleteAccount();
+      // The token is dead the instant the account is gone. Clear it and
+      // leave to the landing page (not /login — there is nothing left to
+      // sign in to, and the background pollers would 401-redirect anyway).
+      setAuthToken(null);
+      window.location.replace('/');
+    } catch (err) {
+      setError(`Couldn't delete your account: ${apiErrorMessage(err)} — nothing was deleted.`);
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-line bg-surface/80 p-5">
+      <h3 className="font-semibold text-hi">Your data</h3>
+      <p className="mt-1 max-w-md text-sm text-low">
+        Everything we hold about you, and the controls the privacy notice
+        promises: export a copy, or delete it all. Deletion removes your
+        profile, the CV file itself, every match, draft and application, your
+        AI usage logs, and your account.
+      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <button
+          onClick={exportData}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-40"
+        >
+          <Download className="h-4 w-4" />
+          {busy === 'export' ? 'Exporting…' : 'Export my data (JSON)'}
+        </button>
+        <button
+          onClick={erase}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-bad/40 px-3.5 py-2 text-sm text-bad transition-colors hover:bg-bad/10 disabled:opacity-40"
+        >
+          {busy === 'delete' ? 'Deleting…' : 'Delete my account and data'}
+        </button>
+        <a
+          href="/privacy"
+          className="text-sm text-signal underline underline-offset-4 transition-colors hover:text-signal/80"
+        >
+          Privacy notice
+        </a>
+      </div>
+      {error && (
+        <p className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SettingsView() {
   const [integrations, setIntegrations] = useState<IntegrationsStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1800,6 +1891,8 @@ function SettingsView() {
         title="Settings"
         sub="Account-level configuration. Integrations connect JobFinderOS to your world."
       />
+
+      <YourDataCard />
 
       <div className="rounded-xl border border-line bg-surface/80 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

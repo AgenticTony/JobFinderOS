@@ -333,9 +333,24 @@ export default function LandingPage() {
                 </div>
               </Reveal>
               <Reveal delay={150}>
-                <p className="num mt-10 text-xs uppercase tracking-[0.14em] text-paper/45">
+                {/* OPS-6: the old line here claimed "Your data stays in the
+                    EU" — false, and exactly what the privacy work corrects:
+                    stored account data is EU-hosted (Supabase eu-west-1,
+                    Render Frankfurt), but CV text is sent to Z.ai outside
+                    the EU on every match/tailor/judge call. This line now
+                    says only what is true, and links the full notice. */}
+                <p className="mt-10 text-sm leading-relaxed text-paper/50">
                   Official public data only. No logins, no grey scraping. Your
-                  data stays in the EU.
+                  account data and CV file are stored in the EU (Frankfurt); the
+                  CV text sent to our AI for matching and tailoring is processed
+                  outside the EU.{' '}
+                  <Link
+                    href="/privacy"
+                    className="font-medium text-paper/80 underline underline-offset-4 transition hover:text-paper"
+                  >
+                    Read the privacy notice
+                  </Link>
+                  .
                 </p>
               </Reveal>
             </div>
@@ -425,9 +440,15 @@ export default function LandingPage() {
           <p className="num text-[10px] uppercase tracking-[0.16em] text-paper/40">
             JobFinderOS
           </p>
-          <p className="num text-[10px] uppercase tracking-[0.16em] text-paper/40">
-            Official job-market data · EU hosted
-          </p>
+          {/* OPS-6: footer privacy link replaces the old imprecise "EU
+              hosted" tagline (stored data is EU-hosted, but CV text
+              reaches Z.ai outside the EU — the /privacy notice says both). */}
+          <Link
+            href="/privacy"
+            className="num text-[10px] uppercase tracking-[0.16em] text-paper/40 transition hover:text-paper/70"
+          >
+            Privacy notice
+          </Link>
           <p className="num text-[10px] uppercase tracking-[0.16em] text-paper/40">
             Made in Malmö
           </p>

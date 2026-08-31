@@ -357,6 +357,40 @@ export const downloadDraftCvPdf = (draftId: number) =>
 
 // ---------- Settings / integrations ----------
 
+// OPS-6: GDPR rights, wired to the backend's account endpoints
+// (backend/app/api/v1/account.py). The privacy notice and the
+// point-of-collection panels promise "Settings → Your data" — these two
+// calls are what make that claim true.
+
+// Right to portability: GET /account/export returns the account, profile,
+// matches and applications as JSON. Fetched as JSON (not a blob) so an
+// error keeps its `detail` message; the file is assembled client-side.
+export const exportAccountData = async (): Promise<void> => {
+  const response = await api.get<Record<string, unknown>>('/api/v1/account/export');
+  const blob = new Blob([JSON.stringify(response.data, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'jobfinderos-export.json';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  }
+};
+
+// Right to erasure: DELETE /account/delete removes the profile (+ the CV
+// file from storage), matches, drafts, applications and the account
+// itself. Callers must log the user out and route them away afterwards —
+// the token they hold is dead the moment this succeeds.
+export const deleteAccount = async (): Promise<void> => {
+  await api.delete('/api/v1/account/delete');
+};
+
 export const getIntegrations = async (): Promise<IntegrationsStatus> => {
   const response = await api.get<IntegrationsStatus>('/api/v1/settings/integrations');
   return response.data;
