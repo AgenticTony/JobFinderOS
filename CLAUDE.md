@@ -241,7 +241,8 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
 
 - [x] **Re-score the legacy-unversioned matches** — done: 241/243 rows are on
       `m2-62c2452b`, 2 stragglers remain (verified 2026-08-31)
-- [ ] Phase 1a-static: landing page (marketing, pricing, FAQ — no data model deps)
+- [x] **Phase 1a-static: landing page** — shipped at `/` with the console
+      at `/app` (be9838f), deployed to Pages and verified live.
 - [ ] Phase 1c: signup UI, wizard entry from signup, console auth guard polish
 - [x] **Composio: connect Gmail** — DONE 2026-08-31: platform key live
       (least-privilege), service on the OFFICIAL SDK (sessions path per
@@ -260,6 +261,12 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
       settle the caching/redistribution ToS question that gates shared-fetch.
 - [ ] UK test user walkthrough (Profile → Edit setup → GB)
 - [ ] JobTech free key for production
+- [ ] Render dashboard: reconcile the hunt cron schedule with the
+      documented 06:00/18:00 UTC cadence — the LIVE schedule fires every
+      3h, so the API's `HUNT_TIMES_UTC` countdown lies to users (found
+      2026-08-31; the fix lands inside WO-14)
+- [ ] OFFSITE_BACKUP_TARGET → real target + one restore rehearsal (the
+      last human step of MIG-WO0)
 - [ ] Deploy: Render (worker) + Cloudflare Pages (frontend) + Postgres.
       The Postgres/auth vendor decision is SETTLED (Supabase consolidation) — see MIGRATION.md (repo root); MIG-WO0 is the first action.
       (Historical: this line and ROADMAP briefly disagreed on Neon vs
