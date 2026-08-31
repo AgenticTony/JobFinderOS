@@ -6,8 +6,13 @@ The uploaded PDF and its extracted text (Profile.cv_text / cv_file_path) are the
 permanent reference point for the whole system. They are written exactly once,
 at upload time, and are never modified by any later pipeline stage. Every job
 specific version lives in its own ApplicationDraft row (see draft_service).
-Re-uploading a CV creates a NEW profile row + NEW file (old ones are kept on
-disk, just deactivated) — nothing is ever overwritten in place.
+
+Re-uploading replaces THIS user's profile row in place and stores a NEW file;
+the object it replaces is deleted at re-upload (P1-5a) unless a still-open
+draft snapshotted it (its package needs its original CV until sent — GDPR
+erasure sweeps snapshot paths when the account dies). The previous claim that
+"a new profile row is created and old files are deactivated" was false: the
+row was overwritten and the old file orphaned on disk, surviving erasure.
 """
 
 import logging
@@ -121,6 +126,7 @@ def create_or_replace_profile_from_pdf(
     # Per-user: replace THIS user's profile if it exists (the singleton
     # takeover — second upload stealing the whole app — died with this)
     profile = db.query(Profile).filter(Profile.user_id == user_id).first()
+    replaced_path = profile.cv_file_path if profile is not None else None
     if profile is None:
         profile = Profile(user_id=user_id, is_active=1)
     profile.cv_text = cv_text
@@ -146,8 +152,55 @@ def create_or_replace_profile_from_pdf(
     db.add(profile)
     db.commit()
     db.refresh(profile)
+
+    # P1-5a: the NEW object is safely committed — retire the one it
+    # replaced. This runs AFTER the commit so a failed delete can never
+    # roll back the upload itself.
+    if replaced_path and replaced_path != path:
+        _retire_replaced_cv(db, user_id, replaced_path)
     logger.info("Saved profile id=%s (user=%s) from %s", profile.id, user_id, safe_name)
     return profile
+
+
+def _retire_replaced_cv(db: Session, user_id, replaced_path: str) -> None:
+    """Delete the CV storage object a re-upload replaced (P1-5a).
+
+    The replaced object is otherwise referenced by NOTHING while erasure
+    only deletes the profile's CURRENT path — the live-confirmed orphan
+    that outlived GDPR deletion. Kept alive ONLY when a still-open draft
+    snapshotted it: that draft's package must be able to attach the CV it
+    was tailored from (erasure sweeps snapshot paths when the account
+    dies). Best-effort by design — a storage hiccup logs a warning and
+    never fails the upload (the new object is already stored).
+    """
+    from app.models import ApplicationDraft
+    from app.services.storage import get_storage
+
+    still_needed = (
+        db.query(ApplicationDraft.id)
+        .filter(
+            ApplicationDraft.user_id == user_id,
+            ApplicationDraft.cv_file_path == replaced_path,
+            ApplicationDraft.status != "submitted",
+        )
+        .first()
+    )
+    if still_needed:
+        logger.info(
+            "Keeping replaced CV object %s — still snapshotted by an open "
+            "draft (erasure will sweep it when the account is deleted)",
+            replaced_path,
+        )
+        return
+    try:
+        if get_storage().delete(replaced_path):
+            logger.info("Deleted replaced CV object %s (user=%s)", replaced_path, user_id)
+    except Exception as e:  # noqa: BLE001 — never fail the upload over cleanup
+        logger.warning(
+            "Could not delete replaced CV object %s (user=%s) — the new CV "
+            "is stored; orphan cleanup did not complete: %s",
+            replaced_path, user_id, e,
+        )
 
 
 def _apply_extraction(profile: Profile, extracted: dict) -> None:

@@ -47,6 +47,15 @@ DELTA_OVERLAP_HOURS = 24
 # budget even on a large deployment.
 STALE_RUN_ABORT_HOURS = 2
 
+# SUBMIT: a draft stuck 'sending' past this many minutes is a dead
+# dispatch (the process died between submit_draft's atomic claim and its
+# outcome write), not a live send — an employer email dispatch takes
+# seconds. The sweep restores the truthful state: application row exists
+# and wasn't failed -> the insert committed, mirror 'submitted'; failed
+# or absent -> nothing was sent, back to 'ready' (retry stays possible).
+# 10min is ~100x a Resend dispatch and far below any human re-check.
+STALE_SENDING_MINUTES = 10
+
 
 def _scope_key(ctx: Dict) -> str:
     from app.services.geo import effective_municipalities, geo_plan
@@ -891,11 +900,46 @@ def match_for_user(db: Session, user_id) -> Dict:
 
 def _maintenance_sweeps(db: Session) -> None:
     """Queue hygiene: expire stale unmatched postings, auto-pass stale
-    pending matches, and abort ScrapeRuns whose worker died mid-run.
-    Runs inside every pipeline run and every scheduled hunt cycle."""
+    pending matches, abort ScrapeRuns whose worker died mid-run, and
+    recover drafts stranded in 'sending' by a dead dispatch. Runs inside
+    every pipeline run and every scheduled hunt cycle."""
     now = utc_now()
 
     from sqlalchemy import or_
+
+    from app.models import Application, ApplicationDraft
+
+    # SUBMIT: submit_draft claims a draft ready->'sending' before
+    # dispatching; a process death between the claim and the outcome
+    # write would strand it there forever (invisible to the submit UI,
+    # which gates on 'ready'). FRESH 'sending' rows are never touched —
+    # a live dispatch in another request still owns them.
+    send_cutoff = now - timedelta(minutes=STALE_SENDING_MINUTES)
+    stranded_sends = (
+        db.query(ApplicationDraft)
+        .filter(
+            ApplicationDraft.status == "sending",
+            ApplicationDraft.updated_at < send_cutoff,
+        )
+        .all()
+    )
+    for d in stranded_sends:
+        app_row = (
+            db.query(Application)
+            .filter(Application.draft_id == d.id)
+            .first()
+        )
+        if app_row is None:
+            d.status = "ready"  # nothing was ever sent
+        elif app_row.status == "failed":
+            d.status = "ready"  # failed send — keep it retryable
+        else:
+            d.status = "submitted"  # the insert committed; mirror it
+    if stranded_sends:
+        logger.info(
+            "Sweep: recovered %d stranded sending draft(s) older than %dmin",
+            len(stranded_sends), STALE_SENDING_MINUTES,
+        )
 
     # PIPE-21: ScrapeRuns stuck 'running' past the max-run budget are
     # dead workers, not live runs — mark them aborted so dashboards stop

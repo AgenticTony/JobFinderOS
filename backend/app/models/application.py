@@ -5,7 +5,17 @@ Tracks the apply stage: after the user approves a match, an application
 is created and executed via email (Resend/SMTP) or queued for browser/manual apply.
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.orm import Base
@@ -16,6 +26,17 @@ class Application(Base):
     """An application to a job, created after user approval of a match."""
 
     __tablename__ = "applications"
+    # SUBMIT: one application row per draft, enforced by the database. The
+    # partial WHERE keeps draft-less applies (browser/manual history seeded
+    # without a draft) unaffected — multiple NULLs are allowed on both
+    # SQLite and Postgres.
+    __table_args__ = (
+        Index(
+            "uq_applications_draft_id", "draft_id", unique=True,
+            sqlite_where=text("draft_id IS NOT NULL"),
+            postgresql_where=text("draft_id IS NOT NULL"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Uuid, ForeignKey("users.id"), nullable=False, index=True)

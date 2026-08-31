@@ -20,6 +20,7 @@ from app.schemas.application import (
 )
 from app.services.apply_service import ApplyError, retry_application
 from app.services.draft_service import (
+    DraftConflictError,
     DraftError,
     create_draft_for_job,
     get_draft,
@@ -227,6 +228,11 @@ async def submit(
         application = await run_in_threadpool(
             submit_draft, db, draft, payload.method, profile, user_id=user.id
         )
+    except DraftConflictError as e:
+        # SUBMIT: a concurrent submit holds the 'sending' claim (or the
+        # unique(draft_id) backstop fired). The package is fine — another
+        # dispatch owns it — so 409, not 400.
+        raise HTTPException(status_code=409, detail=str(e))
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -54,6 +54,10 @@ def retry_application(db: Session, application: Application, profile) -> Applica
         if application.draft_id
         else None
     )
+    # SUBMIT: a draft mid-dispatch ('sending') is owned by another send —
+    # retrying alongside it is the same double-send the claim prevents.
+    if draft is not None and draft.status == "sending":
+        raise ApplyError("This application is already being submitted")
     if draft and draft.cover_letter is not None:
         from app.services.draft_service import _send_with_pdfs
 

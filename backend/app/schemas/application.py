@@ -22,7 +22,7 @@ class DraftResponse(BaseModel):
     cover_letter: Optional[str] = None
     tailored_cv: Optional[str] = None
     changes_summary: List[str] = []
-    status: str  # drafting | ready | submitted | failed
+    status: str  # drafting | ready | sending (transient submit claim) | submitted | failed
     error: Optional[str] = None
     # WO-01 fabrication guard: ADVISORY findings for the review UI
     # (technology-class; high-confidence ones never reach here — they
