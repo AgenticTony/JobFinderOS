@@ -687,3 +687,57 @@ class TestErasureSweepsSnapshotPaths:
             for key in (current, snapped):
                 if Path(key).exists():
                     Path(key).unlink()
+
+
+# =====================================================================
+# BROWSER HAND-OFF — the portal liveness probe (2026-08-31 incident)
+# =====================================================================
+
+
+class TestBrowserHandoffPortalProbe:
+    """A careerjet redirect 502'd at hand-off while the original posting
+    lived at its source (jobtech #31322561) — the user was handed a dead
+    link under a 'sent' label. The hand-off now probes apply_url: a
+    DEFINITE HTTP >= 400 (405 aside — HEAD unsupported, server alive)
+    records a warning on the application row, which the Applications
+    card renders beside the 'Open posting' link. Warn, never block;
+    probe failures stay silent."""
+
+    def _submit(self, db, monkeypatch, head_result):
+        import httpx
+
+        if isinstance(head_result, Exception):
+            def fake_head(url, **kwargs):
+                raise head_result
+        else:
+            def fake_head(url, **kwargs):
+                class _R:
+                    status_code = head_result
+                return _R()
+        monkeypatch.setattr(httpx, "head", fake_head)
+
+        uid, profile, job = _make_user_with_profile(db, cv_text="PROBE CV")
+        draft = _make_ready_draft(db, uid, job)
+        from app.services import draft_service
+
+        return draft_service.submit_draft(db, draft, "browser", profile, user_id=uid)
+
+    def test_dead_portal_records_warning_and_still_hands_off(self, db, monkeypatch):
+        app = self._submit(db, monkeypatch, 502)
+        assert app.status == "manual_pending", "a dead portal must not block the hand-off"
+        assert app.error and "HTTP 502" in app.error, (
+            f"the dead-portal warning must ride the application row: {app.error!r}"
+        )
+
+    def test_live_portal_and_head_unsupported_record_no_warning(self, db, monkeypatch):
+        for code in (200, 405):
+            app = self._submit(db, monkeypatch, code)
+            assert app.error is None, (
+                f"HTTP {code} means the portal answered — no warning (got {app.error!r})"
+            )
+
+    def test_probe_connectivity_failure_stays_silent(self, db, monkeypatch):
+        import httpx
+
+        app = self._submit(db, monkeypatch, httpx.ConnectError("probe network hiccup"))
+        assert app.error is None, "probe connectivity noise must never cry wolf"
