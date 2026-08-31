@@ -233,6 +233,35 @@ def _run_matching_inner(
             j for j in unmatched if passes_language_filter(j.title, j.description, languages)
         ]
 
+    # PIPE-16 scope gate: the shared pool stores a job when it fits ANY
+    # user's scope, so it always held rows this user's own fetch would
+    # never have kept — and matching had no location dimension, so they
+    # entered EVERY strictly-local user's window and burned evaluation
+    # slots before auto-dismissal (live 2026-08-30: a London lead backend
+    # engineer's entire first hunt went to remote marketing/intern ads).
+    # Dismissed per-user, for free, BEFORE any AI slot is spent. The
+    # predicate is the ingest gate mirrored exactly — same functions,
+    # same jobtech/radius selection (app.services.pipeline) — so a job
+    # the ingest gate stored FOR this user's scope always still matches.
+    # Runs before the dedupe gates so out-of-scope rows never enter the
+    # batch's dedupe-key bookkeeping.
+    from app.services.pipeline import build_scrape_context, stored_job_in_user_scope
+
+    scope_ctx = build_scrape_context(db, user_id=user_id)
+    if scope_ctx:
+        out_of_scope = [
+            j for j in unmatched if not stored_job_in_user_scope(j, scope_ctx)
+        ]
+        for j in out_of_scope:
+            _dismiss_for_user(db, user_id, j, "out_of_scope", service.model)
+        if out_of_scope:
+            db.commit()
+            logger.info(
+                "Scope gate: dismissed %d out-of-scope jobs before any AI spend",
+                len(out_of_scope),
+            )
+        unmatched = [j for j in unmatched if j not in out_of_scope]
+
     # Cross-board duplicate gate: if another posting with the same
     # title+company key already has a match, dismiss this copy instead of
     # paying for the same job twice
