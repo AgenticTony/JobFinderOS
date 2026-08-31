@@ -260,7 +260,14 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
       (Indeed's API died 2023; Seek has none and owns Jora). Same email should
       settle the caching/redistribution ToS question that gates shared-fetch.
 - [ ] UK test user walkthrough (Profile → Edit setup → GB)
-- [ ] JobTech free key for production
+- [x] **JobTech free key for production** — CLOSED 2026-08-31 as
+      obsolete: the key-issuing portal is retired (docs repo archived;
+      only bare API hosts remain). The JobSearch API operates OPEN and
+      keyless — verified at production scale: 63 completed runs, zero
+      auth/rate failures ever; live probe returns 200 with no
+      rate-limit headers. Reopen only if 429s appear (contact via
+      arbetsformedlingen.se APIs page). The scraper still sends the
+      `api-key` header automatically if one is ever set.
 - [ ] Render dashboard: reconcile the hunt cron schedule with the
       documented 06:00/18:00 UTC cadence — the LIVE schedule fires every
       3h, so the API's `HUNT_TIMES_UTC` countdown lies to users (found
