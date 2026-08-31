@@ -9,7 +9,6 @@ skips the strict local gate (the API already geo-filtered). Where no
 centroid resolves, everything falls back to municipality codes.
 """
 
-from datetime import datetime, timezone
 
 import pytest
 
@@ -18,6 +17,12 @@ from app.core.database import SessionLocal
 
 @pytest.fixture()
 def db():
+    # The shared sqlite scratch file may predate new columns
+    # (create_all adds tables, never columns). Drop and recreate the
+    # schema IN PLACE — never delete the file: other modules hold
+    # pooled connections to its inode.
+    from app.core.database import engine
+    from app.core.orm import Base
     from app.models import (
         AIUsage,
         Application,
@@ -30,16 +35,16 @@ def db():
         SystemLock,
         User,
     )
-
-    # The shared sqlite scratch file may predate new columns
-    # (create_all adds tables, never columns). Drop and recreate the
-    # schema IN PLACE — never delete the file: other modules hold
-    # pooled connections to its inode.
-    from app.core.database import engine
-    from app.core.orm import Base
+    from tests.conftest import stamp_alembic_head
 
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    # create_all rebuilt the HEAD-shaped schema but left no alembic_version
+    # row — a later app boot in the same session (multiuser's TestClient ->
+    # init_db) would misread the shape and re-run migrations against
+    # existing tables (CircularDependencyError on sqlite, DuplicateTable on
+    # postgres). Stamping head records what create_all actually built.
+    stamp_alembic_head()
     session = SessionLocal()
     for model in (Application, ApplicationDraft, MatchResult, Profile,
                   JobPosting, AIUsage, ScrapeRun, ScrapeWatermark, SystemLock,

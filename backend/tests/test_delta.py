@@ -18,6 +18,12 @@ from app.core.database import SessionLocal
 def db():
     """Per-file session fixture (same shape as test_units/test_multiuser):
     clean per-user data between tests, schema stays — Alembic owns it."""
+    # The shared sqlite scratch file may predate new columns
+    # (create_all adds tables, never columns). Drop and recreate the
+    # schema IN PLACE — never delete the file: other modules hold
+    # pooled connections to its inode.
+    from app.core.database import engine
+    from app.core.orm import Base
     from app.models import (
         AIUsage,
         Application,
@@ -30,16 +36,16 @@ def db():
         SystemLock,
         User,
     )
-
-    # The shared sqlite scratch file may predate new columns
-    # (create_all adds tables, never columns). Drop and recreate the
-    # schema IN PLACE — never delete the file: other modules hold
-    # pooled connections to its inode.
-    from app.core.database import engine
-    from app.core.orm import Base
+    from tests.conftest import stamp_alembic_head
 
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    # create_all rebuilt the HEAD-shaped schema but left no alembic_version
+    # row — a later app boot in the same session (multiuser's TestClient ->
+    # init_db) would misread the shape and re-run migrations against
+    # existing tables (CircularDependencyError on sqlite, DuplicateTable on
+    # postgres). Stamping head records what create_all actually built.
+    stamp_alembic_head()
     session = SessionLocal()
     for model in (Application, ApplicationDraft, MatchResult, Profile,
                   JobPosting, AIUsage, ScrapeRun, ScrapeWatermark, SystemLock,
@@ -75,8 +81,11 @@ class TestWatermarkLifecycle:
 
     def test_watermark_yields_delta_with_overlap(self, db):
         from app.core.timeutil import utc_now
-        from app.models import ScrapeWatermark
-        from app.services.pipeline import DELTA_OVERLAP_HOURS, delta_since_for, set_watermarks
+        from app.services.pipeline import (
+            DELTA_OVERLAP_HOURS,
+            delta_since_for,
+            set_watermarks,
+        )
 
         ctx = _ctx(["utvecklare"], ["Malmö"])
         set_watermarks(db, "jobtech", ctx)
@@ -157,10 +166,10 @@ class TestJobtechDeltaParams:
 
 class TestUnionContexts:
     def test_union_merges_users_per_country(self, db):
+        import uuid as _uuid
+
         from app.models import Profile, User
         from app.services.pipeline import build_union_contexts
-
-        import uuid as _uuid
 
         for i, (country, munis, queries) in enumerate(
             [
@@ -171,6 +180,10 @@ class TestUnionContexts:
         ):
             u = User(id=_uuid.uuid4(), email=f"u{i}-{i}@test.example", hashed_password="x")
             db.add(u)
+            # No relationship() links User->Profile, so the unit of work
+            # cannot order the two INSERTs itself. SQLite never enforces
+            # the FK; postgres does — flush the user row first.
+            db.flush()
             db.add(Profile(
                 is_active=1, user_id=u.id, full_name="T", cv_file_name="cv.pdf",
                 cv_text="dev", country=country, region=None,
@@ -201,9 +214,10 @@ class TestBackfillSchema:
     def test_backfill_is_not_a_cost_vector(self):
         """backfill spends API calls, not AI calls — the clamp that
         matters (max_matches) still bounds spend."""
+        from pydantic import ValidationError
+
         from app.core.config import settings
         from app.schemas.pipeline import PipelineRunRequest
-        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             PipelineRunRequest(max_matches=settings.MAX_JOBS_PER_MATCH_RUN + 1)

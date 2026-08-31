@@ -38,6 +38,36 @@ os.environ["DEBUG"] = "true"  # tests run with production guards relaxed
 os.environ.setdefault("FABRICATION_JUDGE", "off")
 
 
+def stamp_alembic_head() -> None:
+    """Record the current ORM metadata shape as alembic head.
+
+    Modules that rebuild the schema with Base.metadata.create_all (the
+    per-file db fixtures in test_delta/test_radius/test_taxonomy) leave a
+    HEAD-shaped schema with NO alembic_version row. The next app boot in
+    the same session (a TestClient lifespan -> init_db) then misreads it:
+
+    - sqlite: init_db stamps the table-shape at the INITIAL revision and
+      the per-user-FK batch migration chokes on the already-new column
+      order (sqlalchemy CircularDependencyError) — 33 setup errors when
+      the full suite runs against a fresh scratch file.
+    - postgres: init_db replays every migration from scratch against the
+      existing tables (DuplicateTable) — 71 errors.
+
+    create_all builds the CURRENT metadata, which is the head shape, so
+    stamping head after it is the truthful record. Alembic owns the
+    schema on both backends; this keeps its version table honest when a
+    test fixture rebuilds what alembic would have built.
+    """
+    from alembic.config import Config
+
+    from alembic import command
+
+    ini = pathlib.Path(__file__).resolve().parent.parent / "alembic.ini"
+    cfg = Config(str(ini))
+    cfg.set_main_option("sqlalchemy.url", TEST_DB)
+    command.stamp(cfg, "head")
+
+
 def pytest_collection_modifyitems(session, config, items):
     """Refuse to run if the ENGINE bound to anything but the test database.
 

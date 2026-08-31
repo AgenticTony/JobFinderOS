@@ -35,7 +35,7 @@ services:
     region: frankfurt
     healthCheckPath: /health   # DB-connectivity probe (app/main.py) — a
                                # failed check fails the deploy (render.com/docs/health-checks)
-    autoDeploy: true           # deploys on push to main
+    autoDeploy: false          # no deploy before CI is green; re-enable once CI is trusted
     envVars:
       # Database — Supabase session pooler URL from backend/.env
       # (WO-12: session mode, not transaction — prepare_threshold caveat)
