@@ -205,11 +205,18 @@ def run_matching(
         lock.release()
 
 
-def ai_scored_today(db: Session, user_id) -> int:
+def ai_scored_today(db: Session, *, user_id) -> int:
     """WO-14 D3: this user's AI EVALUATIONS today (UTC). Cheap-gate
-    dismissals (duplicate / excluded_keyword / no_description) write
-    match rows but spend no AI — only real evaluations count, which is
-    exactly what the cap bounds."""
+    dismissals (duplicate / excluded_keyword / no_description, and the
+    legacy out_of_scope) write match rows but spend no AI — only real
+    evaluations count, which is exactly what the cap bounds.
+
+    Review fix (2026-08-31): an AI-scored row is exactly one whose
+    dismissed_reason is NULL or 'below_threshold'. The old predicate
+    keyed on decision IS NULL, which UNcounted a kept match the moment
+    the user approved/rejected it (set_match_decision writes decision,
+    never dismissed_reason) — reviewing matches refunded spend slots and
+    the cap leaked in proportion to engagement."""
 
     from sqlalchemy import or_
 
@@ -222,7 +229,7 @@ def ai_scored_today(db: Session, user_id) -> int:
             MatchResult.user_id == user_id,
             MatchResult.created_at >= day_start,
             or_(
-                MatchResult.decision.is_(None),
+                MatchResult.dismissed_reason.is_(None),
                 MatchResult.dismissed_reason == "below_threshold",
             ),
         )
@@ -230,13 +237,15 @@ def ai_scored_today(db: Session, user_id) -> int:
     )
 
 
-def daily_score_allowance(db: Session, user_id) -> int:
+def daily_score_allowance(db: Session, *, user_id) -> int:
     """WO-14 D2: the day-1 allowance is boosted (~2.5×) so the first
     session proves the product; later days settle to the standard cap.
-    'Day 1' = no scoring history yet, or the first-ever row is under 24h
-    old — the whole first day runs on the boosted budget."""
-    from datetime import timedelta
 
+    Review fix (2026-08-31): 'day 1' is the UTC CALENDAR DAY of the
+    user's first-ever match row — not a rolling 24h window. The rolling
+    window ran on a different clock than ai_scored_today's UTC-midnight
+    reset, so a first hunt at 22:00 drew the boosted allowance before
+    midnight AND again after it (50 evaluations, not 25)."""
     from sqlalchemy import func
 
     from app.core.timeutil import utc_now
@@ -246,16 +255,27 @@ def daily_score_allowance(db: Session, user_id) -> int:
         .filter(MatchResult.user_id == user_id)
         .scalar()
     )
-    if first is None or (utc_now() - first) < timedelta(hours=24):
+    if first is None or first.date() == utc_now().date():
         return settings.TRIAL_DAY1_SCORE_CAP
     return settings.TRIAL_DAILY_SCORE_CAP
 
 
-def daily_scoring_state(db: Session, user_id):
+def daily_scoring_state(db: Session, *, user_id):
     """Public pair for the route-level synchronous pre-check: the user's
     (scored_today, allowance) so a capped manual run gets an immediate
     clear message instead of a silent background no-op."""
-    return ai_scored_today(db, user_id), daily_score_allowance(db, user_id)
+    return ai_scored_today(db, user_id=user_id), daily_score_allowance(db, user_id=user_id)
+
+
+def daily_cap_message(scored: int, allowance: int) -> str:
+    """The user-facing capped sentence — public: the /matches/run route
+    surfaces it synchronously, and _daily_cap_summary embeds it in the
+    run summary's error field. Kept separate so the route never depends
+    on the run-summary shape."""
+    return (
+        f"Daily scoring limit reached — {scored} of {allowance} jobs "
+        f"scored today (trial cap). New jobs score on tomorrow's hunt."
+    )
 
 
 def _daily_cap_summary(scored, allowance, jobs_considered=0, matches_created=0) -> Dict:
@@ -263,10 +283,7 @@ def _daily_cap_summary(scored, allowance, jobs_considered=0, matches_created=0) 
         "status": "daily_cap_reached",
         "jobs_considered": jobs_considered,
         "matches_created": matches_created,
-        "error": (
-            f"Daily scoring limit reached — {scored} of {allowance} jobs "
-            f"scored today (trial cap). New jobs score on tomorrow's hunt."
-        ),
+        "error": daily_cap_message(scored, allowance),
     }
 
 
@@ -316,8 +333,8 @@ def _run_matching_inner(
     # service so manual AND scheduled hunts inherit it. Checked before
     # the candidate query: a capped user costs one COUNT, nothing else,
     # and gets a clear message instead of a silent empty queue.
-    scored_today = ai_scored_today(db, user_id)
-    allowance = daily_score_allowance(db, user_id)
+    scored_today = ai_scored_today(db, user_id=user_id)
+    allowance = daily_score_allowance(db, user_id=user_id)
     remaining = allowance - scored_today
     if remaining <= 0:
         logger.info(

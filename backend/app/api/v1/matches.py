@@ -101,11 +101,11 @@ async def run_matching(
     if not get_active_profile(db, user_id=user.id):
         raise HTTPException(status_code=400, detail="Upload a CV before running matching")
 
-    scored, allowance = svc.daily_scoring_state(db, user.id)
+    scored, allowance = svc.daily_scoring_state(db, user_id=user.id)
     if scored >= allowance:
         return {
             "status": "daily_cap_reached",
-            "message": svc._daily_cap_summary(scored, allowance)["error"],
+            "message": svc.daily_cap_message(scored, allowance),
         }
 
     def _task():

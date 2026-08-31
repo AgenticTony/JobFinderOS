@@ -252,3 +252,125 @@ class TestRunMatchingClamp:
             f"a direct call with limit=99999 scored {len(ai['jobs'])} — the "
             "clamp must live in run_matching, not only in route schemas"
         )
+
+
+# ------------------------------------------------ review round (2026-08-31)
+
+class TestCapCountsDecidedMatches:
+    """Review finding 1 (critical): set_match_decision writes
+    decision='approved'/'rejected' and leaves dismissed_reason NULL —
+    a kept match the user APPROVED was AI-scored and must still count.
+    The old predicate (decision IS NULL OR below_threshold) refunded
+    spend slots for the reviewing action the product encourages."""
+
+    def test_approved_kept_matches_still_count_toward_the_cap(self, db, monkeypatch):
+        from datetime import timedelta
+
+        from app.core.timeutil import utc_now
+        from app.models import MatchResult, Profile
+        from app.services import matcher_service
+
+        uid = _onboarded_user(db, country="SE", municipalities='["Malmö"]')
+        # age past day 1: a first-ever row two days ago
+        old = _job_row(db, location="Malmö, Sweden", title="Old Dev")
+        first = MatchResult(user_id=uid, job_id=old.id, score=80,
+                            tier="good_match", model_used="test")
+        db.add(first)
+        db.flush()
+        first.created_at = utc_now() - timedelta(days=2)
+        db.commit()
+        # 10 AI-scored rows today: 5 dismissed below threshold,
+        # 5 KEPT matches the user approved (decision set, reason NULL)
+        for i in range(5):
+            j = _job_row(db, location="Malmö, Sweden", title=f"Below {i}")
+            db.add(MatchResult(user_id=uid, job_id=j.id, score=8,
+                               tier="poor_match", model_used="test",
+                               decision="rejected",
+                               dismissed_reason="below_threshold"))
+        for i in range(5):
+            j = _job_row(db, location="Malmö, Sweden", title=f"Kept {i}")
+            db.add(MatchResult(user_id=uid, job_id=j.id, score=80,
+                               tier="good_match", model_used="test",
+                               decision="approved"))
+        db.commit()
+        for i in range(20):
+            _job_row(db, location="Malmö, Sweden", title=f"Backlog {i}")
+        ai = _fake_ai(monkeypatch)
+
+        summary = matcher_service.run_matching(
+            db, profile=db.query(Profile).filter(Profile.user_id == uid).one(),
+            user_id=uid,
+        )
+
+        assert ai["jobs"] == [], (
+            "approved kept matches fell out of the daily count — reviewing a "
+            "match must not refund the AI slot it consumed (cap leak)"
+        )
+        assert summary["status"] == "daily_cap_reached"
+
+
+class TestDay1BoostExpiresAtUtcMidnight:
+    """Review finding 3 (medium): the boost was a rolling 24h from the
+    first row while the counter resets at UTC midnight — a 22:00 start
+    drew 25 + 25. Day 1 must be the CALENDAR day of the first row."""
+
+    def test_row_from_yesterday_within_24h_gets_standard_cap(self, db):
+        from datetime import timedelta
+
+        from app.core.timeutil import utc_now
+        from app.models import MatchResult
+        from app.services.matcher_service import daily_score_allowance
+
+        uid = _onboarded_user(db, country="SE", municipalities='["Malmö"]')
+        j = _job_row(db, location="Malmö, Sweden", title="Late Start")
+        row = MatchResult(user_id=uid, job_id=j.id, score=80,
+                          tier="good_match", model_used="test")
+        db.add(row)
+        db.flush()
+        # yesterday 23:00 UTC — inside a rolling 24h, but a DIFFERENT
+        # UTC calendar day from now
+        now = utc_now()
+        row.created_at = (now - timedelta(hours=now.hour + 1)).replace(
+            hour=23, minute=0, second=0, microsecond=0)
+        db.commit()
+
+        assert daily_score_allowance(db, user_id=uid) == settings.TRIAL_DAILY_SCORE_CAP, (
+            "a first row from yesterday (even one under 24h old) must NOT "
+            "re-arm the day-1 boost on today's fresh counter — the rolling "
+            "window let late-day users draw the 2.5x boost twice"
+        )
+
+
+class TestCooldownIsPerScope:
+    """Review finding 2 (high): the cooldown was global per source while
+    hunts are per-user scope — A(Stockholm)'s hunt suppressed
+    B(Malmö)'s entirely different fetch. Cooldown must key on the same
+    fetch identity the watermarks use: (source, scope)."""
+
+    def test_different_scope_hunt_is_not_suppressed(self, db, monkeypatch):
+        from app.services.pipeline import run_pipeline
+        from app.services.scrapers.jobtech import JobtechScraper
+
+        calls = {"n": 0}
+
+        def counting_fetch(self, ctx):
+            calls["n"] += 1
+            return []
+
+        monkeypatch.setattr(JobtechScraper, "fetch", counting_fetch)
+
+        a = _onboarded_user(db, country="SE", municipalities='["Stockholm"]',
+                             queries='["utvecklare stockholm"]')
+        b = _onboarded_user(db, country="SE", municipalities='["Malmö"]',
+                             queries='["utvecklare"]')
+
+        run_pipeline(sources=["jobtech"], match=False, user_id=a)
+        assert calls["n"] == 1
+
+        second = run_pipeline(sources=["jobtech"], match=False, user_id=b)
+        assert calls["n"] == 2, (
+            "a different user's different-scope hunt was suppressed by the "
+            f"global cooldown (got {second['scrape'][0]['status']}) — B's "
+            "Stockholm→Malmö queries were never issued"
+        )
+        assert second["scrape"][0]["status"] == "completed"
