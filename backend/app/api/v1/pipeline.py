@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_authenticated_user
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.ratelimit import enforce
 from app.crud import get_stats, list_scrape_runs
 from app.models import MatchResult, User
@@ -16,6 +16,7 @@ from app.schemas.match import MatchWithJobResponse
 from app.schemas.pipeline import PipelineRunRequest, PipelineRunResponse, ScrapeSummary
 from app.services.pipeline import run_pipeline
 from app.services.scrapers import SCRAPER_REGISTRY
+from app.services.worker import claim_hunt, release_hunt
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,14 +43,50 @@ async def run(
         )
 
     enforce(user.id, 'hunt')
-    summary = await run_in_threadpool(
-        run_pipeline,
-        sources=sources,
-        match=payload.match,
-        max_matches=payload.max_matches,
-        backfill=payload.backfill,
-        user_id=user.id,
-    )
+
+    # PIPE-14a: a manual hunt runs the SAME shared-pool scrape unit as
+    # the cron worker (sources, watermarks, job_postings), so it claims
+    # the SAME DB hunt lock the worker claims (claim_hunt: one atomic
+    # conditional UPDATE, portable, TTL-stealable — no new machinery).
+    # The lock is GLOBAL, deliberately: the scrape unit it guards is
+    # global, and this one claim closes both races that used to
+    # double-scrape/double-AI-score the pool (manual-vs-cron and
+    # manual-vs-manual — the DATA-5 watermark race is exactly two
+    # concurrent runs). A busy press gets an honest 409 mirroring the
+    # worker's "lock held — skip" instead of silently double-spending.
+    # Trade-off accepted: a manual hunt holding the claim makes an
+    # overlapping cron cycle skip (the worker's existing lock_held
+    # behavior) — hunts are bounded by the same worst-case budget as the
+    # claim TTL, and a crashed holder self-heals after the TTL.
+    lock_db = SessionLocal()
+    try:
+        claimed = claim_hunt(lock_db)
+    finally:
+        lock_db.close()
+    if not claimed:
+        raise HTTPException(
+            status_code=409,
+            detail="A hunt is already running (scheduled or manual). "
+                   "It finishes within a few minutes — try again after that.",
+        )
+
+    try:
+        summary = await run_in_threadpool(
+            run_pipeline,
+            sources=sources,
+            match=payload.match,
+            max_matches=payload.max_matches,
+            backfill=payload.backfill,
+            user_id=user.id,
+        )
+    finally:
+        # ALWAYS released (the worker's rule): a leaked claim is a
+        # 45-minute silent hunt outage.
+        release_db = SessionLocal()
+        try:
+            release_hunt(release_db)
+        finally:
+            release_db.close()
 
     # Re-read top matches with jobs joined for the response.
     # Defense in depth (P0-1): the id list comes from the service's
