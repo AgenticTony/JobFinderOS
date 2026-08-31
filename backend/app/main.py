@@ -125,6 +125,22 @@ app.include_router(
 app.middleware("http")(set_user_context_middleware)
 
 
+@app.middleware("http")
+async def security_headers_middleware(request, call_next):
+    """Baseline security headers on every response (external verification
+    pass 2: the API shipped none). The frontend is a static export on a
+    different origin, so its headers live in frontend/public/_headers —
+    Next cannot add them at runtime under output:'export'."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # Ignored by browsers over plain HTTP (local dev); enforced on the
+    # Render HTTPS origin. Long max-age is safe: the API is API-only.
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
 @app.get("/health", tags=["Ops"])
 def health():
     """Liveness + database readiness for uptime monitors and deploy checks."""

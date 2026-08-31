@@ -1,0 +1,19 @@
+# Cloudflare Pages security headers (external verification pass 2).
+# The console is a static export (output:'export') — Next cannot inject
+# headers at runtime, so Pages applies this file. The CSP exists because
+# the JWT lives in localStorage: script-src is the line that stops an
+# injected script exfiltrating the token.
+#
+# Trade-offs, deliberately:
+# - script/style 'unsafe-inline': Next's static export embeds inline
+#   bootstrap scripts and Tailwind inline styles; nonces are impossible
+#   without a server. External script injection is still blocked.
+# - connect-src https: + localhost: the API origin is build-time
+#   configurable (NEXT_PUBLIC_API_URL), so it can't be pinned here.
+#   Narrow once the production API host is permanent.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

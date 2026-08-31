@@ -285,6 +285,14 @@ def stored_job_in_user_scope(job, ctx: Dict) -> bool:
     reduced gate is the honest predicate for it (a strict-only mirror
     would strand exactly the neighbouring-kommun jobs the radius fetch
     exists to catch); every other row gets the full gate.
+
+    REG3 (open, P2): manual jobs carry blank/loose locations by design
+    and would be skipped here for their own creator. Exempting them is
+    NOT safe until job_postings grows a created_by column — without one,
+    an exemption also admits OTHER users' manual entries into this
+    user's AI window (the exact spend leak this gate exists to stop).
+    With skip-not-dismiss semantics the skip is at least no longer
+    permanent; the real fix is created_by + exempt only the creator.
     """
     from app.services.geo import geo_plan
 

@@ -303,12 +303,23 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages):
     # entered EVERY strictly-local user's window and burned evaluation
     # slots before auto-dismissal (live 2026-08-30: a London lead backend
     # engineer's entire first hunt went to remote marketing/intern ads).
-    # Dismissed per-user, for free, BEFORE any AI slot is spent. The
+    # SKIPPED per-run, for free, BEFORE any AI slot is spent. The
     # predicate is the ingest gate mirrored exactly — same functions,
     # same jobtech/radius selection (app.services.pipeline) — so a job
     # the ingest gate stored FOR this user's scope always still matches.
     # Runs before the dedupe gates so out-of-scope rows never enter the
     # batch's dedupe-key bookkeeping.
+    #
+    # REG1 (2026-08-31): this used to write TERMINAL out_of_scope
+    # dismissal rows — and the candidate query excludes any (user, job)
+    # with a match row, so a user who later widened their preferences
+    # (re-enabled remote, added a municipality) could NEVER re-see those
+    # jobs: preference edits silently shrank the pool forever (live
+    # proven: include_remote=False run dismissed a remote job; flipping
+    # to True never resurfaced it). Out-of-scope is a property of the
+    # CURRENT preferences, not a verdict on the job — so it is a skip,
+    # re-evaluated each run at zero cost (the gate is a Python filter;
+    # no AI, no DB write). A job re-enters the moment the scope admits it.
     from app.services.pipeline import build_scrape_context, stored_job_in_user_scope
 
     scope_ctx = build_scrape_context(db, user_id=user_id)
@@ -316,12 +327,10 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages):
         out_of_scope = [
             j for j in unmatched if not stored_job_in_user_scope(j, scope_ctx)
         ]
-        for j in out_of_scope:
-            _dismiss_for_user(db, user_id, j, "out_of_scope", service.model)
         if out_of_scope:
-            db.commit()
             logger.info(
-                "Scope gate: dismissed %d out-of-scope jobs before any AI spend",
+                "Scope gate: skipping %d out-of-scope jobs before any AI "
+                "spend (re-evaluated next run — no dismissal rows written)",
                 len(out_of_scope),
             )
         unmatched = [j for j in unmatched if j not in out_of_scope]

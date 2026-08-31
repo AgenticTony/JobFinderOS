@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.core.timeutil import utc_now
 from app.models import (
     Application,
-    ApplicationDraft,
     JobPosting,
     MatchResult,
     ScrapeRun,
@@ -50,42 +49,11 @@ def get_job(db: Session, job_id: int) -> Optional[JobPosting]:
     return db.query(JobPosting).filter(JobPosting.id == job_id).first()
 
 
-def delete_job(db: Session, job_id: int, *, user_id) -> bool:
-    """Remove a job from ONE user's world.
-
-    job_postings is a shared pool: the row is only physically deleted when
-    no other user still references it. Otherwise the caller's own match and
-    application rows go and the shared posting stays, so a delete can never
-    dangle another tenant's foreign keys (MatchResult.job_id is NOT NULL).
-    """
-    job = get_job(db, job_id)
-    if not job:
-        return False
-    # Children first (P0-2): applications reference drafts AND matches
-    # (draft_id, match_id), drafts reference matches (match_id). Those FKs
-    # are NOT DEFERRABLE with no ON DELETE action, so deleting matches
-    # before their dependents raised IntegrityError on Postgres —
-    # DELETE /jobs/{id} 500'd for any drafted or applied job.
-    db.query(Application).filter(
-        Application.job_id == job_id, Application.user_id == user_id
-    ).delete(synchronize_session=False)
-    db.query(ApplicationDraft).filter(
-        ApplicationDraft.job_id == job_id, ApplicationDraft.user_id == user_id
-    ).delete(synchronize_session=False)
-    db.query(MatchResult).filter(
-        MatchResult.job_id == job_id, MatchResult.user_id == user_id
-    ).delete(synchronize_session=False)
-    db.flush()  # make this user's removals visible to the reference checks
-
-    still_referenced = (
-        db.query(MatchResult.id).filter(MatchResult.job_id == job_id).first()
-        or db.query(Application.id).filter(Application.job_id == job_id).first()
-        or db.query(ApplicationDraft.id).filter(ApplicationDraft.job_id == job_id).first()
-    )
-    if not still_referenced:
-        db.delete(job)
-    db.commit()
-    return True
+# delete_job is GONE (2026-08-31) with its only caller, DELETE /jobs/{id}:
+# the "unreferenced" branch let ANY authenticated user permanently delete
+# shared-pool postings nobody had matched yet (external verification
+# pass 2, live-proven cross-tenant). Per-user removal of a job is
+# match_results.dismissed_reason, which is where it lives.
 
 
 # ---------------- Matches ----------------

@@ -627,14 +627,13 @@ class TestGDPRExportCompleteness:
                 f"application {field} missing/wrong in export: {a}"
             )
 
+    def test_export_contains_cv_match_reasoning_and_usage(self, client, db):
+        """External verification pass 2: the export omitted the CV entirely
+        (no cv_text, no file), match reasoning (an AI assessment of the
+        person), and ai_usage. Art. 15/20 covers all three."""
+        from app.models import AIUsage, Profile
 
-class TestDeleteJobFKChain:
-    """P0-2's sibling: delete_job() removed matches before drafts and
-    applications — the same NOT-DEFERRABLE FKs made DELETE /jobs/{id} 500
-    for any job that had been drafted or applied to."""
-
-    def test_delete_job_with_drafted_applied_chain(self, client, db):
-        email = f"djf-{uuid.uuid4().hex[:6]}@test.example"
+        email = f"gdx2-{uuid.uuid4().hex[:6]}@test.example"
         uid = uuid.UUID(_register(client, email))
         _auth_client(client, email)
 
@@ -645,32 +644,95 @@ class TestDeleteJobFKChain:
         )
         db.add(job)
         db.flush()
-        match = MatchResult(user_id=uid, job_id=job.id, score=75,
-                            tier="good_match")
-        db.add(match)
-        db.flush()
-        draft = ApplicationDraft(user_id=uid, job_id=job.id, match_id=match.id,
-                                 cover_letter="x", tailored_cv="y",
-                                 changes_summary="[]", status="ready")
-        db.add(draft)
-        db.flush()
-        db.add(Application(user_id=uid, job_id=job.id, match_id=match.id,
-                           draft_id=draft.id, method="browser",
-                           status="manual_pending"))
+        # registration already created the profile row (on_after_register)
+        prof = db.query(Profile).filter(Profile.user_id == uid).one()
+        prof.full_name = "Export Test"
+        prof.cv_text = "P1-6 CV TEXT verbatim"
+        prof.cv_file_name = "cv.pdf"
+        db.add(MatchResult(
+            user_id=uid, job_id=job.id, score=80, tier="excellent_match",
+            reasoning="P1-6 AI REASONING about the person",
+            matched_skills='["Python"]', missing_skills='["Kafka"]',
+        ))
+        db.add(AIUsage(
+            user_id=uid, kind="match", model="glm-5.1", endpoint="api.z.ai",
+            prompt_tokens=100, cached_tokens=0, completion_tokens=50,
+            cost_usd=250,
+        ))
+        db.commit()
+
+        r = client.get("/api/v1/account/export")
+        assert r.status_code == 200, r.text
+        payload = r.json()
+
+        prof = payload["profile"]
+        assert prof["cv_text"] == "P1-6 CV TEXT verbatim", (
+            f"cv_text missing from export profile: {sorted(prof)}"
+        )
+        assert prof["cv_file_name"] == "cv.pdf"
+
+        m = payload["matches"][0]
+        assert m["reasoning"] == "P1-6 AI REASONING about the person", (
+            f"match reasoning missing from export: {m}"
+        )
+        assert m["matched_skills"] == ["Python"]
+        assert m["missing_skills"] == ["Kafka"]
+
+        usage = payload["ai_usage"]
+        assert usage, "export payload has no ai_usage section"
+        assert usage[0]["model"] == "glm-5.1"
+        assert usage[0]["cost_usd"] == 0.00025  # micro-dollars -> dollars
+
+
+class TestSecurityHeaders:
+    """External verification pass 2: the API shipped no security headers."""
+
+    def test_security_headers_on_every_response(self, client):
+        r = client.get("/health")
+        assert r.status_code == 200
+        expected = {
+            "x-content-type-options": "nosniff",
+            "x-frame-options": "DENY",
+            "referrer-policy": "strict-origin-when-cross-origin",
+        }
+        for header, value in expected.items():
+            assert r.headers.get(header) == value, (
+                f"{header} missing/wrong: {r.headers.get(header)!r}"
+            )
+        assert "max-age" in (r.headers.get("strict-transport-security") or ""), (
+            "HSTS missing from API responses"
+        )
+
+
+class TestDeleteJobEndpointRemoved:
+    """External verification pass 2 (2026-08-31): DELETE /jobs/{id} let ANY
+    authenticated user permanently delete ANY shared-pool posting nobody had
+    matched — the reference check only counted match/draft/application rows,
+    so unreferenced postings (19% of production) were destroyable by users
+    with no relationship to them. The endpoint (and crud.delete_job) is
+    removed; per-user removal lives on match_results.dismissed_reason."""
+
+    def test_delete_jobs_endpoint_is_gone_and_pool_protected(self, client, db):
+        email = f"djf-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+
+        job = JobPosting(
+            source="reed", source_id=uuid.uuid4().hex[:8],
+            title="Someone Else's Job", company="X", url=f"https://x/{uuid.uuid4().hex[:6]}",
+            status="new",
+        )
+        db.add(job)
         db.commit()
 
         r = client.delete(f"/api/v1/jobs/{job.id}")
-        assert r.status_code == 204, (
-            f"job delete returned {r.status_code}: {r.text[:300]} — the FK "
-            "chain (draft.match_id / application.match_id / "
-            "application.draft_id) is breaking the delete transaction"
+        assert r.status_code == 405, (
+            f"DELETE /jobs/{{id}} must not exist (got {r.status_code}) — a "
+            "user with no relationship to a shared posting must not be able "
+            "to remove it for every user"
         )
-
-        assert db.query(MatchResult).filter(MatchResult.user_id == uid).count() == 0
-        assert db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).count() == 0
-        assert db.query(Application).filter(Application.user_id == uid).count() == 0
-        # no other user references the posting — the shared row goes too
-        assert db.query(JobPosting).filter(JobPosting.id == job.id).count() == 0
+        # and the shared row is untouched regardless
+        assert db.query(JobPosting).filter(JobPosting.id == job.id).count() == 1
 
 
 class TestPerUserMatching:
