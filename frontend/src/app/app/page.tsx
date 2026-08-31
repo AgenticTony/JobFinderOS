@@ -5,7 +5,7 @@
 // Shell: left sidebar (nav + live hunt status) on md+, compact top bar on mobile.
 // Landing view is the Dashboard: Hunt Pulse funnel + next decisions + status rail.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -1090,6 +1090,12 @@ function SentApplicationCard({
   onChanged: () => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // FE-9: the header is keyboard-operable (role="button" — a real <button>
+  // is impossible here because the header legitimately CONTAINS interactive
+  // controls: the "Open posting" link and the Retry button; a <button>
+  // cannot nest them). aria-expanded/aria-controls wire the header to the
+  // expandable panel below.
+  const panelId = useId();
   // FE-22: download failures used to vanish into .catch(console.error) —
   // the user clicked "PDF" and nothing happened. Same inline-error
   // pattern as the retry button next to it.
@@ -1109,11 +1115,28 @@ function SentApplicationCard({
   return (
     <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
       <div
+        role={hasDocuments ? 'button' : undefined}
+        tabIndex={hasDocuments ? 0 : undefined}
+        aria-expanded={hasDocuments ? expanded : undefined}
+        aria-controls={hasDocuments ? panelId : undefined}
         className={cn(
           'flex flex-wrap items-center gap-3 p-4',
           hasDocuments && 'cursor-pointer'
         )}
         onClick={hasDocuments ? () => setExpanded(!expanded) : undefined}
+        onKeyDown={
+          hasDocuments
+            ? (e) => {
+                // Inner controls (Retry, the posting link) keep their own
+                // keys — only act when the header itself has focus.
+                if (e.target !== e.currentTarget) return;
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault(); // Space must not scroll the page
+                  setExpanded(!expanded);
+                }
+              }
+            : undefined
+        }
       >
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-hi">
@@ -1163,6 +1186,7 @@ function SentApplicationCard({
       <AnimatePresence>
         {expanded && hasDocuments && draft && (
           <motion.div
+            id={panelId}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -1279,6 +1303,11 @@ function DraftCard({
   const dirty = edits !== undefined;
   const [busy, setBusy] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // FE-9: the accordion header is a real <button> (keyboard: Enter/Space
+  // toggle natively) wired to its panel via aria-expanded/aria-controls.
+  // The dirty chip / confirm flow (P0-4) is untouched — only the header's
+  // element type changed.
+  const panelId = useId();
 
   const job = draft.job;
   const canEmail = Boolean(job?.application_email);
@@ -1350,8 +1379,17 @@ function DraftCard({
 
   return (
     <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
-      {/* Header — click to open the review workspace */}
-      <div className="flex cursor-pointer items-center gap-3 p-4" onClick={onToggle}>
+      {/* Header — click (or Enter/Space) to open the review workspace.
+          FE-9: real <button> so keyboard users can operate the accordion;
+          Tailwind's preflight resets buttons to inherit font/color and a
+          transparent background, so rendering matches the old <div>. */}
+      <button
+        type="button"
+        className="flex w-full cursor-pointer items-center gap-3 p-4 text-left"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+      >
         <h3 className="min-w-0 flex-1 truncate font-semibold text-hi">
           {job?.title ?? `Job #${draft.job_id}`}
           <span className="ml-2 text-sm font-normal text-low">{job?.company}</span>
@@ -1377,11 +1415,12 @@ function DraftCard({
         <ChevronDown
           className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
         />
-      </div>
+      </button>
 
       <AnimatePresence>
         {expanded && (
           <motion.div
+            id={panelId}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}

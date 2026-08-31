@@ -5,7 +5,7 @@
 // cover notes are no longer shown here — they're generated per-application
 // in the Applications view instead.
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowRight,
@@ -33,6 +33,9 @@ interface Props {
 
 export default function MatchCard({ match, onDecision, onPrepare, onReview, prepared }: Props) {
   const [expanded, setExpanded] = useState(false);
+  // FE-9: keyboard-operable accordion — real <button> header (Enter/Space
+  // toggle natively) wired to the detail panel via aria-expanded/aria-controls.
+  const panelId = useId();
   const [busy, setBusy] = useState<string | null>(null);
   // Rolling 24h "new" — decays per-card instead of everything going stale at
   // midnight; recomputed on every data refresh.
@@ -64,8 +67,17 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
 
   return (
     <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
-      {/* Header row — job-board convention: company tile left, score right */}
-      <div className="flex cursor-pointer items-center gap-3.5 p-4" onClick={() => setExpanded(!expanded)}>
+      {/* Header row — job-board convention: company tile left, score right.
+          FE-9: real <button> so keyboard users can open a match (Tailwind
+          preflight gives buttons inherited font/color + transparent
+          background, so it renders exactly like the old <div>). */}
+      <button
+        type="button"
+        className="flex w-full cursor-pointer items-center gap-3.5 p-4 text-left"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+      >
         <span
           className="num flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-2 text-sm font-semibold text-mid"
           aria-hidden
@@ -123,12 +135,13 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
         <ChevronDown
           className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
         />
-      </div>
+      </button>
 
       {/* Expanded detail */}
       <AnimatePresence>
         {expanded && (
           <motion.div
+            id={panelId}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}

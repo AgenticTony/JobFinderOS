@@ -30,8 +30,10 @@ const nextConfig: NextConfig = {
   // (the official "Next.js (Static HTML Export)" path —
   // developers.cloudflare.com/pages/framework-guides/nextjs/deploy-a-static-nextjs-site;
   // build `npx next build`, output directory `out/`). The app is fully
-  // client-side — axios against the API (src/lib/api.ts), zustand state —
+  // client-side — axios against the API (src/lib/api.ts), React state —
   // so nothing here needs a Next server. `next dev` is unaffected.
+  // (HYGIENE: `start` is aligned to `next dev` — `next start` errors under
+  // output:'export' since there is no server bundle to start.)
   output: 'export',
   // Static export cannot use the Next image optimizer (it needs a server);
   // unoptimized keeps any future next/image usage export-safe.
