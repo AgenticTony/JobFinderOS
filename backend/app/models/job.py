@@ -6,7 +6,7 @@ Jobs arrive from scrapers (Arbeitnow, Remotive, Jobicy, Working Nomads)
 or manual entry, then flow through: new -> matched -> approved/rejected -> applied.
 """
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Integer, String, Text, UniqueConstraint
 
 from app.core.orm import Base
 from app.core.timeutil import utc_now
@@ -22,6 +22,16 @@ class JobPosting(Base):
     # Provenance — identifies the job across scrape runs
     source = Column(String(50), nullable=False, index=True)  # arbeitnow, remotive, jobicy, workingnomads, manual
     source_id = Column(String(255), nullable=True)  # ID/slug from the source site
+
+    # PIPE-14b: the DB backstop for the ingest dedupe. _job_exists() is
+    # a pre-check, not a concurrency control — two runs (manual hunt
+    # racing the cron worker) both SELECT nothing and both INSERT, and
+    # the shared pool grows duplicate postings that both runs then
+    # AI-score. NULL source_id rows (manual jobs) never collide: NULLs
+    # are distinct in unique indexes on both SQLite and Postgres.
+    __table_args__ = (
+        UniqueConstraint("source", "source_id", name="uq_job_postings_source_source_id"),
+    )
 
     # Job content
     title = Column(String(500), nullable=False)

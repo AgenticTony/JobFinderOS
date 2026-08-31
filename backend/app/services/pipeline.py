@@ -101,21 +101,56 @@ def delta_since_for(db: Session, source: str, ctx: Dict):
 
 
 def set_watermarks(db: Session, source: str, ctx: Dict) -> None:
-    """Record a successful fetch for every (source, query, scope)."""
+    """Record a successful fetch for every (source, query, scope).
+
+    DATA-5: this is a select-then-insert racing a concurrent run
+    fetching the same key. The loser's INSERT violates
+    uq_scrape_watermark and its failed transaction used to poison the
+    session — the caller's next commit (the ScrapeRun's terminal-status
+    write) then raised PendingRollbackError, so the hunt 500'd AFTER its
+    jobs were committed and the run row stayed 'running'. The collision
+    is now handled in-row: rollback, re-select (the winner's row exists
+    by then), bump it. A watermark that somehow loses twice just stays
+    stale — the next run re-reads with the overlap absorbing it.
+    """
+    from sqlalchemy.exc import IntegrityError
+
     from app.models import ScrapeWatermark
 
     scope = _scope_key(ctx)
     now = utc_now()
-    for q in _watermark_queries(ctx):
-        row = (
-            db.query(ScrapeWatermark)
-            .filter_by(source=source, query=q, scope=scope)
-            .first()
-        )
-        if row is not None:
-            row.watermark_at = now
-        else:
-            db.add(ScrapeWatermark(source=source, query=q, scope=scope, watermark_at=now))
+    queries = _watermark_queries(ctx)
+    stamps = {
+        r.query: r
+        for r in db.query(ScrapeWatermark).filter_by(source=source, scope=scope)
+    }
+
+    # Inserts first, updates after: a lost-race rollback expires the
+    # loaded rows, so no update dirt may exist yet to be discarded.
+    for q in queries:
+        if q in stamps:
+            continue
+        db.add(ScrapeWatermark(source=source, query=q, scope=scope, watermark_at=now))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            row = (
+                db.query(ScrapeWatermark)
+                .filter_by(source=source, query=q, scope=scope)
+                .first()
+            )
+            if row is not None:
+                stamps[q] = row
+            else:
+                logger.warning(
+                    "[%s] watermark %r lost its insert race twice — next run re-reads",
+                    source, q,
+                )
+
+    for q in queries:
+        if q in stamps:
+            stamps[q].watermark_at = now
     db.commit()
 
 
@@ -296,31 +331,15 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
         for nj in jobs:
             if _job_exists(db, nj):
                 continue
-            posting = JobPosting(
-                source=nj.source,
-                source_id=nj.source_id,
-                dedupe_key=dedupe_key_for(nj.title, nj.company, nj.location),
-                title=nj.title[:500],
-                company=nj.company,
-                location=nj.location,
-                remote=1 if nj.remote else 0,
-                url=nj.url[:1000],
-                description=nj.description,
-                employment_type=nj.employment_type,
-                salary=nj.salary,
-                tags=dump_json_list(nj.tags),
-                category=nj.category,
-                application_email=nj.application_email,
-                application_url=nj.application_url,
-                published_at=nj.published_at,
-            )
-            db.add(posting)
-            db.flush()  # make the row visible so same-run duplicates are caught
-            new_count += 1
+            if _insert_job_posting(db, nj):
+                new_count += 1
 
-        db.commit()
+        # Terminal state lands BEFORE the watermarks: whatever happens
+        # from here (a watermark race, a poisoned session), the run row
+        # must already say 'completed' with its counts.
         run.jobs_new = new_count
         run.status = "completed"
+        db.commit()
         if source_name in DELTA_SOURCES:
             try:
                 set_watermarks(db, source_name, ctx)
@@ -337,10 +356,90 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
         run.error = str(e)[:2000]
         logger.error("[%s] scrape failed: %s", source_name, e)
     finally:
-        run.finished_at = utc_now()
-        db.commit()
+        _finalize_run(db, run)
 
     return run
+
+
+def _finalize_run(db: Session, run: ScrapeRun) -> None:
+    """Force the ScrapeRun row to a terminal, timestamped state even
+    when the session is poisoned (DATA-5 belt). The pre-fix finally did
+    an unwrapped db.commit(); anything earlier that left the session in
+    pending-rollback (the watermark insert race did exactly that) turned
+    THIS commit into PendingRollbackError — the hunt 500'd after its
+    jobs were committed and the run row stayed 'running' until the 2h
+    stale-run sweep. Roll back, retry the terminal write once; if even
+    that fails, log it — the sweep is the last resort."""
+    try:
+        run.finished_at = utc_now()
+        db.commit()
+    except Exception:
+        db.rollback()
+        try:
+            run.finished_at = utc_now()
+            db.commit()
+        except Exception as e:  # noqa: BLE001 — nothing left to try
+            logger.error(
+                "ScrapeRun %s: terminal-state write failed twice (%s) — "
+                "the stale-run sweep will abort it", run.id, e,
+            )
+
+
+def _job_values(nj: NormalizedJob) -> Dict:
+    """Column values for one ingested posting (shared by the ORM and
+    dialect-upsert insert paths)."""
+    return dict(
+        source=nj.source,
+        source_id=nj.source_id,
+        dedupe_key=dedupe_key_for(nj.title, nj.company, nj.location),
+        title=nj.title[:500],
+        company=nj.company,
+        location=nj.location,
+        remote=1 if nj.remote else 0,
+        url=nj.url[:1000],
+        description=nj.description,
+        employment_type=nj.employment_type,
+        salary=nj.salary,
+        tags=dump_json_list(nj.tags),
+        category=nj.category,
+        application_email=nj.application_email,
+        application_url=nj.application_url,
+        published_at=nj.published_at,
+    )
+
+
+def _insert_job_posting(db: Session, nj: NormalizedJob) -> bool:
+    """Insert one posting with (source, source_id) conflict-IGNORE.
+
+    PIPE-14b: _job_exists() is the fast path, not a concurrency control
+    — a manual hunt racing the cron worker has both runs pass the check
+    and both INSERT. The unique index (migration b5d7f9a1c3e5) is the
+    backstop; on_conflict_do_nothing turns the loser's insert into a
+    no-op instead of an IntegrityError that fails the whole batch (the
+    same reconcile-instead-of-abort posture as the match_results insert
+    in matcher_service). Both shipped dialects support it: Postgres ON
+    CONFLICT DO NOTHING, SQLite INSERT OR IGNORE. Returns True when the
+    row was actually stored, False when it lost the race.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    values = _job_values(nj)
+    dialect = db.get_bind().dialect.name
+    if dialect in ("postgresql", "sqlite"):
+        insert = pg_insert if dialect == "postgresql" else sqlite_insert
+        stmt = (
+            insert(JobPosting)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["source", "source_id"])
+        )
+        return db.execute(stmt).rowcount == 1
+
+    # Unshipped dialect: plain ORM insert — the constraint (or the
+    # pre-check) still guards, an IntegrityError just surfaces.
+    db.add(JobPosting(**values))
+    db.flush()
+    return True
 
 
 def _job_exists(db: Session, nj: NormalizedJob) -> bool:
@@ -361,8 +460,10 @@ def _job_exists(db: Session, nj: NormalizedJob) -> bool:
     key = dedupe_key_for(nj.title, nj.company, nj.location)
     exists = db.query(JobPosting.id).filter(JobPosting.dedupe_key == key).first()
     return bool(exists)
-# NOTE: autoflush is off, so same-run adds are invisible to these queries.
-# We flush each posting immediately to make same-run dedup work.
+# NOTE: autoflush is off, so same-run adds are invisible to these queries;
+# _insert_job_posting emits the INSERT immediately (and the unique
+# (source, source_id) index is the cross-run backstop), so same-run and
+# cross-run duplicates are both caught.
 
 
 def _select_sources(ctx: Optional[Dict], sources: Optional[List[str]]) -> List[str]:
