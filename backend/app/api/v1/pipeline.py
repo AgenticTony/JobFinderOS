@@ -51,11 +51,18 @@ async def run(
         user_id=user.id,
     )
 
-    # Re-read top matches with jobs joined for the response
+    # Re-read top matches with jobs joined for the response.
+    # Defense in depth (P0-1): the id list comes from the service's
+    # user-scoped query, but this re-fetch scopes by user_id TOO — an
+    # unscoped id-in re-fetch would re-open the cross-user leak if the
+    # upstream filter ever regresses.
     db.expire_all()
     top = (
         db.query(MatchResult)
-        .filter(MatchResult.id.in_(summary.get("top_matches") or [0]))
+        .filter(
+            MatchResult.id.in_(summary.get("top_matches") or [0]),
+            MatchResult.user_id == user.id,
+        )
         .order_by(MatchResult.score.desc())
         .all()
         if summary.get("top_matches")

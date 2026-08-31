@@ -157,6 +157,97 @@ class TestTwoUserIsolation:
         assert r.status_code == 404, "IDOR: A decided B's match"
 
 
+class TestHuntTopMatchesScoped:
+    """P0-1 (beta review): the hunt's top_matches query filtered only
+    decision IS NULL + job.status == 'matched' — the shared status flag
+    any user's matcher sets — so ANY user's Hunt returned the top-10
+    GLOBALLY-ranked pending matches, including other users' CV-derived AI
+    output (reasoning, matched_skills) via MatchWithJobResponse.
+
+    Two users with distinct pending matches; A presses Hunt through the
+    real route (scraping stubbed, matching off — the leak is in the read).
+    B's matches score HIGHER than A's, so under the global ranking they
+    come first: exactly the live repro where Alice's hunt returned 10/10
+    of Bob's matches."""
+
+    def test_hunt_returns_only_the_callers_matches(self, client, db, monkeypatch):
+        from types import SimpleNamespace
+
+        a_email = f"h1a-{uuid.uuid4().hex[:6]}@test.example"
+        b_email = f"h1b-{uuid.uuid4().hex[:6]}@test.example"
+        a_uid = uuid.UUID(_register(client, a_email))
+        b_uid = uuid.UUID(_register(client, b_email))
+
+        def _seed_matches(owner, tag, scores):
+            """One pending match per score on its own 'matched' job —
+            job.status is the SHARED flag, so B's matcher activity makes
+            A's jobs 'matched' too; that shared state is the trap."""
+            ids = []
+            for n, score in enumerate(scores):
+                job = JobPosting(
+                    source="manual", source_id=uuid.uuid4().hex[:8],
+                    title=f"Dev {tag} {n}", company="X",
+                    url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                )
+                db.add(job)
+                db.flush()
+                m = MatchResult(
+                    user_id=owner, job_id=job.id, score=score, tier="good_match",
+                    reasoning=f"{tag}-HUNT-REASONING-{n}",
+                    matched_skills='["' + tag.lower() + '-secret-skill"]',
+                )
+                db.add(m)
+                db.flush()
+                ids.append(m.id)
+            return ids
+
+        # B's pending matches outrank A's globally: 91-93 vs 55-60
+        b_ids = _seed_matches(b_uid, "BOB", [93, 92, 91])
+        a_ids = _seed_matches(a_uid, "ALICE", [60, 55])
+        db.commit()
+
+        # Hunt through the real route as A — scraping stubbed to a skipped
+        # run (no network), matching off (no AI spend)
+        _auth_client(client, a_email)
+        monkeypatch.setattr(
+            "app.services.pipeline.scrape_source",
+            lambda db_, source, ctx=None: SimpleNamespace(
+                source=source, status="skipped", jobs_found=0, jobs_new=0,
+                error=None,
+            ),
+        )
+        r = client.post(
+            "/api/v1/pipeline/run", json={"sources": ["arbeitnow"], "match": False}
+        )
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+
+        payload = r.json()
+        got_ids = [m["id"] for m in payload["top_matches"]]
+        leaked = sorted(set(got_ids) & set(b_ids))
+        assert not leaked, (
+            f"CROSS-USER LEAK (P0-1): A's hunt returned B's match ids {leaked} "
+            f"(full response ids: {got_ids}) — the top_matches query is not "
+            "scoped to the requesting user"
+        )
+        assert set(got_ids) == set(a_ids), (
+            f"A's hunt must return exactly A's pending matches {sorted(a_ids)}, "
+            f"got {got_ids}"
+        )
+        # The AI output derived from B's CV must not appear anywhere in
+        # A's response payload — not as a row, not as content bytes
+        blob = r.text
+        for forbidden in ("BOB-HUNT-REASONING", "bob-secret-skill"):
+            assert forbidden not in blob, (
+                f"CROSS-USER LEAK (P0-1): B's CV-derived AI output {forbidden!r} "
+                "appears in A's hunt response payload"
+            )
+        # Non-vacuous: the response DOES carry A's own content
+        assert "ALICE-HUNT-REASONING" in blob, (
+            "A's own matches did not come back — an over-broad filter would "
+            "pass the leak assertions by returning nothing"
+        )
+
+
 class TestDraftIDOR:
     def test_draft_download_blocked_for_other_user(self, client, db):
         a_email = f"da-{uuid.uuid4().hex[:6]}@test.example"
