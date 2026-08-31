@@ -268,10 +268,11 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
       rate-limit headers. Reopen only if 429s appear (contact via
       arbetsformedlingen.se APIs page). The scraper still sends the
       `api-key` header automatically if one is ever set.
-- [ ] Render dashboard: reconcile the hunt cron schedule with the
-      documented 06:00/18:00 UTC cadence — the LIVE schedule fires every
-      3h, so the API's `HUNT_TIMES_UTC` countdown lies to users (found
-      2026-08-31; the fix lands inside WO-14)
+- [ ] Render dashboard: set the jobfinderos-hunt cron schedule to
+      `0 6,18 * * *` (the live schedule fires every 3h; every repo surface
+      is already correct and CI-asserted). The ONLY remaining step of
+      WO-14 — done 2026-08-31 otherwise (cooldown, trial cap, clamp,
+      notices; see its execution record)
 - [ ] OFFSITE_BACKUP_TARGET → real target + one restore rehearsal (the
       last human step of MIG-WO0)
 - [ ] Deploy: Render (worker) + Cloudflare Pages (frontend) + Postgres.

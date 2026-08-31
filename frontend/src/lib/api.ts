@@ -246,7 +246,7 @@ export const runPipeline = async (options?: {
   return response.data;
 };
 
-export const runMatching = async (limit?: number): Promise<{ status: string }> => {
+export const runMatching = async (limit?: number): Promise<{ status: string; message?: string }> => {
   const response = await api.post(`/api/v1/matches/run${limit ? `?limit=${limit}` : ''}`);
   return response.data;
 };

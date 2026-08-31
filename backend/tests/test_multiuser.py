@@ -2324,3 +2324,30 @@ class TestSharedPoolEndpointRemoved:
         db.expire_all()
         assert db.get(JobPosting, job_id).status == "matched"
 
+
+
+class TestRouteCeilingsAgree:
+    """WO-14: both scoring routes bound at the SERVER max — the old two
+    ceilings (le=100 here, MAX on /pipeline/run) disagreed for the same
+    underlying spend. run_matching clamps structurally now, so this Query
+    bound is defence-in-depth, not the only defence."""
+
+    def test_matches_run_accepts_up_to_the_server_max(self, client):
+        from app.core.config import settings
+
+        email = f"wo14-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+
+        over_max = client.post(
+            f"/api/v1/matches/run?limit={settings.MAX_JOBS_PER_MATCH_RUN + 1}")
+        assert over_max.status_code == 422, (
+            "above the server max must always 422 — defence-in-depth holds"
+        )
+
+        under_max = client.post("/api/v1/matches/run?limit=150")
+        assert under_max.status_code in (200, 400), (
+            f"150 is under the server max ({settings.MAX_JOBS_PER_MATCH_RUN}) "
+            "and must pass validation — the two route ceilings must agree; "
+            f"got {under_max.status_code}: {under_max.text[:120]}"
+        )

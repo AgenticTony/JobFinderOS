@@ -591,6 +591,28 @@ def _select_sources(ctx: Optional[Dict], sources: Optional[List[str]]) -> List[s
     return [s for s in settings.get_scrape_sources() if s in SCRAPER_REGISTRY]
 
 
+def _recently_scraped_at(db: Session, source: str):
+    """WO-14 D1: the source's last COMPLETED run, when it finished inside
+    the manual-hunt cooldown (else None). Repeat Hunt presses cost board
+    quota, not AI — a job is scored once per user ever — so a press
+    inside the window skips the scrape and keeps matching (free)."""
+    from datetime import timedelta
+
+    run = (
+        db.query(ScrapeRun)
+        .filter(ScrapeRun.source == source, ScrapeRun.status == "completed")
+        .order_by(ScrapeRun.finished_at.desc())
+        .first()
+    )
+    if run is None or run.finished_at is None:
+        return None
+    if utc_now() - run.finished_at < timedelta(
+        minutes=settings.HUNT_SCRAPE_COOLDOWN_MINUTES
+    ):
+        return run.finished_at
+    return None
+
+
 def run_pipeline(
     sources: Optional[List[str]] = None,
     match: bool = True,
@@ -613,8 +635,30 @@ def run_pipeline(
             ctx["backfill"] = True
         # Per-user pack when onboarded; explicit request or global allow-list otherwise
         requested = _select_sources(ctx, sources)
+        # Onboarding backfill is exempt: its scope keys are NEW, so the
+        # deep fetch must run even inside the cooldown or the watermark
+        # backfill for the new scope never fires.
+        cooldown_exempt = bool(ctx and ctx.get("backfill"))
         scrape_summaries = []
         for source in requested:
+            if not cooldown_exempt:
+                last_at = _recently_scraped_at(db, source)
+                if last_at is not None:
+                    scrape_summaries.append(
+                        {
+                            "source": source,
+                            "status": "skipped_cooldown",
+                            "jobs_found": 0,
+                            "jobs_new": 0,
+                            "error": (
+                                "no new jobs since "
+                                f"{last_at.strftime('%H:%M')} UTC — sources "
+                                f"scanned within the last "
+                                f"{settings.HUNT_SCRAPE_COOLDOWN_MINUTES} min"
+                            ),
+                        }
+                    )
+                    continue
             run = scrape_source(db, source, ctx)
             scrape_summaries.append(
                 {

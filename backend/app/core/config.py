@@ -62,6 +62,26 @@ class Settings(BaseSettings):
     # as a raw SQL LIMIT placed before the gates — plausible ads aged
     # out unevaluated (the dream-job starvation bug).
     MAX_JOBS_PER_MATCH_RUN: int = 200
+    # WO-14 D1: a manual Hunt inside this window skips the SCRAPE (board
+    # quota is what repeat presses cost — a job is scored once per user
+    # ever, so matching is already free). Matching still runs; the notice
+    # tells the user when the last real scrape happened. Onboarding
+    # backfill bypasses it (new scope keys need their deep fetch). The
+    # scheduled cron path never goes through run_pipeline, so the server
+    # hunts are unaffected.
+    HUNT_SCRAPE_COOLDOWN_MINUTES: int = 45
+    # WO-14 D3 (trial gating v1 — count cap): AI EVALUATIONS per user per
+    # UTC day, enforced inside run_matching so manual AND scheduled hunts
+    # both inherit it (the 7-day × 10/day = 70-job trial economics count
+    # cron runs). Display is never capped — the money is spent before
+    # anything renders. Applies to ALL users while no plans exist (WO-16
+    # lands tiers); v2 replaces the count with a spend budget (WO-05's
+    # per-call cost table now exists — see ai_usage).
+    TRIAL_DAILY_SCORE_CAP: int = 10
+    # WO-14 D2: day 1 carries ~2.5× the daily allowance so the first
+    # session proves the product; the backlog then drips freshest-first
+    # over following days ("new matches every morning").
+    TRIAL_DAY1_SCORE_CAP: int = 25
     # Never-evaluated candidates loaded per run (newest first) for cheap
     # pre-filtering before AI evaluation.
     MATCH_CANDIDATE_WINDOW: int = 500
