@@ -6,14 +6,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_authenticated_user
 from app.core.database import get_db
 from app.core.dedupe import dedupe_key_for
+from app.core.ratelimit import enforce
 from app.crud import delete_job, get_job, list_jobs
-from app.models import JobPosting, MatchResult, User
+from app.models import JobPosting, User
 from app.schemas.common import dump_json_list
-from app.schemas.job import JobCreate, JobDetailResponse, JobResponse, JobStatusUpdate
+from app.schemas.job import JobCreate, JobDetailResponse, JobResponse
 
 router = APIRouter()
-
-VALID_STATUSES = {"new", "matched", "approved", "rejected", "dismissed", "applied"}
 
 
 @router.get("/", response_model=list[JobResponse])
@@ -44,6 +43,8 @@ async def create_manual_job(
     payload: JobCreate, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
 ):
     """Add a job manually (e.g. pasted from a site we don't scrape yet)."""
+    # P1-3: every attempt counts — the burst is the attack, valid or not
+    enforce(user.id, "job_create")
     job = JobPosting(
         source="manual",
         title=payload.title,
@@ -65,32 +66,12 @@ async def create_manual_job(
     return JobDetailResponse.from_orm_job(job)
 
 
-@router.patch("/{job_id}/status", response_model=JobResponse)
-async def update_job_status(
-    job_id: int,
-    payload: JobStatusUpdate,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_authenticated_user),
-):
-    if payload.status not in VALID_STATUSES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid status. Must be one of {sorted(VALID_STATUSES)}",
-        )
-    job = get_job(db, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if payload.status == "new" and db.query(MatchResult.id).filter(MatchResult.job_id == job.id).first():
-        # Re-queuing a matched job collides with UNIQUE(match_results.job_id)
-        raise HTTPException(
-            status_code=400,
-            detail="Job already has a match — cannot re-queue as new (delete its match first)",
-        )
-    job.status = payload.status
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-    return JobResponse.from_orm_job(job)
+# P1-4: PATCH /{job_id}/status is GONE (2026-08-30). It wrote
+# job_postings.status — a SHARED row — for every user at once: one
+# account's "dismissed" removed the job from EVERY user's matching queue
+# (matcher_service filters job.status != "dismissed" pool-wide) and the
+# re-queue guard was unscoped. The frontend never called it, and per-user
+# dismissal already lives on match_results.dismissed_reason.
 
 
 @router.delete("/{job_id}", status_code=204)

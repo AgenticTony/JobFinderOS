@@ -354,6 +354,14 @@ def _send_with_pdfs(
         )
         return
 
+    # P1-3(c): the per-account daily ceiling on employer emails — checked
+    # BEFORE any attachment work or dispatch. The shared APPLY_FROM_EMAIL
+    # domain carries every user's deliverability; one runaway account
+    # must not burn it.
+    from app.core.ratelimit import enforce
+
+    enforce(application.user_id, "send_daily")
+
     import base64
     import os
 
@@ -389,15 +397,19 @@ def _send_with_pdfs(
         from_email = (
             f"{applicant} <{settings.APPLY_FROM_EMAIL}>" if applicant else settings.APPLY_FROM_EMAIL
         )
-        email = resend.Emails.send(
-            {
-                "from": from_email,
-                "to": [application.target_email],
-                "subject": application.subject,
-                "text": draft.cover_letter or "",
-                "attachments": attachments,
-            }
-        )
+        params: dict = {
+            "from": from_email,
+            "to": [application.target_email],
+            "subject": application.subject,
+            "text": draft.cover_letter or "",
+            "attachments": attachments,
+        }
+        # P1-1: applications go out from the SHARED APPLY_FROM_EMAIL —
+        # without reply_to an employer's answer (the interview invitation)
+        # lands in the operator's inbox and never reaches the applicant.
+        if profile is not None and getattr(profile, "email", None):
+            params["reply_to"] = profile.email
+        email = resend.Emails.send(params)
         application.status = "sent"
         application.sent_at = utc_now()
         logger.info("Tailored application sent to %s (id=%s)", application.target_email, email.get("id"))

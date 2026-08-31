@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class JobCreate(BaseModel):
@@ -15,7 +15,10 @@ class JobCreate(BaseModel):
     description: Optional[str] = None
     employment_type: Optional[str] = None
     salary: Optional[str] = None
-    application_email: Optional[str] = None
+    # P1-3: this becomes application.target_email — a future EMAIL SEND
+    # TARGET. Accepted verbatim before ("not-an-email-at-all <<>>" lived
+    # in the DB), so validate at the boundary: 422 before anything runs.
+    application_email: Optional[EmailStr] = None
     application_url: Optional[str] = None
     tags: List[str] = []
     remote: bool = False
@@ -73,5 +76,6 @@ class JobDetailResponse(JobResponse):
         return cls(**base.model_dump(), description=job.description)
 
 
-class JobStatusUpdate(BaseModel):
-    status: str  # new, matched, approved, rejected, dismissed, applied
+# JobStatusUpdate was removed with PATCH /jobs/{id}/status (P1-4): it
+# mutated the SHARED job_postings.status for every user at once. Per-user
+# decisions live on match_results (decision / dismissed_reason).

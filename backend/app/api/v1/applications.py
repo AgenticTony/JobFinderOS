@@ -174,6 +174,8 @@ async def update_draft(
     user: User = Depends(get_authenticated_user),
 ):
     """Save the user's edits to the cover letter / tailored CV."""
+    # P1-3: every attempt counts, owned or not — the burst is the attack
+    enforce(user.id, "draft_update")
     draft = get_draft(db, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -201,6 +203,9 @@ async def submit(
     - browser / manual: queues manual_pending and returns the apply URL —
       the posting opens with the package ready to paste (browser-agent slot)
     """
+    # P1-3: submissions drive real employer emails from the shared sender
+    # domain — every attempt counts, valid or not
+    enforce(user.id, "draft_submit")
     if payload.method not in VALID_METHODS:
         raise HTTPException(status_code=400, detail=f"method must be one of {sorted(VALID_METHODS)}")
 
@@ -261,6 +266,8 @@ async def retry(
     application_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
 ):
     """Retry a failed email application."""
+    # P1-3: retries re-send employer emails — every attempt counts
+    enforce(user.id, "application_retry")
     application = get_application(db, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
