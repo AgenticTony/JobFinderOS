@@ -2,6 +2,7 @@
 // long-running instance for the scrape+match pipeline.
 
 import axios from 'axios';
+import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
   Application,
   ApplicationDraft,
@@ -50,9 +51,15 @@ export function logout(): void {
   if (typeof window !== 'undefined') window.location.href = '/login';
 }
 
+// OPS-1: the API lives on a Render free-tier web service that spins down
+// after idle; the first request after spin-down eats a ~1min cold start
+// (the repo's own ops verify script budgets 90s per attempt, 6 attempts).
+// A 60s timeout failed BEFORE the service finished waking, so every cold
+// visit looked like "API down". 120s lets the first GET outlast the cold
+// start instead of racing it. The slowApi pipeline timeout is untouched.
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000,
+  timeout: 120000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -62,6 +69,65 @@ const slowApi = axios.create({
   timeout: 600000,
   headers: { 'Content-Type': 'application/json' },
 });
+
+// ---------- OPS-1: retry-on-network-failure for GETs only ----------
+
+// Pure decision function for the GET retry below — exported so the logic
+// can be sanity-checked out-of-band (this repo has no JS test harness,
+// per PR #7). Kept free of axios types on purpose: callers boil the error
+// down to {method, hasResponse, code, attempt}.
+export type RetryDecisionInput = {
+  /** HTTP method of the failed request; '' treated as GET (axios default) */
+  method?: string;
+  /** true when the server actually answered (any status) — not a transport failure */
+  hasResponse: boolean;
+  /** axios error code — 'ECONNABORTED' is a timeout, 'ERR_NETWORK' a dropped/refused connection */
+  code?: string;
+  /** retries already spent on this request (0 on the original attempt) */
+  attempt: number;
+};
+
+// Transport failures worth one retry. A cold start can manifest as either
+// a timeout (request accepted, service still booting) or a reset/refused
+// connection (proxy cycling while the container starts).
+const RETRYABLE_CODES = new Set([
+  'ECONNABORTED', // axios timeout
+  'ETIMEDOUT',
+  'ERR_NETWORK', // refused/reset/unreachable — umbrella axios code
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ERR_EMPTY_RESPONSE',
+]);
+
+// Retry a failed request at most ONCE, and ONLY idempotent GETs that never
+// reached the server:
+//   - mutations (POST/PUT) NEVER retry: a retried submit/applications call
+//     could double-send an email application, and the backend has no
+//     idempotency keys; even a "safe-looking" PUT (draft save) could clobber
+//     a newer server-side write (AI re-tailoring) with stale text.
+//   - a request that got ANY response (4xx/5xx) never retries — the server
+//     answered; retrying turns a fast, honest error into a slow one.
+//   - non-transport failures (bad JSON, cancelled) have no retryable code.
+export function shouldRetryGet(info: RetryDecisionInput): boolean {
+  if (info.attempt >= 1) return false; // one retry, never two
+  const method = (info.method || 'get').toLowerCase();
+  if (method !== 'get') return false;
+  if (info.hasResponse) return false;
+  return RETRYABLE_CODES.has(info.code ?? '');
+}
+
+// Config carries its own retry count so the interceptor stays stateless.
+type RetryableConfig = InternalAxiosRequestConfig & { __jfosRetryCount?: number };
+const GET_RETRY_DELAY_MS = 500;
+
+function retryDecision(error: AxiosError, config: RetryableConfig | undefined) {
+  return shouldRetryGet({
+    method: config?.method,
+    hasResponse: error.response !== undefined,
+    code: error.code,
+    attempt: config?.__jfosRetryCount ?? 0,
+  });
+}
 
 // Attach the JWT to every request from BOTH instances, and handle expiry:
 // a 401 while a token is in storage means the session expired (or was
@@ -77,7 +143,17 @@ for (const instance of [api, slowApi]) {
   });
   instance.interceptors.response.use(
     (r) => r,
-    (error) => {
+    async (error: AxiosError) => {
+      // OPS-1 GET retry — runs BEFORE the 401 handling below because a
+      // retried request deserves the same expiry treatment on its second
+      // attempt (a transport failure has no response, so the 401 branch
+      // can't fire for it anyway).
+      const config = error.config as RetryableConfig | undefined;
+      if (config && retryDecision(error, config)) {
+        config.__jfosRetryCount = (config.__jfosRetryCount ?? 0) + 1;
+        await new Promise((resolve) => setTimeout(resolve, GET_RETRY_DELAY_MS));
+        return instance.request(config);
+      }
       if (
         error?.response?.status === 401 &&
         getAuthToken() &&
@@ -237,21 +313,47 @@ export const submitDraft = async (
 };
 
 // PDF downloads — fetched through the axios instance (Bearer token attached)
-// as blobs, then opened via object URLs. The old window.open() was a plain
-// navigation that carried no Authorization header and 401'd every time.
-async function downloadPdfBlob(path: string): Promise<void> {
-  const response = await api.get(path, { responseType: 'blob' });
+// as blobs, then handed to the browser via a programmatic <a download>
+// click. Two bugs fixed vs the old window.open(objectURL):
+//   1. Safari: window.open() called AFTER an await loses the click's user
+//      activation (consumed by the network round-trip), so Safari's popup
+//      blocker silently ate it — and the "Popup blocked" throw was
+//      unreachable dead code. An anchor click on a blob URL needs no user
+//      activation and no popup permission. Callers catch rejections and
+//      surface them through the console's error banner (FE-22).
+//   2. The anchor carries `download`, so the file saves with a real name
+//      (Content-Disposition when the server sends one, else the fallback).
+async function downloadPdfBlob(path: string, fallbackFilename: string): Promise<void> {
+  const response = await api.get<Blob>(path, { responseType: 'blob' });
+  const disposition = response.headers?.['content-disposition'];
+  const match =
+    typeof disposition === 'string' ? /filename="?([^";]+)"?/i.exec(disposition) : null;
+  const filename = match?.[1] ?? fallbackFilename;
   const url = URL.createObjectURL(response.data);
-  const window2 = window.open(url, '_blank', 'noopener');
-  // Revoke after the browser has the blob (best-effort cleanup)
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  if (!window2) throw new Error('Popup blocked — allow popups to download PDFs');
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    // Revoke after the browser has surely grabbed the blob (best-effort
+    // cleanup — too early and Safari cancels the in-flight download).
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  }
 }
 
 export const downloadDraftCoverLetterPdf = (draftId: number) =>
-  downloadPdfBlob(`/api/v1/applications/draft/${draftId}/download/cover-letter`);
+  downloadPdfBlob(
+    `/api/v1/applications/draft/${draftId}/download/cover-letter`,
+    'jobfinderos-cover-letter.pdf'
+  );
 export const downloadDraftCvPdf = (draftId: number) =>
-  downloadPdfBlob(`/api/v1/applications/draft/${draftId}/download/cv`);
+  downloadPdfBlob(
+    `/api/v1/applications/draft/${draftId}/download/cv`,
+    'jobfinderos-cv.pdf'
+  );
 
 // ---------- Settings / integrations ----------
 
