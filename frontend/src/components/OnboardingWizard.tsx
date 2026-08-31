@@ -4,7 +4,7 @@
 // country (source pack) -> region/city + remote (location filter) ->
 // AI-suggested job titles from the CV (search queries) -> confirm.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowLeft,
@@ -71,6 +71,95 @@ const MODES: { id: SearchMode; label: string; hint: string; icon: typeof Target 
   },
 ];
 
+// FE-10: minimal modal machinery for the wizard dialog — focus trap,
+// initial focus, focus restore, and scroll lock. Inline (no dependency,
+// no shared hook file yet: this is the app's only modal).
+//
+// Escape is DELIBERATELY ignored: closing the wizard discards the user's
+// unsaved picks (country, area, curated titles), and first-run mode has no
+// close affordance at all — an invisible Escape shortcut doing that would
+// be destructive without confirmation. The explicit exit paths stay: the
+// visible Close button (re-run mode) and Back navigation. A window.confirm
+// guard was considered (the P0-4 switchView pattern) but rejected: it
+// invents a confirm for a shortcut nobody asked for — the X is the
+// deliberate, visible equivalent.
+function useFocusTrap(active: boolean) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const container = ref.current;
+    if (!container) return;
+
+    // Where focus came from — restored on close so keyboard users land
+    // back on the invoking element ("Edit setup"), not the page top.
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    // Scroll lock while the modal is open (save/restore, not toggle, so
+    // nesting with any other overflow change can't corrupt body styles).
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    // Initial focus: the dialog surface itself (tabIndex=-1 below). The
+    // step heading is announced through aria-labelledby, and the next Tab
+    // lands on the first control of the current step.
+    container.focus();
+
+    // Focusables are queried at KEYDOWN time, not trapped in a closure —
+    // the wizard's steps swap their controls constantly (and a disabled
+    // Continue must drop out of the cycle the moment it disables).
+    const focusables = () =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(
+          [
+            'a[href]',
+            'button:not([disabled])',
+            'input:not([disabled])',
+            'select:not([disabled])',
+            'textarea:not([disabled])',
+            '[tabindex]:not([tabindex="-1"])',
+          ].join(', ')
+        )
+      ).filter((el) => el.getClientRects().length > 0); // visible only
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) {
+        e.preventDefault();
+        container.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const current = document.activeElement;
+      const atEdge =
+        current === container || !container.contains(current)
+          ? 'either'
+          : current === first
+            ? 'first'
+            : current === last
+              ? 'last'
+              : 'inside';
+      if (e.shiftKey && (atEdge === 'first' || atEdge === 'either')) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (atEdge === 'last' || atEdge === 'either')) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    container.addEventListener('keydown', onKeyDown);
+    return () => {
+      container.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [active]);
+  return ref;
+}
+
 export default function OnboardingWizard({
   onComplete,
   onClose,
@@ -85,6 +174,11 @@ export default function OnboardingWizard({
   initialQueries,
 }: Props) {
   const [step, setStep] = useState(0);
+  // FE-10: the wizard is a true modal — trap/restore focus + scroll lock
+  // (see useFocusTrap above). Always active: the component only mounts
+  // while the dialog is shown.
+  const dialogRef = useFocusTrap(true);
+  const titleId = useId();
   const [geo, setGeo] = useState<GeoData | null>(null);
   const [country, setCountry] = useState(initialCountry ?? '');
   const [region, setRegion] = useState(initialRegion ?? '');
@@ -280,12 +374,14 @@ export default function OnboardingWizard({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4 backdrop-blur-sm">
       <motion.div
+        ref={dialogRef}
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         role="dialog"
         aria-modal="true"
-        aria-label="Set up your job hunt"
-        className="w-full max-w-xl rounded-2xl border border-line bg-surface shadow-2xl"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="w-full max-w-xl rounded-2xl border border-line bg-surface shadow-2xl outline-none"
       >
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-line p-5">
@@ -293,7 +389,7 @@ export default function OnboardingWizard({
             <Radar className="h-5 w-5 text-signal" aria-hidden />
           </div>
           <div className="flex-1">
-            <h2 className="font-semibold text-hi">Set up your job hunt</h2>
+            <h2 id={titleId} className="font-semibold text-hi">Set up your job hunt</h2>
             <p className="text-xs text-low">Takes a minute — makes everything after it personal</p>
           </div>
           {onClose && (

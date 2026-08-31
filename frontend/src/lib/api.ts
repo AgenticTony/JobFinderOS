@@ -409,16 +409,78 @@ export const connectComposio = async (
 
 // ---------- Applications ----------
 
+// FE-12: pure planner for the job-join page-walk in getApplications —
+// exported (like shouldRetryGet above) so the batching logic can be
+// sanity-checked out-of-band; this repo has no JS test harness.
+//
+// The walk stops when:
+//   - every referenced job id is resolved (typical: newest page suffices
+//     → still exactly ONE request), or
+//   - the last page came back short (end of the job list — remaining ids
+//     reference deleted jobs and will never resolve), or
+//   - the next offset would pass maxOffset, a documented ceiling that
+//     also bounds a misbehaving server that ignores `offset` and replays
+//     the same full page forever.
+export type JoinWalkPlan = { continueWalking: boolean; nextOffset: number };
+
+export function nextJoinWalkPage(input: {
+  neededIds: ReadonlySet<number>;
+  foundIds: ReadonlySet<number>;
+  lastPageSize: number;
+  requestedLimit: number;
+  offset: number;
+  maxOffset: number;
+}): JoinWalkPlan {
+  for (const id of input.neededIds) {
+    if (!input.foundIds.has(id)) {
+      // Still missing at least one id — continue unless the list ended or
+      // the walk ceiling was reached.
+      const next = input.offset + input.lastPageSize;
+      if (input.lastPageSize < input.requestedLimit || next > input.maxOffset) {
+        return { continueWalking: false, nextOffset: input.offset };
+      }
+      return { continueWalking: true, nextOffset: next };
+    }
+  }
+  return { continueWalking: false, nextOffset: input.offset };
+}
+
+// The applications response carries only job_id (ApplicationResponse has
+// no job summary), so titles/companies are joined client-side. The jobs
+// endpoint (backend/app/api/v1/jobs.py) offers NO id filter and caps
+// `limit` at 500 — the old single `?limit=500` fetch silently missed
+// every job past the first 500, degrading the sent list to "Job #id"
+// once the pool grew. Below, pages of 500 are walked via `offset` until
+// every referenced id resolves (or the list ends), so the join is
+// complete regardless of pool size — no backend change needed.
+const JOB_JOIN_PAGE_SIZE = 500; // must match the endpoint's `le=500` cap
+const JOB_JOIN_MAX_WALKED = 10_000; // 20 pages — ceiling, see nextJoinWalkPage
+
 export const getApplications = async (): Promise<(Application & { job?: Job })[]> => {
   const response = await api.get<Application[]>('/api/v1/applications/');
   const applications = response.data;
-  // Join job info client-side for display
-  if (applications.length > 0) {
-    const jobs = await api.get<Job[]>('/api/v1/jobs/', { params: { limit: 500 } });
-    const jobMap = new Map(jobs.data.map((j) => [j.id, j]));
-    return applications.map((a) => ({ ...a, job: jobMap.get(a.job_id) }));
+  if (applications.length === 0) return applications;
+
+  const neededIds = new Set(applications.map((a) => a.job_id));
+  const jobMap = new Map<number, Job>();
+  for (let offset = 0; ; ) {
+    const page = await api.get<Job[]>('/api/v1/jobs/', {
+      params: { limit: JOB_JOIN_PAGE_SIZE, offset },
+    });
+    for (const j of page.data) jobMap.set(j.id, j);
+    const foundIds = new Set([...neededIds].filter((id) => jobMap.has(id)));
+    const plan = nextJoinWalkPage({
+      neededIds,
+      foundIds,
+      lastPageSize: page.data.length,
+      requestedLimit: JOB_JOIN_PAGE_SIZE,
+      offset,
+      maxOffset: JOB_JOIN_MAX_WALKED,
+    });
+    if (!plan.continueWalking) break;
+    offset = plan.nextOffset;
   }
-  return applications;
+  return applications.map((a) => ({ ...a, job: jobMap.get(a.job_id) }));
 };
 
 export const retryApplication = async (applicationId: number): Promise<Application> => {
