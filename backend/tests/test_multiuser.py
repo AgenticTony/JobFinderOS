@@ -2030,10 +2030,14 @@ class TestRetryIdempotence:
         )
         assert sends["n"] == 1, f"the send path ran {sends['n']} times"
 
-        # And the draft itself is no longer submittable either
+        # And the draft itself is no longer submittable either. 409, not
+        # the old 400: submit now distinguishes CONFLICT with the draft's
+        # state (already submitted / another dispatch holds it — the
+        # SUBMIT double-send fix) from an invalid package ("not ready",
+        # still 400). Either way nothing may be re-sent.
         r = client.post(f"/api/v1/applications/draft/{draft_id}/submit",
                         json={"method": "browser"})
-        assert r.status_code == 400, (
+        assert r.status_code == 409, (
             f"submit after successful retry returned {r.status_code} — the "
             "draft must be locked like any submitted one (P1-2)"
         )

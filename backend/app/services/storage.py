@@ -128,13 +128,22 @@ def get_storage() -> StorageBackend:
     return LocalStorage()
 
 
-def read_original_cv(profile) -> bytes | None:
-    """Original CV bytes through the storage backend, or None if unavailable.
-    Storage-aware: works for local paths AND remote object keys."""
-    if not profile or not profile.cv_file_path:
+def read_cv_at_path(key: str | None) -> bytes | None:
+    """CV bytes at an explicit storage key — a draft's snapshot path
+    (P1-5b) — or None if unavailable. Storage-aware: local paths and
+    remote object keys alike."""
+    if not key:
         return None
     try:
-        return get_storage().read(profile.cv_file_path)
+        return get_storage().read(key)
     except Exception as e:  # noqa: BLE001 — missing CV must never kill a send
-        logger.warning("Could not read original CV (%s): %s", profile.cv_file_path, e)
+        logger.warning("Could not read original CV (%s): %s", key, e)
         return None
+
+
+def read_original_cv(profile) -> bytes | None:
+    """Original CV bytes for a PROFILE (its current path), or None if
+    unavailable. Storage-aware: works for local paths AND remote object keys."""
+    if not profile or not profile.cv_file_path:
+        return None
+    return read_cv_at_path(profile.cv_file_path)

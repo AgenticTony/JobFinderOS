@@ -87,7 +87,16 @@ class Settings(BaseSettings):
 
     # Auth (fastapi-users) — generate with: python -c "import secrets; print(secrets.token_urlsafe(48))"
     AUTH_SECRET: str = "dev-insecure-secret-change-me"
-    AUTH_TOKEN_LIFETIME_SECONDS: int = 3600 * 24 * 7  # 7 days
+    # P1-7: was 7 days with NO revocation — a leaked token outlived a
+    # password change. Tokens are now version-pinned (users.token_version,
+    # bumped on password change -> 401 on every outstanding token), which
+    # is the actual revocation fix. Lifetime is 72h as defense in depth:
+    # it halves the stale-token exposure window for the "token stolen,
+    # owner unaware" case without forcing daily logins — the frontend
+    # keeps the JWT in localStorage with no refresh flow, so 24h would
+    # log every user out once a day, and any 401 already redirects to
+    # /login cleanly (frontend/src/lib/api.ts interceptors).
+    AUTH_TOKEN_LIFETIME_SECONDS: int = 3600 * 24 * 3  # 3 days
 
     # Per-IP auth throttles (P0-3/P1-8, live-confirmed): the email/account
     # auth buckets are keyed by ATTACKER-CHOSEN strings, so distinct-email

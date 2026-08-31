@@ -38,7 +38,25 @@ async def delete_account(
     if not user:
         raise HTTPException(status_code=404, detail="Account not found")
     profile = get_active_profile(db, user_id=uid)
-    cv_path = profile.cv_file_path if profile else None
+
+    # P1-5a: EVERY CV object of this user must go — the profile's current
+    # path AND every distinct draft snapshot path. Drafts keep their
+    # snapshot file alive past a re-upload (their package still needs its
+    # original CV); collecting them BEFORE the rows are deleted is what
+    # makes erasure complete instead of orphan-permitting.
+    cv_paths = set()
+    if profile and profile.cv_file_path:
+        cv_paths.add(profile.cv_file_path)
+    for (snap,) in (
+        db.query(ApplicationDraft.cv_file_path)
+        .filter(
+            ApplicationDraft.user_id == uid,
+            ApplicationDraft.cv_file_path.isnot(None),
+        )
+        .distinct()
+        .all()
+    ):
+        cv_paths.add(snap)
 
     # DELETE ORDER MATTERS (P0-2, live-confirmed): applications reference
     # drafts AND matches (draft_id, match_id), drafts reference matches
@@ -70,13 +88,15 @@ async def delete_account(
     # Goes through the storage backend, so it works for local paths AND
     # remote object keys (the os.path.exists version silently skipped
     # Supabase keys, leaving the CV in the bucket after "erasure").
+    # Every collected path is attempted — one failure must not skip the
+    # rest of the user's PII files.
     from app.services.storage import get_storage
 
     deleted_files = 0
-    if cv_path:
+    for cv_path in sorted(p for p in cv_paths if p):
         try:
             if get_storage().delete(cv_path):
-                deleted_files = 1
+                deleted_files += 1
         except Exception:
             logger.warning("GDPR delete: CV removal failed for %s", cv_path)
 

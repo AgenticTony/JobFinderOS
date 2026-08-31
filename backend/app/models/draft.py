@@ -37,7 +37,19 @@ class ApplicationDraft(Base):
     tailored_cv = Column(Text, nullable=True)  # Restructured CV text for THIS job
     changes_summary = Column(Text, nullable=True)  # What the AI changed and why ("you" voice)
 
-    # Lifecycle: drafting -> ready -> submitted | failed (retryable)
+    # P1-5b: the CV this package was tailored FROM, snapshotted at draft
+    # creation. profile.cv_file_path moves on re-upload; a package guarded
+    # against CV-old must send CV-old as its "original CV" — an
+    # old-tailored package with CV-new attached is internally
+    # contradictory. NULL on legacy rows -> the send path falls back to
+    # the profile's current path (the previous behavior).
+    cv_file_path = Column(String(500), nullable=True)
+    cv_hash = Column(String(64), nullable=True)  # sha256 of profile.cv_text at tailoring time
+
+    # Lifecycle: drafting -> ready -> sending -> submitted | failed -> ready
+    # ('sending' is the transient dispatch claim taken by submit_draft —
+    # see draft_service; a crashed dispatch is recovered by the
+    # maintenance sweep, never by a second send)
     status = Column(String(20), default="drafting", nullable=False)
     error = Column(Text, nullable=True)
 

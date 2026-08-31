@@ -26,8 +26,14 @@ config.set_main_option("sqlalchemy.url", _url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+# disable_existing_loggers=False (the default True) is load-bearing: by the
+# time alembic runs inside the app (init_db at boot, the TestClient lifespan
+# in tests) every app.* logger already exists, and fileConfig's default
+# DISABLES them — the entire application went silent after the first
+# migration run (P1-5a's mandated cleanup warning was one of the swallowed
+# ones; nothing from app.* reached stdout/stderr or caplog).
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # JobFinderOS models — importing the package registers every table
 from app import models  # noqa: E402, F401

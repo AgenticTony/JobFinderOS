@@ -11,12 +11,16 @@ profile.cv_text and the stored PDF are read-only inputs here. Tailoring
 always writes to THIS draft's cover_letter / tailored_cv columns, one row
 per job. The original CV stays the permanent reference for every future
 match and every future draft, and is attached unmodified alongside the
-tailored documents when sending.
+tailored documents when sending — the DRAFT'S SNAPSHOT of the CV path
+(P1-5b), not the profile's current path, so a re-upload mid-review can
+never pair old-tailored documents with a brand-new CV.
 """
 
+import hashlib
 import logging
 from typing import List, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -47,6 +51,12 @@ DRAFT_DIR = "uploads/drafts"
 
 class DraftError(Exception):
     """Raised when a draft cannot be created or submitted."""
+
+
+class DraftConflictError(DraftError):
+    """Another dispatch owns the draft's submission ('sending' claim held,
+    or an application already exists). The caller's package is FINE — the
+    route maps this to 409, not 400."""
 
 
 def get_draft(db: Session, draft_id: int) -> Optional[ApplicationDraft]:
@@ -112,6 +122,17 @@ def create_draft_for_job(
     )
     draft.status = "drafting"
     draft.error = None
+    # P1-5b: snapshot the CV reference this tailoring runs against. The
+    # profile's path moves on re-upload; without the snapshot the send
+    # path cannot know which CV the package was built from, and a
+    # CV-old-tailored package emails CV-new as its "original CV".
+    # Refreshed on every (re)generation — the package now being built IS
+    # against the current CV. The early-return reuse of an untouched
+    # 'ready' draft above keeps its original snapshot (package unchanged).
+    draft.cv_file_path = profile.cv_file_path
+    draft.cv_hash = hashlib.sha256(
+        (profile.cv_text or "").encode("utf-8")
+    ).hexdigest()
     db.add(draft)
     db.commit()
 
@@ -277,11 +298,40 @@ def submit_draft(
                Resend when the job published an application email
     - browser / manual: queues as manual_pending with the apply URL; the UI
                opens the posting with the package ready to paste
+
+    SUBMIT (double-send window): the ready->sending claim below is a
+    conditional UPDATE — the rowcount is the verdict, the same atomic
+    pattern as claim_hunt. Two rapid submits both read 'ready', but only
+    ONE transition wins; the loser gets DraftConflictError (409 at the
+    route) BEFORE any email is dispatched. The partial unique index on
+    applications(draft_id) is the DB backstop for anything the claim
+    cannot see.
     """
     if draft.status == "submitted":
-        raise DraftError("This application was already submitted")
+        raise DraftConflictError("This application was already submitted")
+    if draft.status == "sending":
+        raise DraftConflictError("This application is already being submitted")
     if draft.status != "ready" or not draft.cover_letter:
         raise DraftError("Draft is not ready — prepare or fix it first")
+
+    # Atomic claim: exactly one caller moves this row ready -> sending.
+    # (In-memory status above is only a fast path — it can be stale in the
+    # racing session; the UPDATE's WHERE clause cannot.)
+    from sqlalchemy import update
+
+    claimed = db.execute(
+        update(ApplicationDraft)
+        .where(ApplicationDraft.id == draft.id, ApplicationDraft.status == "ready")
+        .values(status="sending")
+    )
+    db.commit()
+    if claimed.rowcount != 1:
+        db.rollback()
+        db.refresh(draft)
+        if draft.status == "submitted":
+            # the other dispatch already finished
+            raise DraftConflictError("This application was already submitted")
+        raise DraftConflictError("This application is already being submitted")
 
     job: JobPosting = draft.job
     if job is None:
@@ -299,25 +349,58 @@ def submit_draft(
         method = "browser"
 
     applicant = profile.full_name if profile else None
-    application = Application(
-        user_id=user_id if user_id is not None else draft.user_id,
-        job_id=job.id,
-        match_id=draft.match_id,
-        draft_id=draft.id,
-        method=method,
-        status="queued",
-        subject=f"Application: {job.title}" + (f" — {applicant}" if applicant else ""),
-        body=draft.cover_letter,
-        target_email=target_email,
-        apply_url=apply_url,
-    )
-    db.add(application)
-    db.flush()
+    subject = f"Application: {job.title}" + (f" — {applicant}" if applicant else "")
 
-    if method == "email":
-        _send_with_pdfs(db, application, draft, job, profile)
-    else:
-        application.status = "manual_pending"
+    # One application row per draft (unique index). A FAILED application
+    # leaves the draft 'ready'; resubmitting REUSES that row — a fresh
+    # insert would trip the constraint, and a duplicate history for one
+    # reviewed package is a lie anyway.
+    application = (
+        db.query(Application).filter(Application.draft_id == draft.id).first()
+    )
+    if application is not None and application.status != "failed":
+        _release_send_claim(db, draft, status="submitted")
+        raise DraftConflictError("This application was already submitted")
+    if application is None:
+        application = Application(
+            user_id=user_id if user_id is not None else draft.user_id,
+            job_id=job.id,
+            match_id=draft.match_id,
+            draft_id=draft.id,
+        )
+        db.add(application)
+    application.method = method
+    application.status = "queued"
+    application.error = None
+    application.subject = subject
+    application.body = draft.cover_letter
+    application.target_email = target_email
+    application.apply_url = apply_url
+    try:
+        db.flush()
+    except IntegrityError:
+        # The unique(draft_id) backstop fired: another dispatch won the
+        # race (its claim preceded ours in a path the conditional UPDATE
+        # could not observe). Nothing of ours was sent — the INSERT is the
+        # first write of this attempt.
+        db.rollback()
+        db.refresh(draft)
+        raise DraftConflictError("This application was already submitted")
+
+    try:
+        if method == "email":
+            _send_with_pdfs(db, application, draft, job, profile)
+        else:
+            application.status = "manual_pending"
+    except Exception:
+        # _send_with_pdfs swallows its own failures onto the application
+        # row; anything raised PAST it must not strand the 'sending'
+        # claim (the sweep is the last resort, not the plan).
+        db.rollback()
+        draft.status = "ready"
+        db.add(draft)
+        db.commit()
+        raise
 
     # State follows the outcome: a FAILED email send leaves the draft
     # editable, so "Finish applying" still shows it. Applied-ness is DERIVED
@@ -331,6 +414,14 @@ def submit_draft(
     db.commit()
     db.refresh(application)
     return application
+
+
+def _release_send_claim(db: Session, draft: ApplicationDraft, *, status: str) -> None:
+    """Leave the draft in a truthful state when a submit aborts after the
+    claim (never leave 'sending' behind on a path we control)."""
+    draft.status = status
+    db.add(draft)
+    db.commit()
 
 
 def _send_with_pdfs(
@@ -381,14 +472,22 @@ def _send_with_pdfs(
                 {"filename": filename, "content": base64.b64encode(blob).decode("utf-8")}
             )
 
-        # Also attach the original CV PDF when available (storage-aware)
-        from app.services.storage import read_original_cv
+        # Also attach the original CV PDF when available (storage-aware).
+        # P1-5b: the DRAFT's snapshot decides which CV is "original" — this
+        # package was tailored against THAT file. Reading the profile's
+        # CURRENT path here is how a re-upload mid-review produced
+        # CV-old-tailored documents mailed with CV-new attached. Legacy
+        # drafts (NULL snapshot) fall back to the current path.
+        from app.services.storage import read_cv_at_path
 
-        original_cv = read_original_cv(profile)
+        original_cv_path = draft.cv_file_path or (
+            profile.cv_file_path if profile else None
+        )
+        original_cv = read_cv_at_path(original_cv_path)
         if original_cv:
             attachments.append(
                 {
-                    "filename": profile.cv_file_name or "CV.pdf",
+                    "filename": (profile.cv_file_name if profile else None) or "CV.pdf",
                     "content": base64.b64encode(original_cv).decode("utf-8"),
                 }
             )
