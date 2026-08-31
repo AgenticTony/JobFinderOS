@@ -205,6 +205,71 @@ def run_matching(
         lock.release()
 
 
+def ai_scored_today(db: Session, user_id) -> int:
+    """WO-14 D3: this user's AI EVALUATIONS today (UTC). Cheap-gate
+    dismissals (duplicate / excluded_keyword / no_description) write
+    match rows but spend no AI — only real evaluations count, which is
+    exactly what the cap bounds."""
+
+    from sqlalchemy import or_
+
+    from app.core.timeutil import utc_now
+
+    day_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        db.query(MatchResult)
+        .filter(
+            MatchResult.user_id == user_id,
+            MatchResult.created_at >= day_start,
+            or_(
+                MatchResult.decision.is_(None),
+                MatchResult.dismissed_reason == "below_threshold",
+            ),
+        )
+        .count()
+    )
+
+
+def daily_score_allowance(db: Session, user_id) -> int:
+    """WO-14 D2: the day-1 allowance is boosted (~2.5×) so the first
+    session proves the product; later days settle to the standard cap.
+    'Day 1' = no scoring history yet, or the first-ever row is under 24h
+    old — the whole first day runs on the boosted budget."""
+    from datetime import timedelta
+
+    from sqlalchemy import func
+
+    from app.core.timeutil import utc_now
+
+    first = (
+        db.query(func.min(MatchResult.created_at))
+        .filter(MatchResult.user_id == user_id)
+        .scalar()
+    )
+    if first is None or (utc_now() - first) < timedelta(hours=24):
+        return settings.TRIAL_DAY1_SCORE_CAP
+    return settings.TRIAL_DAILY_SCORE_CAP
+
+
+def daily_scoring_state(db: Session, user_id):
+    """Public pair for the route-level synchronous pre-check: the user's
+    (scored_today, allowance) so a capped manual run gets an immediate
+    clear message instead of a silent background no-op."""
+    return ai_scored_today(db, user_id), daily_score_allowance(db, user_id)
+
+
+def _daily_cap_summary(scored, allowance, jobs_considered=0, matches_created=0) -> Dict:
+    return {
+        "status": "daily_cap_reached",
+        "jobs_considered": jobs_considered,
+        "matches_created": matches_created,
+        "error": (
+            f"Daily scoring limit reached — {scored} of {allowance} jobs "
+            f"scored today (trial cap). New jobs score on tomorrow's hunt."
+        ),
+    }
+
+
 def _run_matching_inner(
     db: Session,
     limit: int = None,
@@ -237,7 +302,34 @@ def _run_matching_inner(
     # original design applied this limit to the raw SQL, so plausible ads
     # starved behind junk until the 30-day sweep dismissed them
     # unevaluated (the dream-job starvation bug).
-    limit = limit or settings.MAX_JOBS_PER_MATCH_RUN
+    # WO-14 gap fix: the clamp lives IN the service, so every caller —
+    # route, worker, script, the next one anyone writes — inherits the
+    # bound. Route schemas stay as defence-in-depth, not the only
+    # defence (the Layer-0 principle this codebase applies to tenancy,
+    # applied to spend).
+    limit = min(
+        limit or settings.MAX_JOBS_PER_MATCH_RUN,
+        settings.MAX_JOBS_PER_MATCH_RUN,
+    )
+
+    # WO-14 D3: the daily trial cap binds on AI EVALUATIONS, here in the
+    # service so manual AND scheduled hunts inherit it. Checked before
+    # the candidate query: a capped user costs one COUNT, nothing else,
+    # and gets a clear message instead of a silent empty queue.
+    scored_today = ai_scored_today(db, user_id)
+    allowance = daily_score_allowance(db, user_id)
+    remaining = allowance - scored_today
+    if remaining <= 0:
+        logger.info(
+            "Daily scoring cap: user %s at %d/%d — run returned without "
+            "spending", user_id, scored_today, allowance,
+        )
+        return _daily_cap_summary(scored_today, allowance)
+    spend_limit = min(limit, remaining)
+    # Whether the DAILY cap (not the per-run cap) is the binding
+    # constraint — decides the final summary status so a capped user is
+    # told, not left with a silently short run.
+    daily_binding = remaining <= limit
 
     # Per-user: jobs THIS user has never evaluated (no match row for
     # (user, job)). NEWEST FIRST (user decision, 2026-08-30): continuous
@@ -279,7 +371,9 @@ def _run_matching_inner(
     try:
         return _run_matching_loop(
             db, unmatched, profile, user_id,
-            limit=limit, max_seconds=max_seconds,
+            limit=spend_limit, max_seconds=max_seconds,
+            daily_binding=daily_binding,
+            scored_today=scored_today, allowance=allowance,
         )
     finally:
         _mark_matching_done(user_id)
@@ -377,7 +471,8 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages):
 
 
 def _run_matching_loop(
-    db, unmatched, profile, user_id, *, limit, max_seconds
+    db, unmatched, profile, user_id, *, limit, max_seconds,
+    daily_binding=False, scored_today=0, allowance=0,
 ) -> Dict:
     """The evaluation loop proper. Called with the per-user running mark
     already set (AI-14) — returns the summary dict, aborts early when
@@ -591,6 +686,13 @@ def _run_matching_loop(
             continue
 
     logger.info("Matching run: %d jobs considered, %d matches created", len(unmatched), matches_created)
+    if daily_binding and evaluated >= limit:
+        # The DAILY trial cap was the binding constraint — say so, with
+        # this run's real counts (jobs may still have matched today).
+        return _daily_cap_summary(
+            scored_today + evaluated, allowance,
+            jobs_considered=len(unmatched), matches_created=matches_created,
+        )
     return {
         "status": "completed",
         "jobs_considered": len(unmatched),

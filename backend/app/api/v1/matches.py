@@ -77,17 +77,36 @@ async def decide(
 @router.post("/run")
 async def run_matching(
     background: BackgroundTasks,
-    limit: int | None = Query(None, ge=1, le=100),
+    # WO-14: both scoring routes bound at the SERVER max — the two old
+    # ceilings (100 here, MAX on /pipeline/run) disagreed for the same
+    # underlying spend. run_matching now clamps structurally too, so
+    # this Query bound is defence-in-depth, not the only defence.
+    limit: int | None = Query(None, ge=1, le=settings.MAX_JOBS_PER_MATCH_RUN),
     db: Session = Depends(get_db),
     user: User = Depends(get_authenticated_user),
 ):
     """
     Run AI matching of unmatched jobs against the active profile.
     Runs in the background; poll GET /matches/ for results.
+
+    WO-14 D3: a user already at their daily scoring cap gets the message
+    HERE, synchronously — a background no-op would look like a silent
+    empty queue.
     """
     from app.core.database import SessionLocal
     from app.services import matcher_service as svc
     from app.services.cv_service import get_active_profile
+
+    enforce(user.id, 'match_run')
+    if not get_active_profile(db, user_id=user.id):
+        raise HTTPException(status_code=400, detail="Upload a CV before running matching")
+
+    scored, allowance = svc.daily_scoring_state(db, user.id)
+    if scored >= allowance:
+        return {
+            "status": "daily_cap_reached",
+            "message": svc._daily_cap_summary(scored, allowance)["error"],
+        }
 
     def _task():
         task_db = SessionLocal()
@@ -109,10 +128,6 @@ async def run_matching(
             logger.info("Background matching finished: %s", summary)
         finally:
             task_db.close()
-
-    enforce(user.id, 'match_run')
-    if not get_active_profile(db, user_id=user.id):
-        raise HTTPException(status_code=400, detail="Upload a CV before running matching")
 
     background.add_task(_task)
     return {"status": "started", "message": "Matching running in background — refresh matches shortly"}

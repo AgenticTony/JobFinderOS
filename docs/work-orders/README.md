@@ -43,8 +43,7 @@ bare "WO3" in either document until this is settled** — always qualify it as
 
 | # | Work order | Pri | Depends on | Status | Why now |
 |---|---|---|---|---|---|
-| **WO-14** | Hunt cadence + trial gating | P1 | — | **NEXT UP** | Trial CAC $5.88 → $1.00 by capping *scoring* (not display) at 10/day. Keeps the Hunt button; makes repeat presses a free no-op. Also records the `run_matching` service-clamp gap. **2026-08-31 finding:** the LIVE cron fires every 3h while render.yaml, the runbook and `HUNT_TIMES_UTC` all say 06:00/18:00 — the dashboard's next-hunt countdown lies; reconciling the dashboard schedule belongs inside this WO |
-| **WO-10** | Mount email verification + password reset | P2 | — | open | Routers written, never mounted. Beta users forget passwords; without this the only answer is a support channel |
+| **WO-10** | Mount email verification + password reset | P2 | — | **NEXT UP** | Routers written, never mounted. Beta users forget passwords; without this the only answer is a support channel |
 | **WO-13** | Billing + tax posture (Paddle as Merchant of Record) | P1 | WO-07 ✅ | open | Decided. UK has a **zero** VAT threshold for non-established sellers, so a two-country launch means two registrations from the first sale — an MoR removes both. ~54% margin, ~6–7 user break-even |
 | **WO-15** | Career-site discovery (self-expanding employer boards) | P2 | WO-06 ✅ | open | Replaces the deleted slug-scraper with a mechanism that finds employer career feeds from Platsbanken application_urls (verified 2026-08-27: 79% carry one, custom-domain /jobs.json probes 4/4). Direct-from-employer inventory competitors don't have; vendor-neutral (Teamtailor JSON Feed now, Greenhouse/Lever later). ToS gate before shipping |
 | **WO-16** | Pricing + plan design (€24.99 / €59.97 quarterly) | P1 | WO-13, WO-14 | blocked | Decided. The category's weak point is **billing trust**, not features — AIApply has an F BBB rating over credits-on-top, LazyApply 2.1 over ignored refunds, Sonara auto-renews a €2.95 trial to €23.95. Clean billing is a free differentiator. Owns the price; WO-13 owns the tax posture |
@@ -86,6 +85,14 @@ Nothing here is to be redone — this is the record of what shipped.
 - **WO-08** strip dead surface — 2026-08-27.
 - **WO-09** re-score the legacy backlog — 2026-08-31: 241/243 rows on the
   current prompt version; 2 stragglers noted in CLAUDE.md open items.
+- **WO-14** hunt cadence + trial gating — 2026-08-31: 45-min scrape
+  cooldown (repeat Hunt = free no-op, backfill exempt), daily scoring cap
+  10/day with a 25-job day-1 boost enforced INSIDE run_matching (manual
+  and scheduled hunts both inherit it), clear capped/cooldown notices in
+  the UI, run_matching clamps its own limit, both route ceilings at the
+  server max. 369-test suite, red-first. ONE dashboard-only step remains:
+  set the live Render cron to the render.yaml schedule (`0 6,18 * * *`)
+  — see the WO's execution record.
 - **WO-11** drop asyncpg; unify on psycopg3 — 2026-08-27.
 - **WO-12** Postgres connection path decision — 2026-08-27.
 

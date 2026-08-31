@@ -291,7 +291,23 @@ export default function Home() {
       const result = await runPipeline({ match: false, backfill });
       setPipelineResult(result);
       // 2) Kick AI matching into the background and stream results via polling
-      await runMatching();
+      const mr = await runMatching();
+      if (mr?.status === 'daily_cap_reached' && mr.message) {
+        // WO-14: capped for today — a clear notice beats a silent empty
+        // queue (and polling would never produce anything new).
+        setMatchPolling(false);
+        setPipelineResult({
+          ...result,
+          match: {
+            status: 'notice',
+            jobs_considered: 0,
+            matches_created: 0,
+            error: mr.message,
+          },
+        });
+        await refresh();
+        return;
+      }
       setMatchPolling(true);
       await refresh();
     } catch (err) {
@@ -804,6 +820,23 @@ function DashboardView({
             {matchFailed && pipelineResult?.match?.error && (
               <Warning>Last hunt failed: {pipelineResult.match.error}</Warning>
             )}
+            {/* WO-14: informational hunt notices — the daily trial cap and
+                the scrape cooldown ("no new jobs since HH:MM") are honest
+                "nothing to do right now" states, not failures, so they get
+                this amber status line rather than the red failure banner. */}
+            {(pipelineResult?.match?.status === 'notice' && pipelineResult.match.error) ||
+              (pipelineResult?.scrape?.length &&
+                pipelineResult.scrape.every((s) => s.status === 'skipped_cooldown') &&
+                pipelineResult.scrape[0].error) ? (
+              <div
+                className="rounded-lg border border-signal/30 bg-signal/10 p-3 text-sm text-hi"
+                role="status"
+              >
+                {pipelineResult?.match?.status === 'notice'
+                  ? pipelineResult.match.error
+                  : pipelineResult?.scrape?.[0]?.error}
+              </div>
+            ) : null}
             {/* Email-apply config is deliberately NOT banner-warned: the platform's
                 email path is Composio connected-email (see CLAUDE.md decided
                 architecture), and the draft card already shows a precise error at

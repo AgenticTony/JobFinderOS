@@ -1,6 +1,8 @@
 # WO-14 — Hunt cadence and trial gating
 
-> Priority: P1 · Depends on: nothing for v1 (WO-05 for v2) · Status: not started
+> Priority: P1 · Depends on: nothing for v1 (WO-05 for v2) ·
+> **Status: DONE 2026-08-31** (see Execution record; one dashboard-only
+> human step remains, recorded below)
 > Related: WO-13 (billing), ARCHITECTURE "Stack verification"
 
 ## The finding that shapes this
@@ -111,14 +113,64 @@ tenancy, applied to spend.
 
 ## Acceptance criteria
 
-- [ ] Repeat Hunt within the cooldown performs **no scrape**, returns the
+- [x] Repeat Hunt within the cooldown performs **no scrape**, returns the
       last-scrape timestamp, and is asserted by a test counting scraper calls
-- [ ] First-hunt backlog is staggered; day 1 allowance is larger than
-      subsequent days
-- [ ] Trial cap is enforced on **AI calls made**, proven by a test that counts
-      calls — not by counting rendered cards
-- [ ] A trial user at their daily cap gets a clear message, not a silent empty
-      queue
-- [ ] `run_matching` clamps its own limit; a test calls it directly with an
-      absurd value and asserts the bound holds
-- [ ] The two route ceilings agree
+      — `TestRepeatHuntCooldown` (counted `JobtechScraper.fetch` calls;
+      second press leaves the counter untouched, summary carries
+      `skipped_cooldown` + "no new jobs since HH:MM UTC"; backfill exempt)
+- [x] First-hunt backlog is staggered; day 1 allowance is larger than
+      subsequent days — `TRIAL_DAY1_SCORE_CAP=25` vs `TRIAL_DAILY_SCORE_CAP=10`
+      (asserted in `test_day1_allowance_is_larger_and_binds`: 40 candidates,
+      exactly 25 scored, backlog drips freshest-first over following days)
+- [x] Trial cap is enforced on **AI calls made**, proven by a test that counts
+      calls — the cap counts AI-scored rows only (cheap-gate dismissals
+      excluded), lives INSIDE `run_matching` so manual and scheduled hunts
+      both inherit it, and `_fake_ai` counts the actual evaluations
+- [x] A trial user at their daily cap gets a clear message, not a silent empty
+      queue — service returns `status=daily_cap_reached` + message;
+      `/matches/run` short-circuits synchronously with the same message; the
+      UI shows it as an amber status notice (not the red failure banner)
+- [x] `run_matching` clamps its own limit; a test calls it directly with an
+      absurd value and asserts the bound holds —
+      `test_absurd_limit_is_clamped_structurally` (limit=99999 with
+      MAX=3 → ≤3 evaluations)
+- [x] The two route ceilings agree — both bound at
+      `MAX_JOBS_PER_MATCH_RUN` (was `le=100` on `/matches/run`);
+      `TestRouteCeilingsAgree` proves 150 passes validation and MAX+1 422s
+
+## Execution record (2026-08-31)
+
+- Config: `HUNT_SCRAPE_COOLDOWN_MINUTES=45`, `TRIAL_DAILY_SCORE_CAP=10`,
+  `TRIAL_DAY1_SCORE_CAP=25` — the cap applies to ALL users while no plans
+  exist (WO-16 lands tiers); v2's old blocker is GONE (WO-05's per-call
+  cost table shipped as `ai_usage`), so the spend-budget upgrade is
+  unblocked whenever wanted.
+- Tests: `tests/test_wo14_hunt_gating.py` (+ one class in
+  `test_multiuser.py` for the route boundary, using that module's proven
+  client harness). Written RED first per the queue's rule 2 — all five
+  behaviors failed against the pre-change code, then green: 369 passed /
+  2 skipped suite-wide.
+- Day-1 semantics: a user is on the boosted allowance while they have no
+  scoring history or their first-ever row is under 24h old.
+- Cap counts AI evaluations only (`decision IS NULL OR
+  dismissed_reason='below_threshold'` today, UTC) — duplicate/keyword/
+  no-description dismissals write rows but spend no AI.
+
+## Hunt cadence reconciliation (the 2026-08-31 live finding)
+
+Measured: the LIVE cron fired at 00:00, 03:00, 06:00, 09:00, 12:00 UTC
+(every 3h) while every repo surface says twice daily. Official docs
+(render.com/docs/cronjobs): schedules are standard five-field cron, **UTC
+mandatory**, one active run at a time; blueprint `schedule` is applied to
+the existing service on sync (render.com/docs/blueprint-spec — fields not
+flagged immutable are updated per sync).
+
+Repo state is CORRECT and mutually consistent (CI-enforced):
+`render.yaml` `schedule: "0 6,18 * * *"` ⇔ `HUNT_TIMES_UTC: "06:00,18:00"`
+⇔ runbook WO-07 — only the live dashboard's schedule is wrong, which also
+makes the dashboard's next-hunt countdown lie to users.
+
+**The one remaining step (owner, dashboard-only — no repo change):** set
+the `jobfinderos-hunt` cron's schedule in the Render dashboard to
+`0 6,18 * * *` (or trigger a blueprint sync, which reapplies render.yaml).
+Until then the product is CORRECT but hunts 8× more often than designed.
