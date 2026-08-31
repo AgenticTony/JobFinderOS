@@ -66,6 +66,7 @@ import {
   getAuthToken,
   getIntegrations,
 } from '@/lib/api';
+import { installGlobalErrorReporter, UNHANDLED_ERROR_EVENT } from '@/lib/globalErrorReporter';
 import type { IntegrationsStatus } from '@/types';
 
 export default function Home() {
@@ -81,6 +82,16 @@ export default function Home() {
   const [pipelineResult, setPipelineResult] = useState<PipelineRunResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
+  // FE-21: the console-level error surface — the same banner pattern the
+  // per-card submit/retry errors use (Warning + bad tokens). Mutating
+  // actions that used to reject silently (approve/reject, prepare,
+  // onboarding finish, and anything that slips past a catch via the
+  // unhandledrejection bridge) route their message here.
+  const [actionError, setActionError] = useState<string | null>(null);
+  // FE-23: set when a full refresh couldn't reach the API — distinguishes
+  // "couldn't load" from "loaded, zero items" so the console never renders
+  // healthy-but-empty during an outage.
+  const [loadFailed, setLoadFailed] = useState(false);
   // P0-4 draft-editor cache: typed cover letters/CVs must survive ANY view
   // switch. The keyed <motion.div> below remounts the whole view subtree on
   // every view/sub-tab change (the transition animation depends on the key),
@@ -134,6 +145,19 @@ export default function Home() {
       return next;
     });
 
+  // FE-21: bridge global unhandled promise rejections into the same
+  // actionError banner the explicit catches use — one error surface, so
+  // a forgotten await can never again die as console-only noise while
+  // the UI spins or does nothing.
+  useEffect(() => {
+    installGlobalErrorReporter();
+    const onUnhandled = (e: Event) => {
+      setActionError(`Something failed: ${(e as CustomEvent<string>).detail}`);
+    };
+    window.addEventListener(UNHANDLED_ERROR_EVENT, onUnhandled);
+    return () => window.removeEventListener(UNHANDLED_ERROR_EVENT, onUnhandled);
+  }, []);
+
   // P0-4: leaving a view with unsaved draft edits must be a deliberate
   // act, never a silent loss. window.confirm matches this codebase's
   // weight class (the design system has no dialog component yet). OK
@@ -179,16 +203,31 @@ export default function Home() {
     if (statusRes.status === 'fulfilled') setStatus(statusRes.value);
     if (profileRes.status === 'fulfilled') setProfile(profileRes.value);
     if (pipeRes.status === 'fulfilled') setPipeStatus(pipeRes.value);
-    const [matchRes, draftRes, appsRes] = await Promise.all([
-      getMatches({ limit: 200 }).catch(() => []),
-      getDrafts().catch(() => []),
-      getApplications().catch(() => []),
+    // FE-23: the old `.catch(() => [])` mapped an unreachable API to empty
+    // lists, so an outage rendered as a healthy-but-empty console whose
+    // empty states invited a quota-spending hunt to "fix" it. allSettled
+    // keeps the failure signal: keep whatever loads, but say so.
+    const [matchRes, draftRes, appsRes] = await Promise.allSettled([
+      getMatches({ limit: 200 }),
+      getDrafts(),
+      getApplications(),
     ]);
-    setMatches(matchRes);
-    setDrafts(draftRes);
-    setApplications(appsRes);
+    setMatches(matchRes.status === 'fulfilled' ? matchRes.value : []);
+    setDrafts(draftRes.status === 'fulfilled' ? draftRes.value : []);
+    setApplications(appsRes.status === 'fulfilled' ? appsRes.value : []);
+    const anyListFailed =
+      matchRes.status === 'rejected' || draftRes.status === 'rejected' || appsRes.status === 'rejected';
+    setLoadFailed(anyListFailed);
     setLoading(false);
   }, []);
+
+  // FE-23: the banner's Retry — a fresh full load with the honest loading
+  // state, not a silent background refetch.
+  const retryLoad = useCallback(() => {
+    setLoading(true);
+    setLoadFailed(false);
+    refresh();
+  }, [refresh]);
 
   useEffect(() => {
     refresh();
@@ -279,21 +318,49 @@ export default function Home() {
   }, [profile?.onboarded]);
 
   const handleOnboardingComplete = async (payload: OnboardingPayload) => {
-    await saveOnboarding(payload);
+    setActionError(null);
+    try {
+      await saveOnboarding(payload);
+    } catch (err) {
+      // FE-21: route to the console banner AND rethrow — the wizard modal
+      // covers the whole screen, so its own catch (OnboardingWizard finish)
+      // shows the inline copy the user actually sees; that catch HANDLES
+      // this rethrow, so it never becomes an unhandled rejection. The
+      // wizard stays open: the user's picks are not lost.
+      setActionError(`Couldn't save your setup: ${apiErrorMessage(err)}`);
+      throw err;
+    }
     setShowWizard(false);
     await refresh();
     handleRunPipeline(true); // first targeted run: deep backfill, straight away
   };
 
   const handleDecision = async (matchId: number, decision: 'approved' | 'rejected') => {
-    await decideMatch(matchId, decision);
-    await refresh();
+    setActionError(null);
+    try {
+      await decideMatch(matchId, decision);
+      await refresh();
+    } catch (err) {
+      // FE-21: on a cold-starting free-tier backend this rejection was the
+      // norm, and the button just did nothing. Surface it in the banner.
+      setActionError(
+        `Couldn't record your ${decision === 'approved' ? 'approval' : 'rejection'}: ${apiErrorMessage(err)}`
+      );
+    }
   };
 
   const handlePrepare = async (jobId: number) => {
-    await prepareDraft(jobId); // tailors CV + cover letter (~5-20s)
-    switchView('apps-review'); // take the user straight to the review stage
-    await refresh();
+    setActionError(null);
+    try {
+      await prepareDraft(jobId); // tailors CV + cover letter (~5-20s)
+      switchView('apps-review'); // take the user straight to the review stage
+      await refresh();
+    } catch (err) {
+      // Stay on the current view (switchView above only runs on success,
+      // and its P0-4 dirty-confirm is untouched) — dropping the user on an
+      // empty review page after a failed prepare would read as data loss.
+      setActionError(`Couldn't prepare the application: ${apiErrorMessage(err)}`);
+    }
   };
 
   const preparedJobIds = new Set(
@@ -339,6 +406,12 @@ export default function Home() {
   );
 
   const huntsAutomated = huntsAreAutomated(pipeStatus);
+  // FE-23: nothing survived the load — if the load ALSO failed, render
+  // only the failure banner. The empty-state copy ("Hunt now to…")
+  // assumes a working backend; during an outage it invites a
+  // quota-spending hunt to "fix" a problem the user cannot fix.
+  const nothingLoaded =
+    matches.length === 0 && drafts.length === 0 && applications.length === 0 && status === null;
 
   if (!sessionKnown) {
     return <div className="console-backdrop min-h-dvh bg-ink" />;
@@ -407,8 +480,21 @@ export default function Home() {
               <div className="flex items-center justify-center py-24 text-low">
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Warming up the console…
               </div>
+            ) : loadFailed && nothingLoaded ? (
+              <LoadFailure onRetry={retryLoad} />
             ) : (
-              <motion.div
+              <>
+                {loadFailed && (
+                  <div className="mb-6">
+                    <LoadFailure onRetry={retryLoad} />
+                  </div>
+                )}
+                {actionError && (
+                  <div className="mb-6" role="alert">
+                    <Warning>{actionError}</Warning>
+                  </div>
+                )}
+                <motion.div
                 key={view}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -472,7 +558,8 @@ export default function Home() {
                     onEditSetup={() => setShowWizard(true)}
                   />
                 )}
-              </motion.div>
+                </motion.div>
+              </>
             )}
           </div>
         </main>
@@ -1000,8 +1087,21 @@ function SentApplicationCard({
   onChanged: () => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // FE-22: download failures used to vanish into .catch(console.error) —
+  // the user clicked "PDF" and nothing happened. Same inline-error
+  // pattern as the retry button next to it.
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const a = application;
   const hasDocuments = Boolean(draft && (draft.cover_letter || draft.tailored_cv));
+
+  const download = async (run: () => Promise<void>) => {
+    setDownloadError(null);
+    try {
+      await run();
+    } catch (err) {
+      setDownloadError(apiErrorMessage(err));
+    }
+  };
 
   return (
     <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
@@ -1066,6 +1166,11 @@ function SentApplicationCard({
             className="overflow-hidden border-t border-line"
           >
             <div className="space-y-4 p-4">
+              {downloadError && (
+                <p className="rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
+                  {downloadError}
+                </p>
+              )}
               {draft.cover_letter && (
                 <div>
                   <div className="mb-1.5 flex items-center justify-between">
@@ -1074,7 +1179,7 @@ function SentApplicationCard({
                     </p>
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={() => downloadDraftCoverLetterPdf(draft.id).catch(console.error)}
+                        onClick={() => download(() => downloadDraftCoverLetterPdf(draft.id))}
                         className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                       >
                         <Download className="h-3.5 w-3.5" /> PDF
@@ -1093,7 +1198,7 @@ function SentApplicationCard({
                       CV sent
                     </p>
                     <button
-                      onClick={() => downloadDraftCvPdf(draft.id).catch(console.error)}
+                      onClick={() => download(() => downloadDraftCvPdf(draft.id))}
                       className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                     >
                       <Download className="h-3.5 w-3.5" /> PDF
@@ -1181,6 +1286,12 @@ function DraftCard({
       await updateDraft(draft.id, draftSavePayload(draft, edits));
       onClearEdits();
       await onChanged();
+    } catch (err) {
+      // FE-21: a failed save used to reject through the onClick into an
+      // unhandled rejection. The edits cache stays intact (P0-4): the
+      // "unsaved" badge remains and nothing typed is lost — only the
+      // error panel appears, same surface submit uses.
+      setSubmitError(apiErrorMessage(err));
     } finally {
       setBusy(null);
     }
@@ -1213,16 +1324,24 @@ function DraftCard({
     await navigator.clipboard.writeText(coverLetter);
   };
 
-  // Downloads always reflect saved content — flush pending edits first
+  // Downloads always reflect saved content — flush pending edits first.
+  // FE-21/FE-22: failures (API down mid-flush, blob hand-off refused)
+  // surface in the card's error panel instead of dying as unhandled
+  // rejections while the click silently does nothing.
   const download = async (kind: 'cover-letter' | 'cv') => {
-    if (dirty) {
-      await updateDraft(draft.id, draftSavePayload(draft, edits));
-      onClearEdits();
-    }
-    if (kind === 'cover-letter') {
-      await downloadDraftCoverLetterPdf(draft.id);
-    } else {
-      await downloadDraftCvPdf(draft.id);
+    setSubmitError(null);
+    try {
+      if (dirty) {
+        await updateDraft(draft.id, draftSavePayload(draft, edits));
+        onClearEdits();
+      }
+      if (kind === 'cover-letter') {
+        await downloadDraftCoverLetterPdf(draft.id);
+      } else {
+        await downloadDraftCvPdf(draft.id);
+      }
+    } catch (err) {
+      setSubmitError(apiErrorMessage(err));
     }
   };
 
@@ -1429,6 +1548,10 @@ function ProfileView({
   onEditSetup: () => void;
 }) {
   const [saving, setSaving] = useState(false);
+  // FE-21: profile save used to reject through the onClick silently —
+  // the button spun down and the inputs looked saved. Same panel pattern
+  // as DraftCard's submitError.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [preferredRoles, setPreferredRoles] = useState('');
   const [excludeKeywords, setExcludeKeywords] = useState('');
   const [fullName, setFullName] = useState('');
@@ -1450,6 +1573,7 @@ function ProfileView({
 
   const save = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
       await updateProfile({
         preferred_roles: preferredRoles.split(',').map((s) => s.trim()).filter(Boolean),
@@ -1460,6 +1584,10 @@ function ProfileView({
       });
       prefsDirty.current = false;
       await onSaved();
+    } catch (err) {
+      // Keep prefsDirty true: the pristine-sync effect must not clobber
+      // the user's unsaved input with the stale server profile.
+      setSaveError(apiErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -1619,6 +1747,11 @@ function ProfileView({
             >
               {saving ? 'Saving…' : 'Save preferences'}
             </button>
+            {saveError && (
+              <p className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
+                {saveError}
+              </p>
+            )}
           </div>
         </>
       )}
@@ -1727,6 +1860,35 @@ function Warning({ children }: { children: React.ReactNode }) {
     <div className="flex items-start gap-2 rounded-lg border border-bad/30 bg-bad/10 p-3 text-sm text-hi" role="alert">
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-bad" />
       <div>{children}</div>
+    </div>
+  );
+}
+
+// FE-23: the API is unreachable — say THAT, and offer the one action that
+// can help (retrying the load). Same visual language as Warning (bad
+// tokens + AlertTriangle) with a Retry that re-runs the full initial
+// refresh, including the honest loading state.
+function LoadFailure({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-bad/30 bg-bad/10 p-4"
+      role="alert"
+    >
+      <div className="flex items-start gap-2 text-sm text-hi">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-bad" />
+        <div>
+          Couldn&apos;t reach the server — your lists may be missing or stale.
+          <span className="mt-0.5 block text-xs text-low">
+            The backend may still be waking up (up to a minute after idle on the free plan).
+          </span>
+        </div>
+      </div>
+      <button
+        onClick={onRetry}
+        className="shrink-0 rounded-lg bg-signal px-3 py-1.5 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98]"
+      >
+        Retry
+      </button>
     </div>
   );
 }

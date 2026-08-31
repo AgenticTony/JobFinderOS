@@ -21,7 +21,7 @@ import {
   Target,
   X,
 } from 'lucide-react';
-import { getGeo, suggestQueries } from '@/lib/api';
+import { apiErrorMessage, getGeo, suggestQueries } from '@/lib/api';
 import type { GeoData, OnboardingPayload, OccupationSuggestion, SearchMode } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -123,6 +123,11 @@ export default function OnboardingWizard({
   const [customInput, setCustomInput] = useState('');
   const [loadingQueries, setLoadingQueries] = useState(false);
   const [saving, setSaving] = useState(false);
+  // FE-21: a failed save-on-finish used to reject through the button into
+  // an unhandled rejection — the spinner stopped and nothing else happened.
+  // The wizard is a fullscreen modal, so the console's error banner behind
+  // it is invisible: the error must show IN here.
+  const [finishError, setFinishError] = useState<string | null>(null);
 
   useEffect(() => {
     getGeo().then(setGeo).catch(() => setGeo(null));
@@ -247,6 +252,7 @@ export default function OnboardingWizard({
 
   const finish = async () => {
     setSaving(true);
+    setFinishError(null);
     try {
       await onComplete({
         country,
@@ -260,6 +266,12 @@ export default function OnboardingWizard({
         occupation_codes: [...occSelected],
         languages,
       });
+    } catch (err) {
+      // FE-21: keep the wizard open with the user's picks intact; show
+      // the failure inline (same panel pattern as the console's submit
+      // errors). This also HANDLES the parent's rethrow — see
+      // handleOnboardingComplete in app/page.tsx.
+      setFinishError(apiErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -755,6 +767,12 @@ export default function OnboardingWizard({
             </motion.div>
           </AnimatePresence>
         </div>
+
+        {finishError && (
+          <p className="mx-4 mt-2 rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
+            Couldn&apos;t save your setup — nothing was lost, try again: {finishError}
+          </p>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-line p-4">
