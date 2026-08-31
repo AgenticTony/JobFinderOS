@@ -103,6 +103,10 @@ class JobtechScraper(BaseScraper):
     def fetch(self, context: Optional[dict] = None) -> List[NormalizedJob]:
         jobs: List[NormalizedJob] = []
         seen: set = set()
+        # PIPE-17: this instance starts each fetch healthy; the first
+        # page error below degrades it. scrape_source reads the flag
+        # after fetch() to decide whether the delta watermark may move.
+        self.fetch_complete = True
 
         headers = {"accept": "application/json"}
         if settings.JOBTECH_API_KEY:
@@ -187,6 +191,12 @@ class JobtechScraper(BaseScraper):
                     response.raise_for_status()
                     data = response.json()
                 except Exception as e:
+                    # PIPE-17: this unit's walk ends EARLY on a fetch
+                    # error — the pages after it were never read. Mark
+                    # the whole fetch partial so the pipeline holds the
+                    # watermark; the next run re-reads the gap and the
+                    # dedupe eats the overlap (DELTA_OVERLAP_HOURS).
+                    self.fetch_complete = False
                     logger.warning(
                         "[jobtech] unit %s=%r page %d failed: %s",
                         unit_kind, unit_value, page, e,

@@ -60,10 +60,10 @@ async def run(
     # claim TTL, and a crashed holder self-heals after the TTL.
     lock_db = SessionLocal()
     try:
-        claimed = claim_hunt(lock_db)
+        claim_token = claim_hunt(lock_db)
     finally:
         lock_db.close()
-    if not claimed:
+    if not claim_token:
         raise HTTPException(
             status_code=409,
             detail="A hunt is already running (scheduled or manual). "
@@ -80,11 +80,13 @@ async def run(
             user_id=user.id,
         )
     finally:
-        # ALWAYS released (the worker's rule): a leaked claim is a
-        # 45-minute silent hunt outage.
+        # ALWAYS released BY ITS OWNER (the worker's rule; PIPE-18 —
+        # release is keyed on the claim's owner token, so a TTL-stolen
+        # claim is never freed by its overrunner): a leaked claim is a
+        # silent hunt outage for a full claim TTL.
         release_db = SessionLocal()
         try:
-            release_hunt(release_db)
+            release_hunt(release_db, claim_token)
         finally:
             release_db.close()
 
@@ -117,7 +119,9 @@ async def run(
 async def status(
     db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
 ):
-    """Dashboard readiness: source list, stats, recent scrape runs, live match flag."""
+    """Dashboard readiness: source list, stats, recent scrape runs, live
+    match flag (the CALLER's — AI-14: a global flag told every user
+    "matching in progress" whenever ANY user matched)."""
     from app.services.matcher_service import is_matching_running
     from app.services.scheduler import get_next_run_time, next_run_from_fixed_times
 
@@ -137,7 +141,7 @@ async def status(
         "scheduler_enabled": hunts_automated,
         "scrape_interval_minutes": settings.SCRAPE_INTERVAL_MINUTES,
         "next_run_at": next_run.isoformat() if next_run else None,
-        "matching_running": is_matching_running(),
+        "matching_running": is_matching_running(user_id=user.id),
         "stats": get_stats(db, user_id=user.id),
         "recent_runs": [
             {

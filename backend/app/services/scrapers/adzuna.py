@@ -104,6 +104,10 @@ class AdzunaScraper(BaseScraper):
                     response = self._get_with_retry(BASE_URL.format(country=cc, page=page), params)
                     data = response.json()
                 except Exception as e:
+                    # PIPE-17: this page was never read — mark the fetch
+                    # partial so a watermark (if this source ever joins
+                    # DELTA_SOURCES) is held for the next run.
+                    self.fetch_complete = False
                     logger.warning("[adzuna] search %r page %d failed: %s", what, page, e)
                     continue
 
