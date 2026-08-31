@@ -61,14 +61,19 @@ def delete_job(db: Session, job_id: int, *, user_id) -> bool:
     job = get_job(db, job_id)
     if not job:
         return False
-    db.query(MatchResult).filter(
-        MatchResult.job_id == job_id, MatchResult.user_id == user_id
-    ).delete(synchronize_session=False)
+    # Children first (P0-2): applications reference drafts AND matches
+    # (draft_id, match_id), drafts reference matches (match_id). Those FKs
+    # are NOT DEFERRABLE with no ON DELETE action, so deleting matches
+    # before their dependents raised IntegrityError on Postgres —
+    # DELETE /jobs/{id} 500'd for any drafted or applied job.
     db.query(Application).filter(
         Application.job_id == job_id, Application.user_id == user_id
     ).delete(synchronize_session=False)
     db.query(ApplicationDraft).filter(
         ApplicationDraft.job_id == job_id, ApplicationDraft.user_id == user_id
+    ).delete(synchronize_session=False)
+    db.query(MatchResult).filter(
+        MatchResult.job_id == job_id, MatchResult.user_id == user_id
     ).delete(synchronize_session=False)
     db.flush()  # make this user's removals visible to the reference checks
 

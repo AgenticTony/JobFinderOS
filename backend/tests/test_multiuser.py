@@ -5,6 +5,7 @@ per-user matching. Runs on throwaway SQLite via TestClient — no network.
 
 import os
 import uuid
+from pathlib import Path
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.core.database import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import (  # noqa: E402
+    AIUsage,
     Application,
     ApplicationDraft,
     JobPosting,
@@ -347,6 +349,253 @@ class TestGDPR:
         # Token is dead after erasure
         r = client.get("/api/v1/users/me")
         assert r.status_code == 401
+
+
+class TestGDPRErasureFKChain:
+    """P0-2 (beta review, LIVE-confirmed): erasure deleted matches BEFORE
+    drafts/applications. application_drafts.match_id, applications.match_id
+    and applications.draft_id are NOT-DEFERRABLE FKs with no ON DELETE
+    action, so on Postgres DELETE /account/delete 500'd with an
+    IntegrityError and the rollback kept EVERY personal row — for exactly
+    the users who had drafted or applied.
+
+    The old erasure fixture seeded NULL match_id/draft_id, which is exactly
+    why the suite never caught it. This test builds the REAL chain with
+    every FK set; on Postgres the constraint is what makes it fail loudly,
+    and on SQLite (no FK enforcement) the row-count assertions still verify
+    the delete covers every table including ai_usage."""
+
+    def _seed_chain(self, client, db, tag):
+        email = f"{tag}-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+
+        job = JobPosting(
+            source="manual", source_id=uuid.uuid4().hex[:8],
+            title="Dev", company="X", url=f"https://x/{uuid.uuid4().hex[:6]}",
+            status="matched",
+        )
+        db.add(job)
+        db.flush()
+        match = MatchResult(user_id=uid, job_id=job.id, score=88,
+                            tier="excellent_match", decision="approved")
+        db.add(match)
+        db.flush()
+        # The real chain: draft -> match, application -> match AND draft.
+        # NULL FKs (what the old fixture seeded) never trip the constraint.
+        draft = ApplicationDraft(
+            user_id=uid, job_id=job.id, match_id=match.id,
+            cover_letter=f"{tag} cover letter", tailored_cv=f"{tag} tailored cv",
+            changes_summary="[]", status="ready",
+        )
+        db.add(draft)
+        db.flush()
+        db.add(Application(
+            user_id=uid, job_id=job.id, match_id=match.id, draft_id=draft.id,
+            method="email", status="sent", subject=f"{tag} subject",
+            body=f"{tag} body", target_email="boss@acme.example",
+        ))
+        # ai_usage: user-linked telemetry (no FK) — erasure must take it too
+        db.add(AIUsage(user_id=uid, kind="tailor", model="glm-test",
+                       prompt_tokens=10, completion_tokens=5))
+        db.commit()
+        return email, uid, job
+
+    def test_erasure_commits_on_full_fk_chain(self, client, db):
+        from app.models import User as UserModel
+
+        _, uid, job = self._seed_chain(client, db, "gdfk")
+
+        r = client.delete("/api/v1/account/delete")
+        assert r.status_code == 200, (
+            f"erasure returned {r.status_code}: {r.text[:300]} — the FK "
+            "chain (draft.match_id / application.match_id / "
+            "application.draft_id) is breaking the delete transaction"
+        )
+
+        assert db.query(UserModel).filter(UserModel.id == uid).count() == 0
+        assert db.query(Profile).filter(Profile.user_id == uid).count() == 0
+        assert db.query(MatchResult).filter(MatchResult.user_id == uid).count() == 0
+        assert db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).count() == 0
+        assert db.query(Application).filter(Application.user_id == uid).count() == 0
+        assert db.query(AIUsage).filter(AIUsage.user_id == uid).count() == 0, (
+            "ai_usage rows for the erased user survived — usage telemetry "
+            "is user-linked and must go with the account"
+        )
+        # the shared scraped posting itself is not personal data — it stays
+        assert db.query(JobPosting).filter(JobPosting.id == job.id).count() == 1
+
+    def test_erasure_deletes_the_cv_file(self, client, db):
+        """The CV bytes must go with the account, through the storage
+        backend (local path or remote object key)."""
+        from app.services.storage import get_storage
+
+        email = f"gdcv-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        key = get_storage().save(
+            f"gdpr-cv-{uuid.uuid4().hex[:8]}.pdf", b"%PDF-1.4 erasure cv",
+            "application/pdf",
+        )
+        profile = db.query(Profile).filter(Profile.user_id == uid).first()
+        profile.cv_file_path = key
+        db.commit()
+        try:
+            r = client.delete("/api/v1/account/delete")
+            assert r.status_code == 200, r.text
+            assert not Path(key).exists(), (
+                f"CV file {key} outlived erasure — storage deletion must "
+                "go through the storage backend (local paths AND keys)"
+            )
+        finally:
+            if Path(key).exists():
+                Path(key).unlink()
+
+    def test_failed_erasure_never_destroys_the_cv_file(self, client, db, monkeypatch):
+        """Ordering regression (part of the live repro): the CV file was
+        deleted from storage BEFORE the transaction committed, so when the
+        DB deletes failed the user kept all their rows AND lost their CV.
+        File removal must happen only after a successful commit — a
+        rolled-back erasure leaves both the rows and the file intact."""
+        from sqlalchemy.orm import Session as OrmSession
+
+        from app.services.storage import get_storage
+
+        email = f"gdtx-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        key = get_storage().save(
+            f"gdpr-tx-{uuid.uuid4().hex[:8]}.pdf", b"%PDF-1.4 tx cv",
+            "application/pdf",
+        )
+        profile = db.query(Profile).filter(Profile.user_id == uid).first()
+        profile.cv_file_path = key
+        db.commit()
+
+        def boom(self):
+            raise RuntimeError("simulated commit failure")
+
+        # SYNC Session only — fastapi-users auth runs on the async session,
+        # so this trips exactly the route's own db.commit()
+        monkeypatch.setattr(OrmSession, "commit", boom)
+        try:
+            with pytest.raises(RuntimeError):
+                client.delete("/api/v1/account/delete")
+
+            assert Path(key).exists(), (
+                "CV file was destroyed by an erasure that NEVER COMMITTED "
+                "— storage deletion must run after db.commit()"
+            )
+            # nothing was erased: the transaction rolled back entirely
+            assert db.query(Profile).filter(Profile.user_id == uid).count() == 1
+        finally:
+            monkeypatch.undo()
+            db.rollback()
+            if Path(key).exists():
+                Path(key).unlink()
+
+
+class TestGDPRExportCompleteness:
+    """P1-6: portability covers the user's OWN content. Drafts' cover
+    letters / tailored CVs and applications' subject/body/target_email were
+    missing from the export payload — the exact documents the user wrote or
+    approved are the core of a data export."""
+
+    def test_export_contains_draft_and_application_content(self, client, db):
+        email = f"gdx-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+
+        job = JobPosting(
+            source="manual", source_id=uuid.uuid4().hex[:8],
+            title="Dev", company="X", url=f"https://x/{uuid.uuid4().hex[:6]}",
+            status="matched",
+        )
+        db.add(job)
+        db.flush()
+        db.add(ApplicationDraft(
+            user_id=uid, job_id=job.id,
+            cover_letter="P1-6 cover letter", tailored_cv="P1-6 tailored cv",
+            changes_summary="[]", status="ready",
+        ))
+        db.add(Application(
+            user_id=uid, job_id=job.id, method="email", status="sent",
+            subject="P1-6 subject", body="P1-6 body",
+            target_email="boss@acme.example",
+        ))
+        db.commit()
+
+        r = client.get("/api/v1/account/export")
+        assert r.status_code == 200, r.text
+        payload = r.json()
+
+        drafts = payload.get("drafts")
+        assert drafts, "export payload has no drafts section"
+        d = drafts[0]
+        assert d["cover_letter"] == "P1-6 cover letter", (
+            f"draft cover_letter missing from export: {d}"
+        )
+        assert d["tailored_cv"] == "P1-6 tailored cv", (
+            f"draft tailored_cv missing from export: {d}"
+        )
+
+        apps = payload["applications"]
+        assert apps, "export payload has no applications section"
+        a = apps[0]
+        expected = {
+            "subject": "P1-6 subject",
+            "body": "P1-6 body",
+            "target_email": "boss@acme.example",
+        }
+        for field, value in expected.items():
+            assert a.get(field) == value, (
+                f"application {field} missing/wrong in export: {a}"
+            )
+
+
+class TestDeleteJobFKChain:
+    """P0-2's sibling: delete_job() removed matches before drafts and
+    applications — the same NOT-DEFERRABLE FKs made DELETE /jobs/{id} 500
+    for any job that had been drafted or applied to."""
+
+    def test_delete_job_with_drafted_applied_chain(self, client, db):
+        email = f"djf-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+
+        job = JobPosting(
+            source="manual", source_id=uuid.uuid4().hex[:8],
+            title="Dev", company="X", url=f"https://x/{uuid.uuid4().hex[:6]}",
+            status="matched",
+        )
+        db.add(job)
+        db.flush()
+        match = MatchResult(user_id=uid, job_id=job.id, score=75,
+                            tier="good_match")
+        db.add(match)
+        db.flush()
+        draft = ApplicationDraft(user_id=uid, job_id=job.id, match_id=match.id,
+                                 cover_letter="x", tailored_cv="y",
+                                 changes_summary="[]", status="ready")
+        db.add(draft)
+        db.flush()
+        db.add(Application(user_id=uid, job_id=job.id, match_id=match.id,
+                           draft_id=draft.id, method="browser",
+                           status="manual_pending"))
+        db.commit()
+
+        r = client.delete(f"/api/v1/jobs/{job.id}")
+        assert r.status_code == 204, (
+            f"job delete returned {r.status_code}: {r.text[:300]} — the FK "
+            "chain (draft.match_id / application.match_id / "
+            "application.draft_id) is breaking the delete transaction"
+        )
+
+        assert db.query(MatchResult).filter(MatchResult.user_id == uid).count() == 0
+        assert db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).count() == 0
+        assert db.query(Application).filter(Application.user_id == uid).count() == 0
+        # no other user references the posting — the shared row goes too
+        assert db.query(JobPosting).filter(JobPosting.id == job.id).count() == 0
 
 
 class TestPerUserMatching:
