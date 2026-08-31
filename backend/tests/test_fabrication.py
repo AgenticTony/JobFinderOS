@@ -121,9 +121,11 @@ def test_real_tailoring_produces_zero_unsupported_claims():
         layer_a_high_total += len(high)
 
         # Layer B: the judge — a FRESH call with no tailoring context
+        # Judge, uncapped (2026-08-31) — mirrors production judge_fabrication:
+        # the judge must see at least what the generator saw.
         judge_user = (
-            f"## SOURCE CV\n{cv_text[:9000]}\n\n"
-            f"## TAILORED DOCUMENT\n{tailored[:9000]}\n\n"
+            f"## SOURCE CV\n{cv_text}\n\n"
+            f"## TAILORED DOCUMENT\n{tailored}\n\n"
             "List every unsupported claim."
         )
         verdict = svc._parse_json(svc._complete(JUDGE_SYSTEM, judge_user))
