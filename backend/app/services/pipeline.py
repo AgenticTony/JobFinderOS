@@ -370,12 +370,24 @@ def _finalize_run(db: Session, run: ScrapeRun) -> None:
     jobs were committed and the run row stayed 'running' until the 2h
     stale-run sweep. Roll back, retry the terminal write once; if even
     that fails, log it — the sweep is the last resort."""
+    # Snapshot BEFORE the first commit attempt: if that commit hits the
+    # poisoned session, the rollback expires `run` and the in-memory
+    # terminal status is gone with it (see the retry below).
+    _intended_status = run.status
     try:
         run.finished_at = utc_now()
         db.commit()
     except Exception:
         db.rollback()
+        # The rollback above also discarded any UN-committed attribute
+        # change on `run` — including the terminal status scrape_source
+        # set right before the session was poisoned (Postgres aborts the
+        # whole transaction on a failed statement; a pending-rollback
+        # first commit then loses it). Re-assert the captured status or
+        # the retry below stamps finished_at onto a row still 'running'
+        # — exactly the stuck-run outcome this belt exists to close.
         try:
+            run.status = _intended_status
             run.finished_at = utc_now()
             db.commit()
         except Exception as e:  # noqa: BLE001 — nothing left to try
@@ -420,6 +432,15 @@ def _insert_job_posting(db: Session, nj: NormalizedJob) -> bool:
     in matcher_service). Both shipped dialects support it: Postgres ON
     CONFLICT DO NOTHING, SQLite INSERT OR IGNORE. Returns True when the
     row was actually stored, False when it lost the race.
+
+    "Actually stored" is read from RETURNING, never from rowcount: on
+    psycopg3 CursorResult.rowcount for INSERT .. ON CONFLICT DO NOTHING
+    is -1 (the driver does not populate it for this shape), which made
+    every ingest — fresh row or lost race — count as "not stored" on
+    the production backend, zeroing ScrapeRun.jobs_new. SQLite's driver
+    does populate rowcount, so the SQLite leg hid it. RETURNING id is
+    populated by both backends: a stored row yields one, a skipped
+    insert yields none.
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -432,8 +453,9 @@ def _insert_job_posting(db: Session, nj: NormalizedJob) -> bool:
             insert(JobPosting)
             .values(**values)
             .on_conflict_do_nothing(index_elements=["source", "source_id"])
+            .returning(JobPosting.id)
         )
-        return db.execute(stmt).rowcount == 1
+        return db.execute(stmt).first() is not None
 
     # Unshipped dialect: plain ORM insert — the constraint (or the
     # pre-check) still guards, an IntegrityError just surfaces.
