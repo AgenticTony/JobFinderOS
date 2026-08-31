@@ -16,7 +16,7 @@ fpdf2>=2.7.9
 # Phase 0: auth, migrations, storage
 fastapi-users[sqlalchemy]>=15.0.5
 alembic>=1.19.1
-aiosqlite>=0.21
+aiosqlite>=0.22.1
 psycopg[binary]>=3.3.4
 sentry-sdk>=2.0
 
