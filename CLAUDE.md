@@ -72,6 +72,12 @@ drop_all() in test fixtures will destroy production data if the binding
 drifts. This happened once (recovered from backup); the conftest makes
 it structurally impossible now.
 
+### 9. End of session: sync the brain
+After committing, run the 3-command checklist in
+"End-of-session brain sync" near the bottom of this file (`gbrain sync`,
+`gbrain import docs`, re-capture edited root/config files). The brain is
+a snapshot — it only knows what has been synced.
+
 ## What this is
 
 **JobFinderOS** — an operating system for job hunting. The job-seeker inversion of
@@ -85,6 +91,9 @@ scope (Sweden + UK) for multi-user testing later.
 **Full TalentHive reference index:** `docs/TALENTHIVE_INDEX.md` (file-by-file map of the
 foundation, including how the GLM screening engine works).
 
+**This repo's own full index:** `docs/PROJECT_INDEX.md` (file-by-file map of backend /
+frontend / ops / docs, verified stats, and a findings ledger; indexed 2026-08-30).
+
 ## Stack & run commands
 
 - **Backend:** FastAPI + SQLAlchemy 2 + SQLite→Postgres (`backend/jobfinderos.db`), Python 3.12, pydantic v2
@@ -95,7 +104,7 @@ foundation, including how the GLM screening engine works).
   - Run: `cd frontend && npm run dev` → http://localhost:3000
   - Type-check: `npx tsc --noEmit --noUnusedLocals --noUnusedParameters`
 - **Tests:** `cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`
-  - All 352 tests must be green before any commit
+  - All 356 tests must be green before any commit
   - Flow test: `PYTHONPATH=. .venv/bin/python tests/test_flow.py`
   - Calibration (opt-in, costs API calls): `RUN_CALIBRATION=1 pytest tests/test_calibration.py`
 
@@ -131,8 +140,9 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
 - Tailoring: default temperature 0.3 (variety in cover letters is desirable)
 - Prompt version: `AIService.matching_prompt_version()` — SHA-256 of the prompt
   text; any accidental edit changes the version and calibration tests fail
-- Dead-band: scores in [18, 25) are re-scored once and averaged before keep/dismiss
-- All 243 existing match rows are `legacy-unversioned` — re-score needed (~$1)
+- Dead-band: scores in [13, 25) are re-scored once and averaged before keep/dismiss
+- 241 of 243 match rows carry `m2-62c2452b`; only 2 remain `legacy-unversioned`
+  (verified 2026-08-31). The bulk re-score is done.
 
 ## Job sources
 
@@ -178,8 +188,10 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
 - **prompt_version column** on match_results: `AIService.matching_prompt_version()`
   = SHA-256 of the scoring prompt text (format: `m2-<8-char-hash>`). Stored on
   every match row. Cross-version scores are NOT comparable.
-- **Dead-band**: `MATCH_DEADBAND_MIN_SCORE=18` vs `MATCH_KEEP_MIN_SCORE=25`.
-  Scores in the band get one re-score, averaged. Below 18 = permanent dismiss.
+- **Dead-band**: `MATCH_DEADBAND_MIN_SCORE=13` vs `MATCH_KEEP_MIN_SCORE=25`
+  (`config.py:74,82`). The floor is derived, not chosen: `KEEP_MIN - 2*SD`
+  = 25 - 12 = 13. Scores in the band get one re-score, averaged.
+  Below 13 = permanent dismiss.
   `dismissed_reason` column tracks why (below_threshold, dead_band_confirmed, etc.).
 - **Calibration tests** (tests/test_calibration.py): 4 always-on tests that pin
   the prompt hash (accidental prompt edits break CI), verify dead-band ordering.
@@ -227,8 +239,8 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
 
 ## Open items / next steps
 
-- [ ] **Re-score the 243 legacy-unversioned matches** (~$1, one script) — puts the
-      whole queue on one scoring function
+- [x] **Re-score the legacy-unversioned matches** — done: 241/243 rows are on
+      `m2-62c2452b`, 2 stragglers remain (verified 2026-08-31)
 - [ ] Phase 1a-static: landing page (marketing, pricing, FAQ — no data model deps)
 - [ ] Phase 1c: signup UI, wizard entry from signup, console auth guard polish
 - [ ] Composio: connect Gmail (Settings page ready; needs platform API key)
@@ -251,3 +263,61 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
       third vendor for one feature. RLS is available on BOTH and is not a
       reason to pick either (it is a Postgres feature, not a Supabase one).
 - [ ] Playwright ATS drivers for structured portal applies (staged, human-confirmed)
+
+## GBrain Configuration (configured 2026-08-30)
+- Mode: local-stdio · Engine: pglite (`~/.gbrain/brain.pglite`) · CLI 0.47.6.0 via bun
+- MCP registered: no (no `claude` CLI here — register `gbrain serve` manually if a host needs MCP)
+- Keyless mode: no embedding key — search is keyword-only. For semantic search: set
+  VOYAGE_API_KEY, then `gbrain init --force --pglite --embedding-model voyage:voyage-code-3 --embedding-dimensions 1024`.
+- Repo policy: read-write (github.com/agentictony/jobfinderos)
+
+## GBrain Search Guidance (configured by /sync-gbrain)
+<!-- gstack-gbrain-search-guidance:start -->
+
+GBrain indexes this repo. Layout (verified 173/173 files vs origin/main 2026-08-30):
+- **Pinned code source** (`.gbrain-source` pin): 133 code pages, symbol-aware. All code
+  queries (`code-def`, `code-refs`, `code-callers`, `code-callees`, bare `search`) scope
+  to it automatically from anywhere in this worktree.
+- **default source**: every non-code file as note pages — 24 markdown docs (import slugs
+  like `work-orders/wo-16-pricing-and-plans`, root files as `prd-md` etc.), 14 config
+  files (ci.yml, Dockerfiles, requirements, plists, env examples), 2 screenshot
+  description pages (PNG bytes not stored — no storage backend), plus `project-index`.
+  To span BOTH sources: `gbrain search "<terms>" --source __all__`.
+- `gbrain import docs` is commit-driven (uncommitted md files are skipped) and skips
+  README.md by name. After editing any md/config doc, refresh with
+  `gbrain capture --file <path> --source default --slug <slug>`.
+
+⚠️ **NEVER put/capture/delete note pages in the pinned code source.** Path-registered
+sources reconcile brain↔filesystem in BOTH directions: on 2026-08-30, note captures in
+the pinned source caused gbrain to export pages as root-level `slug.md` files and DELETE
+the tracked markdown files (twice — once on capture, once on delete; recovered via
+`git checkout`). Code pages are file-derived and safe; free-floating pages are not.
+
+Other limits: `gbrain list` bulk output can intermittently omit rows (verify with
+`gbrain get <slug>`); `code-callers` may report `status: indexing` right after a sync
+(edges resolve incrementally); `.yaml`/`.sh` are text-chunked only (symbol tools = 0).
+
+<!-- gstack-gbrain-search-guidance:end -->
+
+### End-of-session brain sync — standing step (added 2026-08-30)
+
+After committing, at the end of any work session on this repo, run:
+
+1. `/sync-gbrain` (the gstack orchestrator: `bun run ~/.claude/skills/gstack/bin/gstack-gbrain-sync.ts`) —
+   refreshes the code pages. NEVER bare `gbrain sync` against the code pack: it is a
+   MARKDOWN importer (2026-08-31: it soft-deleted ~50 code pages and a follow-up
+   `--full` imported 23 stray md pages into the pack; repair needed reindex --force).
+2. `gbrain import docs` — refresh committed `docs/` pages (skips README.md by name,
+   ignores uncommitted files — capture those manually if needed).
+3. Re-capture any edited root-level or config file — note snapshots NEVER auto-update:
+
+```bash
+gbrain capture --file <path> --source default --slug <slug> --quiet
+# slug = lowercase path, leading dot stripped, '/' and '.' → '-':
+#   PRD.md                       → prd-md
+#   .github/workflows/ci.yml     → github-workflows-ci-yml
+#   backend/requirements.txt     → backend-requirements-txt
+```
+
+Everything stays in the `default` source. If a search returns stale info after a session,
+this checklist was skipped — that's the first thing to check.
