@@ -8,6 +8,7 @@ Run: .venv/bin/python -m pytest tests/test_units.py -q
 (uses a throwaway SQLite DB; no network, no keys)
 """
 
+import json
 import uuid
 from datetime import timedelta
 
@@ -238,6 +239,327 @@ class TestParseFailureRetry:
         monkeypatch.setattr(svc, "_complete", lambda *a, **k: "<<not json>>")
         with pytest.raises(ValueError, match="Unparseable"):
             svc.match_job(profile_context="x", cv_text="y", job_description="z")
+
+
+def _bare_service(monkeypatch, raw, finish_reason=None):
+    """An AIService whose model layer (_complete) returns `raw`.
+
+    The response-handling tests below all use this: they exercise the
+    REAL parse/validate code with a scripted model output."""
+    from app.services.ai_service import AIService
+
+    svc = AIService.__new__(AIService)
+    svc.model = "glm-test"
+    svc.thinking = "disabled"
+    svc.max_tokens = 2000
+
+    def fake_complete(*a, **k):
+        svc._last_finish_reason = finish_reason
+        return raw
+
+    monkeypatch.setattr(svc, "_complete", fake_complete)
+    return svc
+
+
+class TestTailorRejectsEmptyPackage:
+    """AI-9 (live-confirmed): a malformed tailoring response parsed to {}
+    and the draft went 'ready' with a 0-char cover letter + 0-char CV —
+    it passed the fabrication guard vacuously and dead-ended at submit.
+    The raise IS the fix: same rule as match_job/judge_fabrication —
+    malformed output is a format failure, never a package."""
+
+    def test_empty_object_raises(self, monkeypatch):
+        svc = _bare_service(monkeypatch, "{}")
+        with pytest.raises(ValueError, match="(?i)tailor|cover_letter|empty"):
+            svc.tailor_application(profile_context="x", cv_text="y", job_description="z")
+
+    def test_blank_documents_raise(self, monkeypatch):
+        raw = json.dumps({"cover_letter": "", "tailored_cv": "   "})
+        svc = _bare_service(monkeypatch, raw)
+        with pytest.raises(ValueError):
+            svc.tailor_application(profile_context="x", cv_text="y", job_description="z")
+
+    def test_missing_tailored_cv_raises(self, monkeypatch):
+        raw = json.dumps({"cover_letter": "Dear Acme"})
+        svc = _bare_service(monkeypatch, raw)
+        with pytest.raises(ValueError):
+            svc.tailor_application(profile_context="x", cv_text="y", job_description="z")
+
+    def test_truncated_response_names_finish_reason(self, monkeypatch):
+        # cut mid-JSON: _parse_json falls back to {} — and when the API
+        # says the output was truncated, the error must say so
+        svc = _bare_service(monkeypatch, '{"cover_letter": "Dear Acme',
+                            finish_reason="length")
+        with pytest.raises(ValueError, match="finish_reason=length"):
+            svc.tailor_application(profile_context="x", cv_text="y", job_description="z")
+
+    def test_valid_package_still_passes(self, monkeypatch):
+        pkg = {
+            "cover_letter": "Dear Acme team",
+            "tailored_cv": "PROFESSIONAL SUMMARY\nBackend developer",
+            "changes_summary": ["Front-loaded Python"],
+        }
+        svc = _bare_service(monkeypatch, json.dumps(pkg))
+        out = svc.tailor_application(profile_context="x", cv_text="y", job_description="z")
+        assert out["cover_letter"] == "Dear Acme team"
+        assert out["tailored_cv"].startswith("PROFESSIONAL SUMMARY")
+
+    def test_draft_fails_closed_instead_of_ready_empty(self, db, monkeypatch):
+        """End-to-end: the raise lands in create_draft_for_job's except —
+        the draft row is 'failed' with the AI error on it (regenerable),
+        never 'ready' with empty documents that submit would reject."""
+        from app.services import draft_service
+
+        profile = _profile(db)
+        job = _job_row(db, status="approved")
+        job.description = "A Python role worth tailoring for."
+        db.commit()
+
+        svc = _bare_service(monkeypatch, "{}")
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: svc)
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+
+        draft = draft_service.create_draft_for_job(
+            db, job, profile=profile, user_id=profile.user_id
+        )
+        assert draft.status == "failed", (
+            f"draft.status is '{draft.status}' — a malformed tailoring "
+            "response must fail the draft, not produce an empty package"
+        )
+        assert draft.error and "Tailoring failed" in draft.error
+        assert not draft.cover_letter and not draft.tailored_cv
+
+
+class TestScorelessMatchRejected:
+    """AI-10: parsed.get('score', 0) + _clamp_score's TypeError fallback
+    turned a scoreless response into a CONFIDENT 0 — one below-threshold
+    sample dismissed the job forever. The comment above the parse check
+    already forbids this for unparseable output; a missing/non-numeric
+    score is the same format failure and must raise the same way."""
+
+    def test_missing_score_raises(self, monkeypatch):
+        raw = json.dumps({"reasoning": "great fit", "recommendation": "apply"})
+        svc = _bare_service(monkeypatch, raw)
+        with pytest.raises(ValueError, match="score"):
+            svc.match_job(profile_context="x", cv_text="y", job_description="z")
+
+    def test_non_numeric_score_raises(self, monkeypatch):
+        for raw in ('{"score": "high", "reasoning": "r"}',
+                    '{"score": null, "reasoning": "r"}'):
+            svc = _bare_service(monkeypatch, raw)
+            with pytest.raises(ValueError):
+                svc.match_job(profile_context="x", cv_text="y", job_description="z")
+
+    def test_nan_score_raises(self, monkeypatch):
+        # json.loads accepts the bare NaN literal; _clamp_score's
+        # ValueError fallback turned it into a confident 0 — the exact
+        # silent-dismissal path this class exists to close
+        svc = _bare_service(monkeypatch, '{"score": NaN}')
+        with pytest.raises(ValueError):
+            svc.match_job(profile_context="x", cv_text="y", job_description="z")
+
+    def test_numeric_score_still_clamps(self, monkeypatch):
+        svc = _bare_service(monkeypatch, '{"score": 132, "reasoning": "r"}')
+        out = svc.match_job(profile_context="x", cv_text="y", job_description="z")
+        assert out["score"] == 100
+        assert out["tier"] == "excellent_match"
+
+    def test_scoreless_match_never_dismisses_the_job(self, db, monkeypatch):
+        """Through run_matching (the caller's error path): a scoreless
+        first sample raises, the job stays 'new' with NO match row, and a
+        later run with a well-formed response scores it normally."""
+        from app.models import MatchResult
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        profile = _profile(db)
+        job = _job_row(db, status="new")
+        job.description = "A real description long enough to be assessed."
+        db.commit()
+
+        mode = {"broken": True}
+
+        def fake_match(**kwargs):
+            if mode["broken"]:
+                # exactly what match_job now raises for a scoreless body
+                raise ValueError(
+                    "Malformed match response: 'score' is missing or non-numeric"
+                )
+            return {
+                "score": 42, "tier": "stretch", "reasoning": "solid transferable core",
+                "matched_skills": [], "missing_skills": [],
+                "transferable_skills": [], "recommendation": "maybe",
+                "confidence": "medium",
+            }
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        svc.match_job = fake_match
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+
+        matcher_service.run_matching(db, profile=profile, user_id=profile.user_id)
+        db.refresh(job)
+        assert job.status == "new", (
+            f"job.status is '{job.status}' — a scoreless response must leave "
+            "the job re-scoreable, not dismiss or match it"
+        )
+        assert db.query(MatchResult).filter(MatchResult.job_id == job.id).count() == 0, (
+            "a scoreless response wrote a match row — the confident-0 "
+            "permanent dismissal (AI-10) is back"
+        )
+
+        mode["broken"] = False
+        matcher_service.run_matching(db, profile=profile, user_id=profile.user_id)
+        row = db.query(MatchResult).filter(MatchResult.job_id == job.id).one()
+        assert row.score == 42
+        assert row.dismissed_reason is None
+
+
+class TestEmptyExtractionKeepsProfile:
+    """AI-11 (live-confirmed): a malformed extraction response returns {}
+    and _apply_extraction(profile, {}) NULLed full_name/email/phone/
+    title/years on a previously-good profile when the user re-uploaded
+    their CV. Raising inside the AI service does NOT fix it — cv_service
+    swallows the exception and still applies — so the WRITE is guarded:
+    an empty extraction is a no-op for the derived fields."""
+
+    def _patch_upload(self, monkeypatch, service):
+        from app.services import cv_service
+
+        monkeypatch.setattr(
+            cv_service.FileService, "validate_pdf", staticmethod(lambda b: True)
+        )
+        monkeypatch.setattr(
+            cv_service.FileService,
+            "extract_text_from_pdf",
+            staticmethod(lambda b: "fresh cv text python"),
+        )
+        monkeypatch.setattr(
+            cv_service, "_store_cv_file", lambda content, filename: ("cvs/new.pdf", "new.pdf")
+        )
+        monkeypatch.setattr(cv_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(cv_service, "get_ai_service", lambda: service)
+
+    def _good_profile(self, db):
+        profile = _profile(db)
+        profile.full_name = "Jane Doe"
+        profile.email = "jane@example.com"
+        profile.phone = "+46700000000"
+        profile.professional_title = "Backend Developer"
+        profile.experience_years = 7
+        db.commit()
+        return profile
+
+    class _HiccupService:
+        """Stands in for get_ai_service(): malformed output, no raise."""
+
+        def extract_profile(self, cv_text):
+            return {}
+
+    def test_empty_extraction_on_reupload_keeps_fields(self, db, monkeypatch):
+        from app.services import cv_service
+
+        profile = self._good_profile(db)
+        self._patch_upload(monkeypatch, self._HiccupService())
+
+        warnings = []
+        monkeypatch.setattr(
+            cv_service.logger, "warning",
+            lambda msg, *a, **k: warnings.append(msg % a if a else msg),
+        )
+
+        updated = cv_service.create_or_replace_profile_from_pdf(
+            db, b"%PDF-fresh", "new_cv.pdf", user_id=profile.user_id
+        )
+
+        assert updated.id == profile.id, "re-upload replaces the user's own row"
+        assert updated.full_name == "Jane Doe", "AI-11 wipe: full_name nulled by empty extraction"
+        assert updated.email == "jane@example.com", "AI-11 wipe: email nulled"
+        assert updated.phone == "+46700000000", "AI-11 wipe: phone nulled"
+        assert updated.professional_title == "Backend Developer", "AI-11 wipe: title nulled"
+        assert updated.experience_years == 7, "AI-11 wipe: years nulled"
+        # the new CV itself DID land — only the derived fields are guarded
+        assert updated.cv_text == "fresh cv text python"
+        assert updated.cv_file_name == "new_cv.pdf"
+        assert any("extraction" in w.lower() for w in warnings), (
+            "an empty extraction must be logged — it is a silent model "
+            f"failure, not a normal empty CV (warnings: {warnings})"
+        )
+
+    def test_raised_extraction_on_reupload_keeps_fields(self, db, monkeypatch):
+        """The exception path funnels into the same {} — the live incident
+        was a Z.ai hiccup, which can arrive as either shape."""
+        from app.services import cv_service
+
+        profile = self._good_profile(db)
+
+        class RaisingService:
+            def extract_profile(self, cv_text):
+                raise RuntimeError("simulated Z.ai 503")
+
+        self._patch_upload(monkeypatch, RaisingService())
+        updated = cv_service.create_or_replace_profile_from_pdf(
+            db, b"%PDF-fresh", "new_cv.pdf", user_id=profile.user_id
+        )
+        assert updated.full_name == "Jane Doe"
+        assert updated.email == "jane@example.com"
+        assert updated.professional_title == "Backend Developer"
+        assert updated.experience_years == 7
+
+    def test_good_extraction_still_replaces_fields(self, db, monkeypatch):
+        """The guard must not over-fire: a real extraction still updates
+        the derived fields on re-upload."""
+        from app.services import cv_service
+
+        profile = self._good_profile(db)
+
+        class GoodService:
+            def extract_profile(self, cv_text):
+                return {
+                    "full_name": "New Name", "email": "new@example.com",
+                    "professional_title": "Platform Engineer",
+                    "experience_years": 9,
+                }
+
+        self._patch_upload(monkeypatch, GoodService())
+        updated = cv_service.create_or_replace_profile_from_pdf(
+            db, b"%PDF-fresh", "new_cv.pdf", user_id=profile.user_id
+        )
+        assert updated.full_name == "New Name"
+        assert updated.email == "new@example.com"
+        assert updated.professional_title == "Platform Engineer"
+        assert updated.experience_years == 9
+
+
+class TestPromptVersionComposition:
+    """AI-13: the version hash covered only the system prompt. The
+    profile-context rendering (truncations, the experience_years removal)
+    changed what the model SAW with no version bump — scores silently not
+    comparable. A composition constant is folded into the hash."""
+
+    def test_format_is_major_dash_8_hex(self):
+        import re
+
+        from app.services.ai_service import AIService
+
+        assert re.fullmatch(r"m2-[0-9a-f]{8}", AIService.matching_prompt_version())
+
+    def test_composition_bump_changes_the_hash(self):
+        from app.services.ai_service import AIService
+
+        before = AIService.matching_prompt_version()
+        original = AIService.MATCHING_INPUT_COMPOSITION_VERSION
+        try:
+            AIService.MATCHING_INPUT_COMPOSITION_VERSION = original + 1
+            assert AIService.matching_prompt_version() != before, (
+                "bumping MATCHING_INPUT_COMPOSITION_VERSION must change the "
+                "version — that is the whole point of the constant"
+            )
+        finally:
+            AIService.MATCHING_INPUT_COMPOSITION_VERSION = original
+        # same constant back: the hash is stable (deterministic)
+        assert AIService.matching_prompt_version() == before
 
 
 class TestDuplicateMatchContainment:
