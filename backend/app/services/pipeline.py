@@ -303,7 +303,11 @@ def stored_job_in_user_scope(job, ctx: Dict) -> bool:
 
 def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> ScrapeRun:
     """Run one scraper, upsert new jobs, record a ScrapeRun audit row."""
-    run = ScrapeRun(source=source_name, status="running")
+    # WO-14 review fix: stamp the fetch identity's scope half so the
+    # manual-hunt cooldown can key on (source, scope) — the same identity
+    # the watermarks use — instead of suppressing every scope after the
+    # first. Legacy rows have NULL here and never match a scope filter.
+    run = ScrapeRun(source=source_name, status="running", scope=_scope_key(ctx or {}))
     db.add(run)
     db.commit()
 
@@ -591,16 +595,25 @@ def _select_sources(ctx: Optional[Dict], sources: Optional[List[str]]) -> List[s
     return [s for s in settings.get_scrape_sources() if s in SCRAPER_REGISTRY]
 
 
-def _recently_scraped_at(db: Session, source: str):
-    """WO-14 D1: the source's last COMPLETED run, when it finished inside
+def _recently_scraped_at(db: Session, source: str, scope: str):
+    """WO-14 D1: the last COMPLETED run of this (source, scope) — the
+    same fetch identity the watermarks key on — when it finished inside
     the manual-hunt cooldown (else None). Repeat Hunt presses cost board
     quota, not AI — a job is scored once per user ever — so a press
-    inside the window skips the scrape and keeps matching (free)."""
+    inside the window skips the scrape and keeps matching (free).
+
+    Review fix (2026-08-31): the filter used to be source-only, so one
+    user's Stockholm hunt suppressed a different user's Malmö hunt
+    entirely — a cooldown is per fetch identity, never global."""
     from datetime import timedelta
 
     run = (
         db.query(ScrapeRun)
-        .filter(ScrapeRun.source == source, ScrapeRun.status == "completed")
+        .filter(
+            ScrapeRun.source == source,
+            ScrapeRun.status == "completed",
+            ScrapeRun.scope == scope,
+        )
         .order_by(ScrapeRun.finished_at.desc())
         .first()
     )
@@ -639,10 +652,13 @@ def run_pipeline(
         # deep fetch must run even inside the cooldown or the watermark
         # backfill for the new scope never fires.
         cooldown_exempt = bool(ctx and ctx.get("backfill"))
+        # The cooldown is per (source, scope): compute the scope half
+        # once — it is identical for every source in this hunt.
+        hunt_scope = _scope_key(ctx or {})
         scrape_summaries = []
         for source in requested:
             if not cooldown_exempt:
-                last_at = _recently_scraped_at(db, source)
+                last_at = _recently_scraped_at(db, source, hunt_scope)
                 if last_at is not None:
                     scrape_summaries.append(
                         {
