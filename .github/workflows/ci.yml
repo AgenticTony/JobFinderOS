@@ -46,11 +46,29 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          # Cache on what this job actually installs: the dev lock
+          # (prod lock + pytest/ruff). It used to key on requirements.txt,
+          # which nothing installs — every cache entry was a miss target.
+          cache-dependency-path: backend/requirements.dev.lock
 
-      - name: Install dependencies (locked)
-        run: pip install -r requirements.lock ruff pytest
+      # INFRA-30: prove the lock split before using it — dev lock must be
+      # a version-identical superset of the prod lock, and pytest/ruff
+      # must be dev-only (they used to ship in both production images;
+      # the docker job below still proves requirements.lock installs
+      # standalone by building the images from it).
+      - name: Lock split check (dev lock is a superset, toolchain dev-only)
+        run: python scripts/check_dev_lock.py
 
+      - name: Install dependencies (dev lock — prod pins + pytest + ruff)
+        run: pip install -r requirements.dev.lock
+
+      # Lint scope stays I,F (INFRA-31): the current command is clean,
+      # but the DEFAULT ruff ruleset already reports ~590 pre-existing
+      # findings on this scope (6.4k under --select ALL) — nearly all in
+      # files CI deliberately doesn't lint. Expanding the ruleset means
+      # fixing those first: a dedicated cleanup PR, not a rider on this
+      # one. The 7 pre-existing I001s live only in alembic/versions/*
+      # (autogen files, outside this scope).
       - name: Lint (imports + errors)
         run: ruff check --select I,F app/ tests/ scripts/
 
@@ -198,6 +216,25 @@ jobs:
           assert "?" not in extracted, repr(extracted)
           print("hunt container PDF typography OK:", extracted[:90])
           PY
+
+  # INFRA-31: supply-chain audit of what PRODUCTION runs. Official
+  # pattern: pypa/gh-action-pip-audit (github.com/pypa/gh-action-pip-audit).
+  # Audits requirements.lock — the file both Docker images install — not
+  # the dev lock, so a finding means "shipping code is vulnerable", not
+  # "the linter is". no-deps: the lock is fully pinned, so dependency
+  # resolution would resolve nothing new and only slow every run.
+  pip-audit:
+    name: Security audit (pip-audit on requirements.lock)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: backend/requirements.lock
+          no-deps: true
 
   blueprint:
     name: Render blueprint (render.yaml valid)

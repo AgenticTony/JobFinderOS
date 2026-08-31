@@ -1765,13 +1765,213 @@ class TestDependencyFreeMigrations:
 
         r = subprocess.run(
             [sys.executable, "-c",
-             "import sys; import app.core.dburl, app.core.orm; "
+             "import sys; import app.core.dburl, app.core.orm, "
+             "app.core.migration_env; "
              "assert 'app.core.config' not in sys.modules, 'config loaded'; "
              "assert 'app.core.database' not in sys.modules, 'database loaded'"],
             capture_output=True, text=True,
         )
         assert r.returncode == 0, (
             f"dependency-free modules pull app config:\n{r.stderr[-400:]}"
+        )
+
+
+class TestAlembicUrlPrecedence:
+    """DATA-4: alembic/env.py used to let the DATABASE_URL env var
+    override the URL injected into the alembic Config UNCONDITIONALLY.
+    init_db() injects settings.DATABASE_URL — real env vars MERGED with
+    backend/.env — so on a machine whose DATABASE_URL lived only in
+    backend/.env, env.py resolved that correctly and then stomped it
+    with the env-var default: the boot silently migrated a fresh
+    ./jobfinderos.db. The precedence now lives in the dependency-free
+    app.core.migration_env.resolve_url (importable with ONLY
+    DATABASE_URL set — see TestDependencyFreeMigrations above)."""
+
+    class _Cfg:
+        """Duck-typed alembic Config — get_main_option is all the
+        policy reads."""
+
+        def __init__(self, url=None):
+            self._url = url
+
+        def get_main_option(self, name):
+            return self._url if name == "sqlalchemy.url" else None
+
+    def test_injected_config_url_wins_when_env_var_unset(self):
+        """The exact DATA-4 shape: DATABASE_URL only in backend/.env, so
+        the process env carries nothing — the injected (settings) URL
+        must survive, not the sqlite default env.py used to substitute."""
+        from app.core.migration_env import resolve_url
+
+        assert resolve_url(
+            self._Cfg("postgresql+psycopg://user:secret@db-host/prod"),
+            environ={},
+        ) == "postgresql+psycopg://user:secret@db-host/prod"
+
+    def test_injected_config_url_wins_even_when_env_var_differs(self):
+        from app.core.migration_env import resolve_url
+
+        assert resolve_url(
+            self._Cfg("postgresql+psycopg://user:secret@db-host/prod"),
+            {"DATABASE_URL": "sqlite:///./envvar.db"},
+        ) == "postgresql+psycopg://user:secret@db-host/prod"
+
+    def test_env_var_used_only_when_config_has_no_url(self):
+        """The CI minimal-env contract: `python -m alembic upgrade head`
+        carrying ONLY DATABASE_URL (the migration-container shape) must
+        migrate exactly that database — env var in, postgres:// and
+        +asyncpg forms normalized by the one normalizer."""
+        from app.core.migration_env import resolve_url
+
+        assert resolve_url(
+            self._Cfg(None), {"DATABASE_URL": "postgres://u:p@h:5432/db"}
+        ) == "postgresql+psycopg://u:p@h:5432/db"
+
+    def test_sqlite_fallback_when_no_config_url_and_no_env_var(self):
+        from app.core.migration_env import resolve_url
+
+        assert resolve_url(self._Cfg(None), environ={}) == \
+            "sqlite:///./jobfinderos.db"
+
+    def test_async_driver_forms_step_down_to_sync(self):
+        from app.core.migration_env import resolve_url
+
+        assert resolve_url(
+            self._Cfg(None),
+            {"DATABASE_URL": "sqlite+aiosqlite:///./x.db"},
+        ) == "sqlite:///./x.db"
+
+    def test_alembic_ini_defines_no_url_so_the_cli_uses_the_env_var(self):
+        """Guard the other side of the flip: alembic.ini deliberately
+        ships WITHOUT sqlalchemy.url, so a Config built from it (what
+        the CLI uses) has no URL and falls through to DATABASE_URL. If
+        anyone ever hardcodes a URL in the ini, every migration
+        container's env var would be silently ignored — fail here."""
+        from pathlib import Path
+
+        from alembic.config import Config
+
+        from app.core.migration_env import resolve_url
+
+        ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+        assert "sqlalchemy.url" not in ini.read_text()
+        cfg = Config(str(ini))
+        assert cfg.get_main_option("sqlalchemy.url") is None
+        assert resolve_url(
+            cfg, {"DATABASE_URL": "sqlite:///./ci.db"}
+        ) == "sqlite:///./ci.db"
+
+
+class TestMigrationLockTimeout:
+    """DATA-6: init_db's advisory-lock connection carries a lock_timeout,
+    but the connection ALEMBIC itself opens had none — the first DDL
+    queued behind a long-running transaction would block unboundedly:
+    no error, no log line, a boot that hangs until the platform kills
+    it. The fix registers a connect-event on the alembic engine
+    (app.core.migration_env.register_migration_timeouts). lock_timeout
+    only — deliberately no statement_timeout, which would abort a LONG
+    BUT LEGITIMATE migration (backfill / index build) mid-deploy."""
+
+    def test_listener_registered_on_postgres_engines_only(self):
+        from sqlalchemy import create_engine, event
+
+        from app.core.migration_env import (
+            apply_lock_timeout,
+            register_migration_timeouts,
+        )
+
+        pg = create_engine("postgresql+psycopg://u:p@localhost:5432/db")
+        register_migration_timeouts(pg)
+        assert event.contains(pg, "connect", apply_lock_timeout), (
+            "postgres migration engine lost its lock_timeout listener")
+
+        lite = create_engine("sqlite://")
+        register_migration_timeouts(lite)
+        assert not event.contains(lite, "connect", apply_lock_timeout), (
+            "sqlite must stay a no-op: it has no lock_timeout, and the "
+            "SET would error out of every local migration run")
+
+    def test_connect_event_sets_a_30s_session_lock_timeout(self):
+        """The event body itself: session-scoped SET (alembic's dedicated
+        NullPool connection; SET LOCAL would revert on the first commit
+        when transaction_per_migration splits the run)."""
+        from app.core.migration_env import (
+            MIGRATION_LOCK_TIMEOUT_SECONDS,
+            apply_lock_timeout,
+        )
+
+        executed = []
+
+        class _Cursor:
+            def execute(self, sql):
+                executed.append(sql)
+
+            def close(self):
+                executed.append("<cursor-closed>")
+
+        class _Conn:
+            def cursor(self):
+                return _Cursor()
+
+        apply_lock_timeout(_Conn(), None)
+        assert executed == [
+            f"SET SESSION lock_timeout = "
+            f"'{MIGRATION_LOCK_TIMEOUT_SECONDS}s'",
+            "<cursor-closed>",
+        ]
+        assert MIGRATION_LOCK_TIMEOUT_SECONDS == 30
+
+    def test_timeout_is_live_on_the_postgres_suite_leg(self):
+        """The full proof where a real Postgres exists (CI's postgres
+        leg): connect through a wrapped engine and read the session
+        variable back. The sqlite leg has no lock_timeout to read — its
+        no-op is what the registration test above pins."""
+        from sqlalchemy import create_engine, text
+
+        from app.core.database import DATABASE_URL
+        from app.core.migration_env import register_migration_timeouts
+
+        if not DATABASE_URL.startswith("postgres"):
+            return
+        eng = register_migration_timeouts(create_engine(DATABASE_URL))
+        try:
+            with eng.connect() as conn:
+                setting, unit = conn.execute(text(
+                    "SELECT setting, unit FROM pg_settings "
+                    "WHERE name = 'lock_timeout'")).one()
+        finally:
+            eng.dispose()
+        assert (setting, unit) == ("30000", "ms"), (setting, unit)
+
+
+class TestScraperExportsHygiene:
+    """HYGIENE: scrapers/__init__.__all__ advertised TeamtailorScraper
+    long after its module was deleted — `from app.services.scrapers
+    import *` raises AttributeError at import time because a star import
+    resolves every __all__ entry eagerly. __all__ must name only real
+    exports, and every registered scraper must be exported."""
+
+    def test_star_import_resolves_every_dunder_all_name(self):
+        # Executes the actual failing operation, not a proxy: one dead
+        # __all__ entry and this line is the AttributeError.
+        namespace = {}
+        exec("from app.services.scrapers import *", namespace)  # noqa: S102
+
+        import app.services.scrapers as pkg
+
+        for name in pkg.__all__:
+            assert name in namespace, name
+
+    def test_registered_scrapers_and_all_stay_in_sync(self):
+        import app.services.scrapers as pkg
+
+        exported = {name for name in pkg.__all__ if name.endswith("Scraper")}
+        exported.discard("BaseScraper")  # the base class, never registered
+        registered = {cls.__name__ for cls in pkg.SCRAPER_REGISTRY.values()}
+        assert exported == registered, (
+            f"__all__ scraper exports {sorted(exported)} != registered "
+            f"{sorted(registered)} — a scraper exists without an export "
+            "or an export without a scraper"
         )
 
 
