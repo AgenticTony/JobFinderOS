@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FileUp, Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiErrorMessage } from '@/lib/api';
+import PrivacyNotice from '@/components/PrivacyNotice';
 
 interface Props {
   onUploaded: (file: File) => Promise<void>;
@@ -104,6 +105,10 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
         />
       </div>
       {error && <p className="mt-2 text-sm text-bad">{error}</p>}
+      {/* OPS-6: the disclosure sits at the exact moment of collection —
+          uploading the CV is what sends its text to the processors named
+          in the panel. Informational, never blocking. */}
+      <PrivacyNotice context="cv" />
     </div>
   );
 }

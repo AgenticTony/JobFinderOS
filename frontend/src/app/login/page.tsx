@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Radar, Loader2, ArrowLeft } from 'lucide-react';
 import { api, apiErrorMessage, setAuthToken } from '@/lib/api';
+import PrivacyNotice from '@/components/PrivacyNotice';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -175,6 +176,15 @@ export default function LoginPage() {
         <p className="mt-2 text-center text-xs text-low">
           Hunts twice daily · scores honestly · nothing sent without you
         </p>
+
+        {/* OPS-6: the Art. 13 disclosure at account creation — shown in
+            BOTH modes (an information duty, not a consent gate). It is a
+            plain statement plus a link to /privacy; there is deliberately
+            no checkbox and nothing here blocks the form. Placed inside the
+            card so it is seen before "Create account", not below the fold. */}
+        <div className="mt-4">
+          <PrivacyNotice context="account" />
+        </div>
         </form>
       </div>
     </div>
