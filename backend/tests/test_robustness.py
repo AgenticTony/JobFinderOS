@@ -523,11 +523,22 @@ class TestDeletedUserAbortsMatching:
         user_id FK. The matcher must VERIFY the user row is gone and
         abort instead of burning the remaining evaluations.
 
-        The IntegrityError trigger here is the (user_id, job_id) unique
-        constraint (SQLite never enforces the FK, and the two columns'
-        text renderings differ anyway) — what is under test is the
-        DECISION: commit fails -> user row checked -> gone -> abort.
+        The IntegrityError trigger is backend-appropriate (what is under
+        test is the DECISION: commit fails -> user row checked -> gone ->
+        abort). Postgres enforces the user_id FK, so erasing the user
+        alone arms the per-job INSERT failure. SQLite never enforces the
+        FK, so there the conflicting (user_id, job_id) row is what makes
+        the matcher's commit raise instead.
+
+        The erase therefore COMMITS FIRST and the conflicting row is
+        added after, tolerated to fail: in one flush SQLAlchemy runs
+        INSERTs before DELETEs, so insert-then-delete in a single
+        transaction makes the user DELETE fail the FK itself (the row
+        just inserted still references the user) on any FK-enforcing
+        backend — the erase never lands and the run completes.
         """
+        from sqlalchemy.exc import IntegrityError as SAIntegrityError
+
         from app.models import MatchResult
         from app.services import matcher_service
         from app.services.cv_service import get_active_profile
@@ -543,14 +554,22 @@ class TestDeletedUserAbortsMatching:
                 # the erase AND a conflicting match row for the in-flight
                 # job: the matcher's own commit then raises IntegrityError.
                 # The conflicting match row must SURVIVE the erase (the
-                # GDPR wipe would delete it) — delete profile+user only.
+                # GDPR wipe would delete it) — delete profile+user only,
+                # and commit that BEFORE inserting the conflicting row.
                 s = SessionLocal()
                 try:
-                    s.add(MatchResult(user_id=uid, job_id=by_title[title].id,
-                                      score=1, tier="poor_match"))
                     s.query(Profile).filter(Profile.user_id == uid).delete()
                     s.query(User).filter(User.id == uid).delete()
                     s.commit()
+                    try:
+                        s.add(MatchResult(user_id=uid, job_id=by_title[title].id,
+                                          score=1, tier="poor_match"))
+                        s.commit()
+                    except SAIntegrityError:
+                        # Postgres: expected — the user is gone, so this
+                        # insert fails the FK. The FK on the matcher's
+                        # own per-job insert is the trigger there.
+                        s.rollback()
                 finally:
                     s.close()
 
