@@ -44,27 +44,34 @@ _MUNICIPALITY_CODES: Optional[Dict[str, str]] = None
 
 def _municipality_codes() -> Dict[str, str]:
     global _MUNICIPALITY_CODES
-    if _MUNICIPALITY_CODES is None:
-        codes: Dict[str, str] = {}
-        try:
-            resp = httpx.get(
-                TAXONOMY_URL,
-                params={"version": 1, "type": "municipality"},
-                timeout=settings.SCRAPE_TIMEOUT_SECONDS,
-                follow_redirects=True,
-            )
-            resp.raise_for_status()
-            for c in resp.json():
-                label = c.get("taxonomy/preferred-label")
-                cid = c.get("taxonomy/id")
-                if label and cid:
-                    codes[str(label).lower()] = str(cid)
-        except Exception as e:  # noqa: BLE001 — a taxonomy miss must not
-            # break scraping: without codes we fetch unfiltered and the
-            # local location gate still enforces the user's scope.
-            logger.warning("[jobtech] taxonomy fetch failed (%s) — "
-                           "falling back to unfiltered fetch + local gate", e)
-        _MUNICIPALITY_CODES = codes
+    if _MUNICIPALITY_CODES is not None:
+        return _MUNICIPALITY_CODES
+    codes: Dict[str, str] = {}
+    try:
+        resp = httpx.get(
+            TAXONOMY_URL,
+            params={"version": 1, "type": "municipality"},
+            timeout=settings.SCRAPE_TIMEOUT_SECONDS,
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        for c in resp.json():
+            label = c.get("taxonomy/preferred-label")
+            cid = c.get("taxonomy/id")
+            if label and cid:
+                codes[str(label).lower()] = str(cid)
+    except Exception as e:  # noqa: BLE001 — a taxonomy miss must not
+        # break scraping: without codes we fetch unfiltered and the
+        # local location gate still enforces the user's scope. Cache
+        # the SUCCESS only (PIPE-20, occupation_taxonomy's fixed
+        # pattern): caching the failure would pin every later hunt to
+        # the unfiltered path for the process lifetime after one
+        # transient outage. This call returns empty and the next call
+        # retries the fetch.
+        logger.warning("[jobtech] taxonomy fetch failed (%s) — "
+                       "falling back to unfiltered fetch + local gate, will retry", e)
+        return codes
+    _MUNICIPALITY_CODES = codes
     return _MUNICIPALITY_CODES
 
 
