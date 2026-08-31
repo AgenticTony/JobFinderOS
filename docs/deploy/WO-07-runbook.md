@@ -139,9 +139,53 @@ curl https://jobfinderos-api.onrender.com/health        # {"status":"ok","databa
 
 ## Operations
 
-- **Backups** stay as-is: `ops/backup.sh` (pg_dump of Supabase + off-site
-  B2) runs nightly from the Mac via launchd. Render does not run our
-  backups; the cron job is the hunt only.
+- **Backups** — `ops/backup.sh` runs nightly at 04:30 from the Mac via
+  launchd (`ops/com.jobfinderos.backup.plist`; install with
+  `cp ops/com.jobfinderos.backup.plist ~/Library/LaunchAgents/ &&
+  launchctl load ~/Library/LaunchAgents/com.jobfinderos.backup.plist`).
+  Each run writes to `~/backups/jobfinderos/`:
+  - `db-<stamp>.sql` — pg_dump of Supabase, `--schema public`, PLAIN SQL.
+    The app's entire schema is public (alembic restricts to public;
+    Supabase's own auth/storage schemas are unused by the app), so the
+    dump restores into ANY fresh database — a dump you can't restore
+    into a throwaway is an unverified backup.
+  - `storage/cvs/` — every object in the private `cvs` Storage bucket,
+    i.e. every user's ORIGINAL CV (P0-5: pg_dump captures rows, not
+    Storage objects, and the bucket is the only copy — the local
+    uploads dir receives nothing in production). The bucket is listed
+    page by page and each object downloaded with the service key
+    (same REST pattern as `ops/provision_supabase_storage.py`);
+    the run FAILS on any listed-vs-downloaded count mismatch.
+  - `cvs/`, `drafts/` — mirrors of the local dev upload dirs
+    (dev-only; empty in production).
+  Render does not run our backups; the cron job is the hunt only.
+  Success lines to grep for in `/tmp/jobfinderos-backup.log`:
+  `pg_dump OK`, `Storage export OK: N objects`, `off-site OK: N files`.
+- **Off-site copy — OWNER STEP, NOT YET CONFIGURED.** The plist now
+  carries the `EnvironmentVariables` dict `backup.sh` reads
+  (`OFFSITE_BACKUP_TARGET`, `OFFSITE_CMD`, `DATABASE_URL`,
+  `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_STORAGE_BUCKET`).
+  All committed values are deliberately EMPTY: an empty value behaves
+  exactly like an unset variable to the script, which then falls back
+  to parsing `backend/.env` (where DATABASE_URL and the Supabase creds
+  live today) — no real secrets in git, same convention as
+  `backend/.env.example`. Until `OFFSITE_BACKUP_TARGET` is filled in
+  the installed copy, every nightly run honestly logs
+  `WARNING: OFFSITE_BACKUP_TARGET not set — backups exist on ONE disk only`
+  and exits 0. To turn the off-site copy on (Backblaze B2 via rclone):
+  1. `brew install rclone`
+  2. `rclone config create jfos-b2 b2 account <B2-keyID> key <B2-applicationKey>`
+  3. `rclone mkdir jfos-b2:jobfinderos-backups`
+  4. Edit `~/Library/LaunchAgents/com.jobfinderos.backup.plist`:
+     `OFFSITE_BACKUP_TARGET` → `jfos-b2:jobfinderos-backups` and
+     `OFFSITE_CMD` → `rclone`. (An rsync target `user@host:/path` works
+     too — leave `OFFSITE_CMD` empty for rsync.)
+  5. `launchctl unload ~/Library/LaunchAgents/com.jobfinderos.backup.plist && launchctl load ~/Library/LaunchAgents/com.jobfinderos.backup.plist`
+  6. The next run (or `bash ops/backup.sh` by hand) must log
+     `off-site OK: N files at jfos-b2:jobfinderos-backups` — the script
+     verifies the destination file count and exits NON-ZERO on mismatch.
+     Anything other than that line is a failure; investigate before
+     trusting the backups again.
 - **Cost ceiling**: ~$1–3/mo total until a paid instance is justified.
   Growth path: upgrade the API instance first (cold starts hurt more than
   hunt latency), keep the cron shape until hunts exceed ~10 h/month of
@@ -149,3 +193,68 @@ curl https://jobfinderos-api.onrender.com/health        # {"status":"ok","databa
 - **Secrets rotation**: everything prompted in Step 2 lives in Render's
   dashboard — rotate there, then redeploy. Never put real values in
   `render.yaml` (CI enforces this).
+
+## Restore — rehearse BEFORE you need it (OPS-4)
+
+`ops/restore.sh <bundle-dir>` restores a bundle produced by
+`ops/backup.sh`: the database via **psql** (the dumps are plain SQL, so
+psql — not pg_restore — is the matching tool), then verifies every
+table's live row count against the dump's COPY blocks; and the CVs back
+into the Storage bucket via x-upsert uploads (the `storage.py` save()
+pattern), verified by re-listing. It REFUSES a database that already has
+tables unless `--force` (which drops the public schema first —
+destructive), masks the password in all output, and supports
+`--dry-run` (no network), `--db-only`, `--storage-only`.
+
+**The rehearsal procedure** — run it once NOW and after any change to
+the backup scripts. ALWAYS against a THROWAWAY target first; never
+rehearse against the production project (restore overwrites).
+
+1. Create a throwaway database — a fresh free Supabase project, or
+   locally: `docker run --name jfos-restore-drill -e POSTGRES_PASSWORD=drill
+   -p 5433:5432 -d postgres:16`.
+2. Point the environment at it (env vars win over `backend/.env`) and
+   dry-run the plan — no network calls, password masked:
+
+   ```sh
+   DATABASE_URL='postgresql://postgres:drill@localhost:5433/postgres' \
+       bash ops/restore.sh --dry-run ~/backups/jobfinderos
+   ```
+
+3. Restore the database part and let the script verify itself:
+
+   ```sh
+   DATABASE_URL='postgresql://postgres:drill@localhost:5433/postgres' \
+       bash ops/restore.sh --db-only ~/backups/jobfinderos
+   ```
+
+   Expected tail output: `database restore verified: N tables, 0
+   mismatches`. Any `COUNT MISMATCH` line means the restore is partial —
+   do not trust it; re-run against a clean database.
+4. (Optional, still on the throwaway project) rehearse the storage part
+   by pointing the Supabase vars at the throwaway project's bucket:
+
+   ```sh
+   SUPABASE_URL='<throwaway-project>' SUPABASE_SERVICE_KEY='<throwaway-key>' \
+       bash ops/restore.sh --storage-only ~/backups/jobfinderos
+   ```
+
+   Expected: `Storage restore OK: N objects in bucket 'cvs'`.
+5. Tear the throwaway down (`docker rm -f jfos-restore-drill` or delete
+   the drill project) — a restore drill left running is a stale copy of
+   user PII.
+
+**Real disaster recovery** (only after a rehearsal has passed): the same
+commands with the production `DATABASE_URL` (from `backend/.env` —
+omitting the env var targets it directly) and the Supabase vars unset so
+`backend/.env` resolves them. `--force` only if the production database
+still contains half-broken data that must be dropped first. The CV
+restore re-uploads into the production `cvs` bucket with x-upsert:
+objects created AFTER the bundle was taken are left in place; restore
+the newest bundle available.
+
+The scripts' logic is exercised by `bash ops/test_storage_backup_lib.sh`
+(pagination, per-object download, count-mismatch failure, upload
+verification, dump table-count parsing, dry run) against a stubbed HTTP
+layer — it never touches a real Supabase project. The live steps above
+(psql against a real database, real uploads) are the manual part.

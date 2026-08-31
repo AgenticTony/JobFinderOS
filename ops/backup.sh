@@ -1,6 +1,8 @@
 #!/bin/bash
 # Scheduled backup of the database (Supabase pg_dump; sqlite3 .backup for
-# dev SQLite) + backend/uploads/ (CV PDFs).
+# dev SQLite) + the PRODUCTION CV bucket (Supabase Storage export —
+# pg_dump captures rows, NOT Storage objects) + backend/uploads/ (the
+# local-dev CV/draft dirs, which receive nothing in production).
 # Runs via launchd (com.jobfinderos.backup) at 04:30 daily.
 # Timestamped copies, rotated (30 days kept), stored off the working directory.
 
@@ -9,6 +11,13 @@ set -euo pipefail
 PROJECT="/Users/anthonyforan/Desktop/JobFinderOS"
 BACKUP_DIR="$HOME/backups/jobfinderos"
 KEEP_DAYS=30
+
+# Supabase Storage export/restore helpers (P0-5). All HTTP goes through
+# the lib's sb_curl(); creds resolve from env or backend/.env below.
+OPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=storage_backup_lib.sh
+. "$OPS_DIR/storage_backup_lib.sh"
+SB_ENV_FILE="$PROJECT/backend/.env"
 
 mkdir -p "$BACKUP_DIR/cvs" "$BACKUP_DIR/drafts"
 
@@ -129,7 +138,14 @@ if [ -x "$PG_DUMP" ] && \
     # dump, so the log is the only record — "FAILED" without a reason
     # can't distinguish a transient pooler blip from a rotated password.
     # On success the .err file is removed; on failure it is KEPT.
-    if "$PG_DUMP" --no-owner --no-privileges --dbname "${DATABASE_URL/postgresql+psycopg/postgresql}" \
+    # --schema public (OPS-4): the app's entire schema is public (alembic
+    # restricts to public; auth/storage schemas are Supabase-managed and
+    # unused by the app). An unscoped dump also carries those schemas,
+    # and restoring it into ANY fresh Supabase project dies on
+    # "relation already exists" under ON_ERROR_STOP — a dump you cannot
+    # restore into a throwaway database is an unverified backup.
+    if "$PG_DUMP" --schema public --no-owner --no-privileges \
+        --dbname "${DATABASE_URL/postgresql+psycopg/postgresql}" \
         --file "$BACKUP_DIR/db-$STAMP.sql" 2> "$BACKUP_DIR/db-$STAMP.dump.err" && \
        [ -s "$BACKUP_DIR/db-$STAMP.sql" ]; then
         rm -f "$BACKUP_DIR/db-$STAMP.dump.err"
@@ -153,6 +169,29 @@ else
         echo "$(date -Iseconds) sqlite backup FAILED — continuing to off-site sync" >&2
         DB_FAILED=1
     fi
+fi
+
+# --- Production CV Storage export (P0-5: beta blocker) ---
+# pg_dump captures ROWS, not Storage objects: production CVs live in the
+# private Supabase bucket (render.yaml sets STORAGE_BACKEND=supabase), so
+# the local mirror above receives NOTHING in production. Before this
+# step existed, bucket loss = permanent loss of every user's original CV
+# (immutable — irreplaceable). The export lands inside the backup bundle
+# (so the off-site step below replicates it too); it lists the bucket
+# page by page, downloads each object, and FAILS the run on any count
+# mismatch between what was listed and what landed on disk.
+STORAGE_FAILED=0
+if sb_resolve_config; then
+    # A Storage failure must NOT gate the off-site sync (same reasoning
+    # as the dump's DB_FAILED above): what did succeed still replicates
+    # off-site; the failure is recorded and surfaces to launchd at the
+    # very end, after everything salvageable was copied.
+    if ! storage_export "$BACKUP_DIR/storage/$SB_BUCKET"; then
+        echo "$(date -Iseconds) Storage export FAILED — continuing to off-site sync with the previous export" >&2
+        STORAGE_FAILED=1
+    fi
+else
+    echo "$(date -Iseconds) WARNING: SUPABASE_URL / SUPABASE_SERVICE_KEY not in env or $SB_ENV_FILE — production CV bucket NOT exported (expected only on STORAGE_BACKEND=local dev machines)" >&2
 fi
 
 # --- Rotation: remove database backups older than KEEP_DAYS ---
@@ -205,9 +244,15 @@ else
     echo "$(date -Iseconds) WARNING: OFFSITE_BACKUP_TARGET not set — backups exist on ONE disk only (MIG-WO0 incomplete)" >&2
 fi
 
-# The database failure deferred from above (r3): the off-site sync has now
-# run regardless, so surface the failure to launchd only at the very end.
-if [ "$DB_FAILED" -ne 0 ]; then
-    echo "$(date -Iseconds) BACKUP INCOMPLETE: database dump failed (off-site sync ran; CV mirror is safe)" >&2
+# The failures deferred from above (r3 pattern): the off-site sync has now
+# run regardless, so surface them to launchd only at the very end. (Plain
+# if/fi, not [ ] && — under set -e a false bare [ ] && kills the script.)
+FAILED_SUMMARY=""
+if [ "$DB_FAILED" -ne 0 ]; then FAILED_SUMMARY="database dump"; fi
+if [ "$STORAGE_FAILED" -ne 0 ]; then
+    FAILED_SUMMARY="${FAILED_SUMMARY:+$FAILED_SUMMARY + }CV Storage export"
+fi
+if [ -n "$FAILED_SUMMARY" ]; then
+    echo "$(date -Iseconds) BACKUP INCOMPLETE: $FAILED_SUMMARY failed (off-site sync ran; whatever succeeded is safe)" >&2
     exit 1
 fi
