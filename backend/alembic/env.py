@@ -1,6 +1,6 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, exc, pool
 
 from alembic import context
 
@@ -8,21 +8,26 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-# URL comes from the environment (DATABASE_URL), never from alembic.ini —
-# sync drivers only here (alembic runs sync engines): translate async forms.
-import os  # noqa: E402
-
-_url = os.getenv("DATABASE_URL", "sqlite:///./jobfinderos.db")
-# ONE normalization path for every engine (WO-11 review), imported from
-# the dependency-free module: importing app.core.database here would
+# URL precedence (DATA-4): a URL the CALLER injected into this Config
+# (init_db sets sqlalchemy.url from app settings = real env vars MERGED
+# with backend/.env) wins; the DATABASE_URL env var is consulted only
+# when the config carries no URL — the `alembic upgrade head` CLI shape
+# (CI's minimal-env step, the migration container). env.py used to let
+# the env var override unconditionally, so a boot whose DATABASE_URL
+# lived only in backend/.env silently migrated a fresh sqlite file.
+# Never from alembic.ini (it defines no URL — migration_env tests pin
+# that). Policy + normalization live in the dependency-free
+# app.core.migration_env: importing app.core.database here would
 # construct Settings()/engines — a migration step carrying only
 # DATABASE_URL (pre-deploy command, init container) must not need full
-# app config. Only the sqlite step-down stays local to alembic.
-from app.core.dburl import normalize_postgres_url
+# app config.
+from app.core.migration_env import (  # noqa: E402
+    MIGRATION_LOCK_TIMEOUT_SECONDS,
+    register_migration_timeouts,
+    resolve_url,
+)
 
-_url = normalize_postgres_url(_url)
-_url = _url.replace("sqlite+aiosqlite://", "sqlite://", 1)
-config.set_main_option("sqlalchemy.url", _url)
+config.set_main_option("sqlalchemy.url", resolve_url(config))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -88,10 +93,16 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
+    # DATA-6: bound DDL lock WAITING on the migration connection itself
+    # (the advisory lock in init_db bounds only its own connection).
+    # No-op off postgres. lock_timeout only — see migration_env for why
+    # there is deliberately no statement_timeout.
+    connectable = register_migration_timeouts(
+        engine_from_config(
+            config.get_section(config.config_ini_section, {}),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
     )
 
     with connectable.connect() as connection:
@@ -99,8 +110,23 @@ def run_migrations_online() -> None:
             connection=connection, target_metadata=target_metadata
         )
 
-        with context.begin_transaction():
-            context.run_migrations()
+        try:
+            with context.begin_transaction():
+                context.run_migrations()
+        except exc.OperationalError as err:
+            # A lock_timeout abort already says so in the driver message,
+            # but naming the knob and its value turns "why did the deploy
+            # die?" into a one-line diagnosis.
+            if "lock timeout" in str(err).lower():
+                raise RuntimeError(
+                    f"Migration aborted: DDL waited more than "
+                    f"{MIGRATION_LOCK_TIMEOUT_SECONDS}s for a lock "
+                    "(lock_timeout set on the alembic connection — "
+                    "DATA-6). A long-running transaction is holding "
+                    "locks on the target tables; let it finish or "
+                    "terminate it, then retry the deploy."
+                ) from err
+            raise
 
 
 if context.is_offline_mode():

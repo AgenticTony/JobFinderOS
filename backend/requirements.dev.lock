@@ -1,3 +1,18 @@
+# DEV/CI lock (INFRA-30) — a strict SUPERSET of requirements.lock:
+# every prod pin, byte-identical, plus the dev toolchain (pytest, ruff,
+# and pytest's own private deps iniconfig/pluggy, which ride along so
+# the prod image never carries them).
+#
+# Who installs what:
+#   - CI (and local dev): this file — lint + the test suite need the toolchain.
+#   - Production Docker images (Dockerfile, Dockerfile.hunt): requirements.lock
+#     ONLY — pytest/ruff used to ship in both images (INFRA-30).
+#
+# Drift is caught in CI: scripts/check_dev_lock.py asserts the superset
+# property AND that the toolchain is dev-only (never re-added to the prod
+# lock by accident). pygments stays a PROD pin (mako/httpx import it at
+# runtime); packaging stays too — only pytest declares it today, but it is
+# the classic ambient dependency and not worth pruning risk.
 aiosqlite==0.22.1
 alembic==1.19.1
 annotated-doc==0.0.5
@@ -28,6 +43,7 @@ httptools==0.8.0
 httpx==0.28.1
 httpx2==2.12.0
 idna==3.19
+iniconfig==2.3.0
 jiter==0.16.0
 makefun==1.16.0
 mako==1.4.1
@@ -37,6 +53,7 @@ packaging==26.3
 pdfminer-six==20260107
 pdfplumber==0.11.10
 pillow==12.3.0
+pluggy==1.6.0
 psycopg==3.3.4
 psycopg-binary==3.3.4
 pwdlib==0.3.0
@@ -47,11 +64,13 @@ pydantic-settings==2.15.0
 pygments==2.21.0
 pyjwt==2.13.0
 pypdfium2==5.13.0
+pytest==9.1.1
 python-dotenv==1.2.3
 python-multipart==0.0.32
 pyyaml==6.0.3
 requests==2.34.2
 resend==2.39.0
+ruff==0.16.4
 sniffio==1.3.1
 sqlalchemy==2.0.52
 starlette==1.6.0

@@ -1,0 +1,36 @@
+# Dependabot — zero-maintenance dependency drift watchdog (INFRA-31).
+# pip-audit in ci.yml catches KNOWN vulns in what we ship; this file
+# catches AVAILABILITY drift (new versions) by opening PRs, which is the
+# half pip-audit cannot see.
+#
+# Scope notes:
+# - pip: Dependabot's pip ecosystem reads requirements.txt — the
+#   constraint file real installs are cut from. It does NOT read the
+#   custom-named requirements.lock, so the pinned lock stays a
+#   deliberate human step (bump the constraint here, then re-pin both
+#   locks together — scripts/check_dev_lock.py refuses a half-bump).
+# - npm: package.json + package-lock.json (frontend).
+# - github-actions: keeps actions/checkout, setup-python, setup-node and
+#   pypa/gh-action-pip-audit current.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps-backend)"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps-frontend)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps-ci)"

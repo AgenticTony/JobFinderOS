@@ -1,7 +1,7 @@
 # JobFinderOS — Project Memory
 
 > Auto-loaded context for AI coding sessions. Keep this current as the project evolves.
-> Last updated: 2026-08-26
+> Last updated: 2026-08-30
 
 ## MANDATORY DEVELOPMENT STANDARDS — read before every task
 
@@ -95,14 +95,14 @@ foundation, including how the GLM screening engine works).
   - Run: `cd frontend && npm run dev` → http://localhost:3000
   - Type-check: `npx tsc --noEmit --noUnusedLocals --noUnusedParameters`
 - **Tests:** `cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`
-  - All 42+ tests must be green before any commit
+  - All 352 tests must be green before any commit
   - Flow test: `PYTHONPATH=. .venv/bin/python tests/test_flow.py`
   - Calibration (opt-in, costs API calls): `RUN_CALIBRATION=1 pytest tests/test_calibration.py`
 
 ## Pipeline (implemented & verified)
 
 ```
-scrape (9 sources) → dedupe → per-user gates (location/language/freshness) → store
+scrape (8 sources) → dedupe → per-user gates (location/language/freshness) → store
   → AI match vs CV (score/tier/skills, glm-5.1, anchored rubric, temp=0)
   → user approves match in UI
   → AI tailors CV + cover letter for THAT job (ApplicationDraft, user edits)
@@ -161,9 +161,12 @@ scrape (9 sources) → dedupe → per-user gates (location/language/freshness) �
 
 ## Production infrastructure
 
-- **CI** (.github/workflows/ci.yml): 3 jobs — Backend (ruff + Alembic on Postgres 16 +
-  multi-user tests + flow test), Frontend (tsc + next build), Docker (build + smoke test).
-  Installs from `requirements.lock` (71 pinned deps).
+- **CI** (.github/workflows/ci.yml): 5 jobs — Backend (ruff + Alembic on Postgres 16 +
+  full test suite on both DBs + flow test), Frontend (tsc + next build), Docker
+  (build + smoke test), pip-audit (supply-chain), Blueprint (render.yaml invariants).
+  CI installs from `requirements.dev.lock` (71 pins = prod lock + pytest/ruff);
+  the production Docker images install `requirements.lock` (67 pins) only.
+  Dependabot (.github/dependabot.yml) covers pip/npm/github-actions drift.
 - **Dockerfile**: python:3.12-slim, non-root user, lockfile-only install,
   ships Alembic for boot migrations.
 - **launchd agent**: `com.jobfinderos.backend` — RunAtLoad + KeepAlive.
@@ -224,7 +227,7 @@ scrape (9 sources) → dedupe → per-user gates (location/language/freshness) �
 
 ## Open items / next steps
 
-- [ ] **Re-score the 236 legacy-unversioned matches** (~$1, one script) — puts the
+- [ ] **Re-score the 243 legacy-unversioned matches** (~$1, one script) — puts the
       whole queue on one scoring function
 - [ ] Phase 1a-static: landing page (marketing, pricing, FAQ — no data model deps)
 - [ ] Phase 1c: signup UI, wizard entry from signup, console auth guard polish

@@ -23,6 +23,10 @@ SCRAPER_REGISTRY: Dict[str, Type[BaseScraper]] = {
     "careerjet": CareerjetScraper,
 }
 
+# __all__ must name ONLY imported symbols: a star import resolves every
+# entry eagerly, so a leftover name raises AttributeError at import time
+# ("TeamtailorScraper" sat here after its module was removed — HYGIENE;
+# pinned by TestScraperExportsHygiene in tests/test_units.py).
 __all__ = [
     "BaseScraper",
     "NormalizedJob",
@@ -32,7 +36,6 @@ __all__ = [
     "JobicyScraper",
     "WorkingNomadsScraper",
     "JobtechScraper",
-    "TeamtailorScraper",
     "ReedScraper",
     "AdzunaScraper",
     "CareerjetScraper",
