@@ -1,5 +1,6 @@
-"""Account API — GDPR erasure (right to be forgotten)."""
+"""Account API — GDPR erasure (right to be forgotten) and export."""
 
+import base64
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +16,9 @@ from app.models import (
     Profile,
     User,
 )
+from app.schemas.common import parse_json_list
 from app.services.cv_service import get_active_profile
+from app.services.storage import read_original_cv
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -136,11 +139,19 @@ async def export_account(
     profile = get_active_profile(db, user_id=uid)
 
     def match_row(m):
+        # reasoning + skill lists are an AI assessment OF THE PERSON —
+        # core Art. 15 data, not internals (external verification pass 2).
         return {
             "job_id": m.job_id,
             "score": m.score,
             "tier": m.tier,
+            "recommendation": m.recommendation,
+            "reasoning": m.reasoning,
+            "matched_skills": parse_json_list(m.matched_skills),
+            "missing_skills": parse_json_list(m.missing_skills),
+            "transferable_skills": parse_json_list(m.transferable_skills),
             "decision": m.decision,
+            "dismissed_reason": m.dismissed_reason,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
 
@@ -169,6 +180,33 @@ async def export_account(
             "created_at": a.created_at.isoformat() if a.created_at else None,
         }
 
+    # The CV is the document the user gave us — Art. 15/20 portability
+    # covers it verbatim (external verification pass 2 found it absent).
+    # The text is always included; the original PDF bytes are embedded
+    # base64 best-effort (storage hiccup must not fail the export).
+    cv_file_b64 = None
+    if profile:
+        try:
+            cv_bytes = read_original_cv(profile)
+            if cv_bytes:
+                cv_file_b64 = base64.b64encode(cv_bytes).decode("ascii")
+        except Exception:  # noqa: BLE001 — best-effort; text below is the data
+            logger.warning("GDPR export: CV file read failed for %s", uid)
+
+    def usage_row(u):
+        # ai_usage: the user's own activity telemetry (which AI ran, when,
+        # what it cost). Erasure deletes these; export shows them while live.
+        return {
+            "kind": u.kind,
+            "model": u.model,
+            "endpoint": u.endpoint,
+            "prompt_tokens": u.prompt_tokens,
+            "cached_tokens": u.cached_tokens,
+            "completion_tokens": u.completion_tokens,
+            "cost_usd": (u.cost_usd / 1_000_000) if u.cost_usd is not None else None,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        }
+
     return {
         "account": {"id": str(uid), "email": user.email, "created_at": user.created_at.isoformat() if user.created_at else None},
         "profile": {
@@ -181,6 +219,9 @@ async def export_account(
             "municipality": profile.municipality,
             "languages": profile.languages,
             "search_queries": profile.search_queries,
+            "cv_file_name": profile.cv_file_name,
+            "cv_text": profile.cv_text,
+            "cv_file_b64": cv_file_b64,
             "created_at": profile.created_at.isoformat() if profile.created_at else None,
         }
         if profile
@@ -196,5 +237,9 @@ async def export_account(
         "applications": [
             app_row(a)
             for a in db.query(Application).filter(Application.user_id == uid).all()
+        ],
+        "ai_usage": [
+            usage_row(u)
+            for u in db.query(AIUsage).filter(AIUsage.user_id == uid).order_by(AIUsage.created_at).all()
         ],
     }

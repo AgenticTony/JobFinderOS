@@ -37,3 +37,4 @@ agent/
 agents/
 .claude/
 skills-lock.json
+.gbrain-source

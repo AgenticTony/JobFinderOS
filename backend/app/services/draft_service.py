@@ -174,7 +174,16 @@ def create_draft_for_job(
             # it via the summary. After the lossy-years fix, the summary
             # is safe to include — aligning before that fix would have
             # laundered the bad summary into 'supported'.
-            model_input = (f"{profile.cv_text}\n"
+            #
+            # INVARIANT (2026-08-31): the guard's source is never smaller
+            # than the generator's input. The CV is guarded BEFORE
+            # composing — slicing the composed source later (the old
+            # [:9000] in judge_fabrication) cut the profile context off
+            # long CVs entirely, and truthful claims sourced from it were
+            # flagged as fabrications: regeneration loop, blocked send,
+            # for exactly the long-master-CV users the product targets.
+            from app.services.ai_service import CV_GUARD_CHARS
+            model_input = (f"{profile.cv_text[:CV_GUARD_CHARS]}\n"
                            f"{build_profile_context(profile, include_derived=False)}")
             findings = unsupported_claims(
                 model_input,

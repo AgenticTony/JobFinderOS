@@ -562,6 +562,135 @@ class TestPromptVersionComposition:
         assert AIService.matching_prompt_version() == before
 
 
+class TestCVSentWhole:
+    """2026-08-31 cap removal: the per-stage CV caps (match 5000, suggest
+    6000, tailor/judge 9000) truncated 2-3 page CVs mid-history — a CV
+    page is ~3,000-3,500 chars — cutting the oldest roles where a career
+    changer's transfer evidence lives, and made the fabrication judge see
+    LESS than the generator (past 9000 chars the profile context fell off
+    the composed source entirely → truthful users flagged as fabricating).
+    One shared context guard (CV_GUARD_CHARS) replaces all four caps."""
+
+    MATCH_OK = (
+        '{"score": 42, "tier": "fair_match", "reasoning": "ok", '
+        '"matched_skills": [], "missing_skills": [], '
+        '"transferable_skills": [], "recommendation": "maybe", '
+        '"confidence": "medium"}'
+    )
+
+    def _svc(self, raw_response):
+        from app.services.ai_service import AIService
+
+        svc = AIService(api_key="test-only")
+        captured = {}
+
+        def fake_complete(system_prompt, user_message, temperature=0.3, kind="unknown"):
+            captured["user"] = user_message
+            return raw_response
+
+        svc._complete = fake_complete
+        return svc, captured
+
+    def test_match_sends_the_whole_cv_past_every_old_cap(self):
+        svc, captured = self._svc(self.MATCH_OK)
+        long_cv = "TRANSFER EVIDENCE FROM THE OLDEST ROLES. " * 280  # ~11k chars
+        assert len(long_cv) > 9_000  # beyond even the old tailor/judge cap
+        svc.match_job(
+            profile_context="ctx", cv_text=long_cv,
+            job_description="Title: Dev\n\nDescription:\nA role.",
+        )
+        assert long_cv in captured["user"], (
+            "match_job truncated the CV — the stage that permanently "
+            "dismisses jobs must see the whole CV or the tail of a master "
+            "CV (the transfer evidence) is invisible to it"
+        )
+
+    def test_suggest_search_queries_sends_the_whole_cv(self):
+        svc, captured = self._svc('{"from_your_experience": [], "worth_a_look": []}')
+        long_cv = "FULL CAREER HISTORY. " * 350  # ~7k chars, past the old 6000 cap
+        svc.suggest_search_queries(cv_text=long_cv, country="SE")
+        assert long_cv in captured["user"], (
+            "suggest_search_queries truncated the CV — onboarding queries "
+            "must be derivable from the whole history, not its first two pages"
+        )
+
+    def test_judge_sees_source_and_tailored_uncapped(self):
+        svc, captured = self._svc('{"unsupported": []}')
+        source = "S" * 12_000 + "\nPROFILE CONTEXT TAIL"
+        tailored = "T" * 12_000
+        assert svc.judge_fabrication(source, tailored) == []
+        assert "PROFILE CONTEXT TAIL" in captured["user"], (
+            "the judge's source was sliced — the profile context falls off "
+            "long CVs and truthful claims get flagged as fabrications"
+        )
+        assert "S" * 12_000 in captured["user"] and "T" * 12_000 in captured["user"], (
+            "the judge must see BOTH documents whole: a cut tailored "
+            "document hides fabrications in its tail instead of catching them"
+        )
+
+    def test_draft_guard_source_equals_the_generators_guarded_view(self, db, monkeypatch):
+        """The invariant, at the place it broke: draft_service composes the
+        guard's source, so it must guard the CV BEFORE composing — never
+        slice the composed string after the fact."""
+        from app.models import JobPosting, Profile, User
+        from app.services import draft_service
+        from app.services.ai_service import CV_GUARD_CHARS
+        from app.services.cv_service import build_profile_context
+
+        uid = uuid.uuid4()
+        db.add(User(id=uid, email=f"cvw-{uid.hex[:8]}@test.example",
+                    hashed_password="test-only"))
+        db.flush()
+        long_cv = "LONG MASTER CV EVIDENCE. " * 400  # 9,600 chars — over the old 9000 slice
+        db.add(Profile(
+            is_active=1, user_id=uid, full_name="Whole CV Tester",
+            cv_file_name="cv.pdf", cv_text=long_cv, country="SE",
+            search_queries='["utvecklare"]', languages='[]',
+        ))
+        job = JobPosting(
+            source="manual", source_id=uid.hex[:8], title="Dev", company="Acme",
+            url=f"https://x/{uid.hex[:6]}", status="matched",
+            description="A real role with a real description.",
+        )
+        db.add(job)
+        db.commit()
+        profile = db.query(Profile).filter(Profile.user_id == uid).one()
+
+        expected_source = (
+            long_cv[:CV_GUARD_CHARS] + "\n"
+            + build_profile_context(profile, include_derived=False)
+        )
+        seen = {}
+
+        class _Tailor:
+            def tailor_application(self, **kwargs):
+                # tailored docs built ONLY from CV fragments: Layer A must
+                # come back clean so the judge branch actually runs
+                return {
+                    "cover_letter": long_cv[:180],
+                    "tailored_cv": long_cv[:400],
+                    "changes_summary": ["Reordered skills."],
+                }
+
+        class _Judge:
+            def judge_fabrication(self, source, tailored):
+                seen["source"] = source
+                seen["tailored"] = tailored
+                return []
+
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: _Tailor())
+        monkeypatch.setattr(draft_service, "get_ai_service_with_judge", lambda: _Judge())
+
+        draft_service.create_draft_for_job(db, job, profile=profile, user_id=uid)
+
+        assert seen.get("source") == expected_source, (
+            "the guard's source must equal the generator's guarded input "
+            f"(expected {len(expected_source)} chars, saw {len(seen.get('source', ''))}) "
+            "— a smaller view once cut the profile context off long CVs"
+        )
+
+
 class TestDuplicateMatchContainment:
     """B9: a pre-matched job requeued must not abort the whole batch."""
 

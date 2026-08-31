@@ -32,14 +32,16 @@ from app.services.ai_service import AIService  # noqa: E402
 #: last calibrated. If the prompt text changes, matching_prompt_version()
 #: changes and this test fails — bump this constant DELIBERATELY, and
 #: re-score the backlog, because old scores are no longer comparable.
-CALIBRATED_PROMPT_VERSION = "m2-86693873"  # AI-13: MATCHING_INPUT_COMPOSITION_VERSION
-# (=2) folded into the hash — the hash used to cover only the system prompt,
-# so the experience_years removal from the profile context changed what the
-# model SAW with no version bump. The prompt TEXT is unchanged; the rubric's
-# MEANING is unchanged — MATCHING_PROMPT_MAJOR stays m2. Cross-version scores
-# are not comparable BY DESIGN (the 236 pre-constant rows are already
-# legacy-unversioned); rows stamped m2-57a0f692 are now one composition era
-# older and re-score when picked up.
+CALIBRATED_PROMPT_VERSION = "m2-7bc7123f"  # AI-13: MATCHING_INPUT_COMPOSITION_VERSION
+# (=2 → 3, 2026-08-31) folded into the hash — the hash used to cover only
+# the system prompt, so the experience_years removal from the profile
+# context changed what the model SAW with no version bump. The prompt TEXT
+# is unchanged; the rubric's MEANING is unchanged — MATCHING_PROMPT_MAJOR
+# stays m2. v3 = the CV-cap removal (cv_text whole up to CV_GUARD_CHARS):
+# for every CV under the old 5,000-char cap the prompts are byte-identical
+# — which covers the calibrated CV — so the tier bands stay valid and NO
+# backlog re-score is owed. Cross-version scores are not comparable BY
+# DESIGN; older-era rows re-score when picked up.
 
 
 class TestPromptVersioning:

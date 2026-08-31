@@ -377,13 +377,14 @@ class TestMatchTimeScopeGate:
         )
         assert summary["matches_created"] == 1
 
-        # The remote job was dismissed for FREE, per-user, before the AI
-        row = db.query(MatchResult).filter(
+        # The remote job was SKIPPED for free, per-user, before the AI —
+        # REG1 fix: no dismissal row is written (a terminal row would make
+        # the skip permanent; widening preferences must be able to recover
+        # the job, which the candidate query's match-row exclusion would
+        # prevent). The job simply stays eligible for a future run.
+        assert db.query(MatchResult).filter(
             MatchResult.user_id == uid, MatchResult.job_id == remote_job.id
-        ).one()
-        assert row.dismissed_reason == "out_of_scope"
-        assert row.decision == "rejected"
-        # Dismissal is per-user state — the shared job row is untouched
+        ).count() == 0, "out_of_scope must be a per-run SKIP, not a row"
         db.refresh(remote_job)
         assert remote_job.status == "new"
         # ...and the local job got the slot: a real match row, not a dismissal
@@ -393,6 +394,45 @@ class TestMatchTimeScopeGate:
             MatchResult.user_id == uid, MatchResult.job_id == local_job.id
         ).one()
         assert kept.decision is None and kept.score == 80
+
+    def test_reg1_widened_scope_recovers_skipped_jobs(self, db, monkeypatch):
+        """REG1 (live-proven 2026-08-31): a user runs matching with
+        include_remote=False — the remote job is skipped. They re-onboard
+        with include_remote=True and run again: the job MUST come back.
+        Under the old dismissal-row form it never did — the candidate
+        query excludes any (user, job) with a match row, so one narrow
+        run permanently deleted the job from the widened scope's world."""
+        from app.models import MatchResult, Profile
+        from app.services import matcher_service
+
+        uid = _onboarded_user(db, country="GB", municipalities='["London"]',
+                              include_remote=False)
+        profile = db.query(Profile).filter(Profile.user_id == uid).one()
+        remote_job = _job_row(db, remote=1, location="Remote",
+                              title="Remote Recovery Dev",
+                              description="Fully remote Python role.")
+        ai = _fake_ai(monkeypatch)
+
+        matcher_service.run_matching(db, profile=profile, user_id=uid)
+        assert ai["jobs"] == [], "strictly-local run must skip the remote job"
+        assert db.query(MatchResult).filter(
+            MatchResult.user_id == uid).count() == 0, (
+            "the skip must leave no row (a row would block recovery)"
+        )
+
+        # the user widens their preferences in the wizard and hunts again
+        profile.include_remote = 1
+        db.commit()
+        matcher_service.run_matching(db, profile=profile, user_id=uid)
+
+        assert ai["jobs"] == ["Remote Recovery Dev"], (
+            f"REG1 regression: after include_remote=True the previously "
+            f"skipped job must be evaluated (got {ai['jobs']})"
+        )
+        row = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == remote_job.id
+        ).one()
+        assert row.decision is None and row.score == 80
 
     def test_remote_allowing_user_still_sees_remote_jobs(self, db, monkeypatch):
         from app.models import MatchResult, Profile
@@ -437,8 +477,10 @@ class TestMatchTimeScopeGate:
             "a same-country but out-of-municipality on-site job must not "
             f"spend this strictly-local user's AI budget (got {ai['jobs']})"
         )
+        # REG1 semantics: skipped, never written — stays eligible for a
+        # future run or a widened scope
         assert db.query(MatchResult).filter(
-            MatchResult.dismissed_reason == "out_of_scope").count() == 1
+            MatchResult.dismissed_reason == "out_of_scope").count() == 0
 
     def test_ingest_mirror_radius_user_keeps_neighbouring_job(self, db, monkeypatch):
         """NOT-STRICTER-THAN-INGEST pin: a Malmö+30km user's own radius
@@ -469,13 +511,13 @@ class TestMatchTimeScopeGate:
             "stricter than ingest would strand exactly the jobs PIPE-15 "
             f"went out of its way to fetch (got {ai['jobs']})"
         )
-        dismissed = db.query(MatchResult).filter(
+        # REG1 semantics: the out-of-area careerjet ad is SKIPPED (no row —
+        # a widened scope or a future run can still admit it)
+        assert db.query(MatchResult).filter(
             MatchResult.job_id == gbg_job.id,
-            MatchResult.dismissed_reason == "out_of_scope").count()
-        assert dismissed == 1, (
-            "the careerjet ad out of the user's area was stored for ANOTHER "
-            "user's scope; at match time it mirrors the strict gate that "
-            "the user's own careerjet fetch would have applied"
+            MatchResult.dismissed_reason == "out_of_scope").count() == 0, (
+            "the careerjet ad out of the user's area must be skipped "
+            "without a terminal dismissal row"
         )
         db.refresh(lund_job)
         assert lund_job.status == "matched"
@@ -514,8 +556,9 @@ class TestMatchTimeScopeGate:
         matcher_service.run_matching(db, profile=profile, user_id=uid)
 
         assert ai["jobs"] == ["Remote Dev"]
+        # REG1 semantics: the on-site job is skipped, no terminal row
         assert db.query(MatchResult).filter(
-            MatchResult.dismissed_reason == "out_of_scope").count() == 1
+            MatchResult.dismissed_reason == "out_of_scope").count() == 0
 
     def test_budget_accounting_evaluation_cap_not_consumed_by_scope(self, db, monkeypatch):
         """Budget accounting: with 3 out-of-scope jobs and 1 in-scope job

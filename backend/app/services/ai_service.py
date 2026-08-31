@@ -42,6 +42,20 @@ AI_PRICES_USD_PER_M = {
 }
 DEFAULT_PRICE = (1.40, 0.26, 4.40)  # assume glm-5.1 pricing until updated
 
+# CV-side context guard (2026-08-31). The old per-stage caps — match 5000,
+# suggest 6000, tailor/judge 9000 — truncated 2-3 page CVs mid-history (a
+# CV page is ~3,000-3,500 chars) and made the fabrication judge see LESS
+# than the generator: past 9000 chars the profile context fell off the
+# composed source entirely and truthful claims were flagged as
+# fabrications. With Z.ai prefix caching measured at an 86% hit rate the
+# CV bills at the cached rate, so the caps' cost argument is dead
+# (~$0.0005/call extra for a 12k-char CV). This is a context-WINDOW
+# ceiling (~25k tokens), NOT a scoring cap — real CVs are 2-6 pages
+# (6k-20k chars). The JD caps stay: the 2026-08-31 truncation probe
+# re-scored all 51 truncated-and-dismissed jobs at a 12k JD cap and zero
+# verdicts changed.
+CV_GUARD_CHARS = 100_000
+
 
 def compute_cost_usd(model: str, prompt: int, cached: int, completion: int) -> int:
     """Cost in MICRO-dollars (integer, exact at these magnitudes)."""
@@ -206,7 +220,7 @@ Respond with ONLY valid JSON (no markdown):
 {profile_context}
 
 ## My CV (evidence)
-{cv_text[:5000]}
+{cv_text[:CV_GUARD_CHARS]}
 
 ## Job Posting
 {job_description[:5000]}
@@ -309,7 +323,7 @@ Respond with ONLY valid JSON (no markdown):
 {profile_context}
 
 ## My CV (source of truth — every fact must come from here)
-{cv_text[:9000]}
+{cv_text[:CV_GUARD_CHARS]}
 
 ## The Job I Approved
 {job_description[:6000]}
@@ -425,7 +439,7 @@ Respond with ONLY valid JSON (no markdown):
   "occupation_names": ["Standard Occupation Name", "..."]
 }}"""
 
-        raw = self._complete(system_prompt, f"## CV\n{cv_text[:6000]}\n\nSuggest search queries.",
+        raw = self._complete(system_prompt, f"## CV\n{cv_text[:CV_GUARD_CHARS]}\n\nSuggest search queries.",
                            kind="suggest")
         parsed = self._parse_json(raw)
 
@@ -595,9 +609,13 @@ have not had. Translation is legitimate (an English CV may be tailored
 into Swedish); fabrication is not. Respond with ONLY valid JSON:
 {"unsupported": [{"claim": "...", "why": "..."}]}
 An empty list means the document is faithful."""
+        # UNCAPPED by design (2026-08-31): the judge must see at least
+        # what the generator saw. Slicing here once cut the profile
+        # context off long CVs and blocked truthful users — the caller
+        # composes and guards the source, this side never shrinks it.
         user_message = (
-            f"## SOURCE OF TRUTH\n{source_of_truth[:9000]}\n\n"
-            f"## TAILORED DOCUMENT\n{tailored_text[:9000]}\n\n"
+            f"## SOURCE OF TRUTH\n{source_of_truth}\n\n"
+            f"## TAILORED DOCUMENT\n{tailored_text}\n\n"
             "List every unsupported claim."
         )
         raw = self._complete(system_prompt, user_message, temperature=0.0,
@@ -644,8 +662,13 @@ An empty list means the document is faithful."""
     #: hash used to cover only the prompt text, so the experience_years
     #: removal from the profile context changed what the model SAW with
     #: no version bump and scores silently stopped being comparable.
-    #: 1 = the implicit pre-constant era; 2 = current composition.
-    MATCHING_INPUT_COMPOSITION_VERSION = 2
+    #: 1 = the implicit pre-constant era; 2 = CV capped at 5000 chars at
+    #: match time; 3 = 2026-08-31, CV sent whole up to CV_GUARD_CHARS.
+    #: Prompts are byte-identical for any CV under the old cap, so
+    #: existing v2 rows stay valid and NO re-score is owed — the bump
+    #: marks the policy change so capped-vs-whole questions stay
+    #: answerable from stored prompt_version values.
+    MATCHING_INPUT_COMPOSITION_VERSION = 3
 
     @classmethod
     def matching_prompt_version(cls) -> str:

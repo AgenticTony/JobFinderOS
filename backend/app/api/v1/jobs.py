@@ -1,4 +1,4 @@
-"""Jobs API — scraped job postings list, detail, manual add, delete."""
+"""Jobs API — scraped job postings list, detail, manual add."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -7,7 +7,7 @@ from app.api.deps import get_authenticated_user
 from app.core.database import get_db
 from app.core.dedupe import dedupe_key_for
 from app.core.ratelimit import enforce
-from app.crud import delete_job, get_job, list_jobs
+from app.crud import get_job, list_jobs
 from app.models import JobPosting, User
 from app.schemas.common import dump_json_list
 from app.schemas.job import JobCreate, JobDetailResponse, JobResponse
@@ -72,11 +72,13 @@ async def create_manual_job(
 # (matcher_service filters job.status != "dismissed" pool-wide) and the
 # re-queue guard was unscoped. The frontend never called it, and per-user
 # dismissal already lives on match_results.dismissed_reason.
-
-
-@router.delete("/{job_id}", status_code=204)
-async def remove_job(
-    job_id: int, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
-):
-    if not delete_job(db, job_id, user_id=user.id):
-        raise HTTPException(status_code=404, detail="Job not found")
+#
+# DELETE /{job_id} is GONE too (2026-08-31, external verification pass 2).
+# Its reference check counted only match/draft/application rows, so ANY
+# authenticated user could permanently delete ANY posting nobody had
+# matched yet — live-proven cross-tenant destruction: a user with no
+# relationship to a reed posting removed it from the shared pool for
+# every user (204); 19% of production postings had no reference rows.
+# The frontend never called this endpoint either, and per-user removal
+# of a job from one's own world already lives on
+# match_results.dismissed_reason — same decision as PATCH.
