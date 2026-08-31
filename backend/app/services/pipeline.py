@@ -41,8 +41,10 @@ DELTA_OVERLAP_HOURS = 24
 # reaches the terminal-status write and its ScrapeRun stays 'running'
 # on dashboards forever. A run this old can no longer be live: the
 # codebase's worst-case hunt budget is the worker's hunt-lock TTL
-# (CLAIM_TTL_MINUTES = 45 — matching time budget 300s + scrape +
-# retries); 2h gives that ~2.7x of headroom before we declare abortion.
+# (PIPE-18: sized from the scrape allowance + one matching budget per
+# onboarded user, floor 45min). This constant bounds a SINGLE SOURCE's
+# scrape, not the whole hunt — 2h is ~10x a source's own fetch+retry
+# budget even on a large deployment.
 STALE_RUN_ABORT_HOURS = 2
 
 
@@ -315,7 +317,11 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
         return run
 
     try:
-        jobs: List[NormalizedJob] = scraper_cls().fetch(ctx)
+        # PIPE-17: keep the INSTANCE — its fetch_complete flag is the
+        # fetch-health report the watermark decision below reads.
+        scraper = scraper_cls()
+        jobs: List[NormalizedJob] = scraper.fetch(ctx)
+        fetch_complete = getattr(scraper, "fetch_complete", True)
         run.jobs_found = len(jobs)
 
         # Universal location gate — out-of-area jobs are never stored,
@@ -377,11 +383,26 @@ def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> 
         run.status = "completed"
         db.commit()
         if source_name in DELTA_SOURCES:
-            try:
-                set_watermarks(db, source_name, ctx)
-            except Exception as e:  # noqa: BLE001 — a watermark miss degrades
-                # to a re-read next run (overlap absorbs it); never fail the hunt
-                logger.warning("[%s] watermark update failed: %s", source_name, e)
+            # PIPE-17: only a FULLY successful fetch may advance the
+            # watermark. A partial fetch (a paginated walk that broke on
+            # a page error) holds the old stamp so the next run re-reads
+            # the gap — the 24h overlap + dedupe absorb the re-fetch.
+            # Stamping a partial fetch permanently skipped the un-read
+            # pages in delta mode: one 06:00 hiccup dropped that day's
+            # postings for every user sharing the scope. An ordinary
+            # "0 new jobs" fetch is NOT partial — the walk completed —
+            # and still stamps.
+            if fetch_complete:
+                try:
+                    set_watermarks(db, source_name, ctx)
+                except Exception as e:  # noqa: BLE001 — a watermark miss degrades
+                    # to a re-read next run (overlap absorbs it); never fail the hunt
+                    logger.warning("[%s] watermark update failed: %s", source_name, e)
+            else:
+                logger.warning(
+                    "[%s] partial fetch — watermark held; next run re-reads the gap",
+                    source_name,
+                )
         logger.info(
             "[%s] %d found, %d new (delta_since=%s)",
             source_name, len(jobs), new_count, ctx.get("delta_since"),

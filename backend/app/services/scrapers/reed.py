@@ -93,6 +93,9 @@ class ReedScraper(BaseScraper):
                 response.raise_for_status()
                 data = response.json()
             except Exception as e:
+                # PIPE-17: this search unit was never read — mark the
+                # fetch partial (see adzuna's note).
+                self.fetch_complete = False
                 logger.warning("[reed] search failed (%s): %s", extra or "broad", e)
                 continue
 

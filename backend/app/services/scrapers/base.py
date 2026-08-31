@@ -83,6 +83,16 @@ class BaseScraper(ABC):
     #: registry name — must be unique
     source: str = "base"
 
+    #: PIPE-17 fetch-health report. True = every page this fetch was
+    #: going to read came back (the result list is the WHOLE unit).
+    #: Paginated scrapers that bail out mid-walk on a page error set
+    #: this False on their own instance — the pipeline then refuses to
+    #: advance the delta watermark, because stamping a partial fetch
+    #: permanently skips the un-read pages. Single-request scrapers
+    #: never touch it: for them a fetch either succeeds whole or raises
+    #: (which fails the run, and a failed run never watermarks).
+    fetch_complete: bool = True
+
     @classmethod
     def is_configured(cls, context: Optional[dict] = None) -> bool:
         """False when required credentials/settings are missing — the pipeline

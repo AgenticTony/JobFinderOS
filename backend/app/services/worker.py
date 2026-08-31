@@ -9,10 +9,12 @@ the only thing that hunts:
 
 Every scheduled cycle claims the DB hunt lock first — portable
 (SQLite + Postgres), TTL-stealable (a crashed holder self-heals),
-always released. A double-started worker skips harmlessly.
+always released BY ITS OWNER (PIPE-18). A double-started worker skips
+harmlessly.
 """
 
 import logging
+import uuid
 
 from app.core.config import settings
 from app.core.database import SessionLocal, init_db
@@ -20,14 +22,65 @@ from app.services.ai_service import current_user_id
 
 logger = logging.getLogger(__name__)
 
-CLAIM_TTL_MINUTES = 45  # a hunt cycle's worst-case budget (matching
-                         # time-budget default 300s + scrape + retries)
+# PIPE-18 — the claim TTL is SIZED, not guessed. The old fixed
+# CLAIM_TTL_MINUTES=45 covered the scrape phase + at most SIX users'
+# matching (MATCH_TIME_BUDGET_SECONDS=420 each), while a scheduled hunt
+# matches EVERY onboarded user in one claimed cycle: at N users the
+# holder overran its own TTL, a second worker stole the claim, and the
+# overrunner's unconditional release then freed the STEALER's claim —
+# two concurrent hunts double-scoring the shared pool.
+CLAIM_TTL_FLOOR_MINUTES = 45  # scrape phase + small deployments; keeps
+#                              the historical minimum release cadence
+SCRAPE_PHASE_ALLOWANCE_MINUTES = 15  # union contexts x sources, with retries
+CLAIM_TTL_SAFETY_FACTOR = 1.25  # headroom over the computed worst case
 
 
-def claim_hunt(db) -> bool:
-    """Claim the hunt lock. True = this process runs the cycle; False =
-    someone else holds it (skip, don't error). Stale claims (crashed
-    holder past TTL) are stealable.
+def _onboarded_user_count(db) -> int:
+    """Users this hunt cycle will match (the worker's own enumeration)."""
+    from app.models import Profile
+
+    try:
+        return (
+            db.query(Profile.user_id)
+            .filter(Profile.country.isnot(None), Profile.user_id.isnot(None))
+            .distinct()
+            .count()
+        )
+    except Exception:  # noqa: BLE001 — sizing must never break claiming
+        return 0
+
+
+def compute_claim_ttl_minutes(user_count: int) -> int:
+    """Worst-case hunt budget: the scrape phase plus ONE matching time
+    budget per onboarded user, with headroom, floored at the historical
+    45 minutes.
+
+    MATCH_TIME_BUDGET_SECONDS is the binding per-user cost — it is the
+    hard wall-clock stop of a matching run. MAX_JOBS_PER_MATCH_RUN (the
+    200-evaluation spend cap) cannot exceed it in wall time (200 evals
+    x up to 3 samples at ~5-10s each is stopped by the 420s budget long
+    before the cap), so sizing on the time budget covers both.
+    """
+    import math
+
+    per_user_minutes = math.ceil(settings.MATCH_TIME_BUDGET_SECONDS / 60)
+    worst = SCRAPE_PHASE_ALLOWANCE_MINUTES + max(int(user_count), 0) * per_user_minutes
+    return max(CLAIM_TTL_FLOOR_MINUTES, math.ceil(worst * CLAIM_TTL_SAFETY_FACTOR))
+
+
+def _claim_ttl_minutes(db) -> int:
+    """Effective TTL: the ops override, else the computed worst case."""
+    return settings.HUNT_CLAIM_TTL_MINUTES or compute_claim_ttl_minutes(
+        _onboarded_user_count(db)
+    )
+
+
+def claim_hunt(db):
+    """Claim the hunt lock. Returns the claim's OWNER TOKEN (truthy) when
+    this process runs the cycle, None when someone else holds it (skip,
+    don't error). Stale claims (crashed holder past TTL) are stealable —
+    stealing mints a NEW owner token, so the overrunner cannot release
+    the stealer's claim.
 
     ATOMIC (review r2): one conditional UPDATE whose rowcount is the
     verdict — the previous SELECT->check->UPDATE had no serialization
@@ -42,7 +95,8 @@ def claim_hunt(db) -> bool:
     from app.models import SystemLock
 
     now = utc_now()
-    new_until = now + datetime.timedelta(minutes=CLAIM_TTL_MINUTES)
+    new_until = now + datetime.timedelta(minutes=_claim_ttl_minutes(db))
+    owner_token = uuid.uuid4().hex
 
     result = db.execute(
         update(SystemLock)
@@ -51,41 +105,84 @@ def claim_hunt(db) -> bool:
             or_(SystemLock.locked_until.is_(None),
                 SystemLock.locked_until <= now),
         )
-        .values(locked_until=new_until)
+        .values(locked_until=new_until, owner_token=owner_token)
     )
     db.commit()
     if result.rowcount == 1:
-        return True
+        return owner_token
 
-    # rowcount 0: either held (False) or the row does not exist yet —
+    # rowcount 0: either held (None) or the row does not exist yet —
     # first-ever claim via INSERT; the PK makes a second inserter lose
     db.rollback()
-    db.add(SystemLock(name="hunt", locked_until=new_until))
+    db.add(SystemLock(name="hunt", locked_until=new_until, owner_token=owner_token))
     try:
         db.commit()
-        return True
+        return owner_token
     except Exception:  # noqa: BLE001 — PK collision = another process claimed first
         db.rollback()
-        return False
+        return None
 
 
-def release_hunt(db) -> None:
-    """Release the claim. Idempotent — safe on the crashed-after-release
-    path."""
+def release_hunt(db, owner_token) -> bool:
+    """Release OUR claim — a conditional UPDATE keyed on the owner
+    token (PIPE-18). A holder whose TTL was stolen releases NOTHING:
+    the stealer owns the claim now, and clearing it would put a second
+    hunt in flight. Idempotent for the true owner — safe on the
+    crashed-after-release path. Returns True when this call freed it.
+    """
+    from sqlalchemy import update
+
     from app.models import SystemLock
 
-    row = db.query(SystemLock).filter(SystemLock.name == "hunt").first()
-    if row is not None:
-        row.locked_until = None
-        db.add(row)
-        db.commit()
+    result = db.execute(
+        update(SystemLock)
+        .where(
+            SystemLock.name == "hunt",
+            SystemLock.owner_token == owner_token,
+            SystemLock.locked_until.isnot(None),
+        )
+        .values(locked_until=None, owner_token=None)
+    )
+    db.commit()
+    return result.rowcount == 1
+
+
+def renew_hunt(db, owner_token) -> bool:
+    """Heartbeat: extend OUR claim's TTL (fresh full window, re-sized
+    from the live user count — a user added mid-cycle is covered).
+
+    The worker calls this once per matched user. With the heartbeat, a
+    LIVE hunt never expires its own TTL; without a holder, TTL expiry
+    remains the self-heal for a crashed process. Returns False when the
+    claim is no longer ours (stolen after a heartbeat gap): the caller
+    logs it and finishes its cycle — the stealer is already running and
+    dedupe/upsert keep the pool consistent.
+    """
+    import datetime
+
+    from sqlalchemy import update
+
+    from app.core.timeutil import utc_now
+    from app.models import SystemLock
+
+    result = db.execute(
+        update(SystemLock)
+        .where(
+            SystemLock.name == "hunt",
+            SystemLock.owner_token == owner_token,
+            SystemLock.locked_until.isnot(None),
+        )
+        .values(locked_until=utc_now() + datetime.timedelta(minutes=_claim_ttl_minutes(db)))
+    )
+    db.commit()
+    return result.rowcount == 1
 
 
 def run_scheduled_hunt() -> dict:
     """One hunt cycle under the claim lock: ONE delta scrape per country
     (the UNION of every onboarded user's queries and municipalities —
     the pool stops being shaped by whoever last pressed Hunt), then a
-    matching pass per user. The claim is ALWAYS released."""
+    matching pass per user. The claim is ALWAYS released by its owner."""
     from app.models import Profile
     from app.services.pipeline import (
         _maintenance_sweeps,
@@ -94,9 +191,11 @@ def run_scheduled_hunt() -> dict:
         scrape_for_context,
     )
 
+    claim_token = None
     db = SessionLocal()
     try:
-        if not claim_hunt(db):
+        claim_token = claim_hunt(db)
+        if not claim_token:
             logger.info("Hunt lock held elsewhere — skipping this cycle")
             return {"status": "skipped", "reason": "lock_held"}
     finally:
@@ -133,6 +232,15 @@ def run_scheduled_hunt() -> dict:
             try:
                 db = SessionLocal()
                 try:
+                    # PIPE-18 heartbeat: keep OUR claim alive across the
+                    # per-user matching passes (each may spend a full
+                    # MATCH_TIME_BUDGET_SECONDS), re-sized for users
+                    # onboarded since the claim.
+                    if not renew_hunt(db, claim_token):
+                        logger.warning(
+                            "Hunt claim no longer ours (TTL stolen?) — "
+                            "finishing this cycle; the stealer is running"
+                        )
                     result = match_for_user(db, uid)
                 finally:
                     db.close()
@@ -140,6 +248,13 @@ def run_scheduled_hunt() -> dict:
                     summary["errors"] += 1
                     logger.error("Scheduled match failed for user %s: %s",
                                  uid, result.get("error"))
+                elif result.get("status") == "aborted":
+                    # PIPE-19: the user vanished mid-run (GDPR erase).
+                    # Not an error and not a served user — just stop.
+                    logger.info(
+                        "Scheduled match aborted for user %s (deleted mid-run)",
+                        uid,
+                    )
                 else:
                     summary["users"] += 1
             except Exception as e:  # noqa: BLE001 — one user's failure never kills the cycle
@@ -148,13 +263,19 @@ def run_scheduled_hunt() -> dict:
             finally:
                 current_user_id.reset(token)
     finally:
-        # ALWAYS released (review: a transient error between claim and
-        # release leaked the claim = 45-minute silent outage)
-        db = SessionLocal()
-        try:
-            release_hunt(db)
-        finally:
-            db.close()
+        # ALWAYS released BY ITS OWNER (review: a transient error between
+        # claim and release leaked the claim = a TTL-length silent
+        # outage; PIPE-18: only when the claim is still ours — an
+        # overrunner must not free a stealer's claim)
+        if claim_token:
+            db = SessionLocal()
+            try:
+                if not release_hunt(db, claim_token):
+                    logger.warning(
+                        "Hunt release skipped: claim no longer ours (TTL stolen)"
+                    )
+            finally:
+                db.close()
     logger.info("Scheduled hunt: %s", summary)
     return summary
 

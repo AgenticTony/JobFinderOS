@@ -2369,10 +2369,11 @@ class TestHuntClaimLock:
     def test_exactly_one_claimant_wins(self, db):
         from app.services.worker import claim_hunt, release_hunt
 
-        assert claim_hunt(db) is True, "first claimant must win"
-        assert claim_hunt(db) is False, "second concurrent claimant must skip"
-        release_hunt(db)
-        assert claim_hunt(db) is True, "released claim is claimable again"
+        token = claim_hunt(db)
+        assert token, "first claimant must win"
+        assert claim_hunt(db) is None, "second concurrent claimant must skip"
+        release_hunt(db, token)
+        assert claim_hunt(db), "released claim is claimable again"
 
     def test_stale_claim_is_stealable(self, db):
         """A crashed holder self-heals: once the TTL passes, the claim
@@ -2386,15 +2387,15 @@ class TestHuntClaimLock:
         db.commit()
         from app.services.worker import claim_hunt
 
-        assert claim_hunt(db) is True, "stale claim must be stealable"
+        assert claim_hunt(db), "stale claim must be stealable"
 
     def test_release_is_idempotent(self, db):
         from app.services.worker import claim_hunt, release_hunt
 
-        claim_hunt(db)
-        release_hunt(db)
-        release_hunt(db)  # crashed-after-release path must not raise
-        assert claim_hunt(db) is True
+        token = claim_hunt(db)
+        release_hunt(db, token)
+        release_hunt(db, token)  # crashed-after-release path must not raise
+        assert claim_hunt(db)
 
 
 class TestWorkerEntrypoint:
@@ -2425,12 +2426,12 @@ class TestWorkerEntrypoint:
 
         from app.services import worker
 
-        with patch.object(worker, "claim_hunt", return_value=True), \
+        with patch.object(worker, "claim_hunt", return_value="test-owner-token"), \
              patch.object(worker.SessionLocal, "__call__", side_effect=[db, db]):
             summary = worker.run_scheduled_hunt()
         assert summary["status"] == "ran"
         # claim released: next claim succeeds
-        assert worker.claim_hunt(db) is True
+        assert worker.claim_hunt(db)
 
 
 class TestClaimInsertRace:
@@ -2465,8 +2466,8 @@ class TestClaimInsertRace:
             won = worker.claim_hunt(db)
         finally:
             db.execute = original_execute
-        assert won is False, (
-            "the losing inserter must return False, not raise — a PK "
+        assert won is None, (
+            "the losing inserter must return None, not raise — a PK "
             "collision is another process winning the claim"
         )
 
@@ -2485,8 +2486,9 @@ class TestClaimAtomicUpdatePath:
         from app.services.worker import claim_hunt, release_hunt
 
         # SEED: row exists and is released — the steady state
-        assert claim_hunt(db) is True
-        release_hunt(db)
+        seed_token = claim_hunt(db)
+        assert seed_token
+        release_hunt(db, seed_token)
 
         barrier = threading.Barrier(8)
         wins = []
@@ -2516,7 +2518,7 @@ class TestClaimAtomicUpdatePath:
         claim — a 45-minute silent outage from a transient DB error."""
         from app.services import worker
 
-        monkeypatch.setattr(worker, "claim_hunt", lambda db_: True)
+        monkeypatch.setattr(worker, "claim_hunt", lambda db_: "test-owner-token")
         # user enumeration explodes (transient DB error shape)
         import sqlalchemy as sa
 

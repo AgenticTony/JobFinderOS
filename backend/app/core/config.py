@@ -148,6 +148,12 @@ class Settings(BaseSettings):
 
     ENABLE_SCHEDULER: bool = False
     SCRAPE_INTERVAL_MINUTES: int = 60
+    # PIPE-18: hunt claim TTL override, minutes. Empty (default) = the
+    # worker COMPUTES it from the worst case (scrape allowance + one
+    # matching budget per onboarded user, floored at 45). Set only as an
+    # ops escape hatch — a value smaller than a real hunt cycle invites
+    # TTL-steal overlap.
+    HUNT_CLAIM_TTL_MINUTES: int | None = None
     # The EXTERNAL cron's hunt times (UTC, comma list "HH:MM") — set when
     # hunts run via the render.yaml cron job instead of the dev scheduler.
     # /api/v1/pipeline/status uses it to report an honest next-run time;

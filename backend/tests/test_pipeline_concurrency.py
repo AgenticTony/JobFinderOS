@@ -108,7 +108,8 @@ class TestManualHuntClaimsHuntLock:
 
         monkeypatch.setattr("app.api.v1.pipeline.run_pipeline", fake_run_pipeline)
 
-        assert claim_hunt(db) is True, "fixture setup: first claimant must win"
+        token = claim_hunt(db)
+        assert token, "fixture setup: first claimant must win"
         try:
             r = client.post(
                 "/api/v1/pipeline/run",
@@ -119,7 +120,7 @@ class TestManualHuntClaimsHuntLock:
             )
             assert not ran, "a held hunt lock must short-circuit the run, not double-run"
         finally:
-            release_hunt(db)
+            release_hunt(db, token)
 
     def test_lock_held_during_run_and_released_after(self, client, db, monkeypatch):
         """The route claims the SAME SystemLock row the worker uses:
@@ -141,10 +142,10 @@ class TestManualHuntClaimsHuntLock:
             "/api/v1/pipeline/run", json={"sources": ["arbeitnow"], "match": False}
         )
         assert r.status_code == 200, r.text[:300]
-        assert seen["claim_during_run"] is False, (
+        assert seen["claim_during_run"] is None, (
             "the manual hunt did not hold the hunt lock while running"
         )
-        assert claim_hunt(db) is True, "the manual hunt must ALWAYS release its claim"
+        assert claim_hunt(db), "the manual hunt must ALWAYS release its claim"
 
     def test_lock_released_when_pipeline_raises(self, client, db, monkeypatch):
         """A crashed manual hunt must not leak the claim — a leaked
@@ -163,7 +164,7 @@ class TestManualHuntClaimsHuntLock:
                 "/api/v1/pipeline/run",
                 json={"sources": ["arbeitnow"], "match": False},
             )
-        assert claim_hunt(db) is True, "a crashed manual hunt leaked the hunt lock"
+        assert claim_hunt(db), "a crashed manual hunt leaked the hunt lock"
 
 
 # ---------- PIPE-14b: unique(source, source_id) + ingest upsert ----------
@@ -428,8 +429,11 @@ class TestJobPostingsUniqueMigration:
                         " VALUES ('t','dup-1','Dev','https://x/d1b',0,'new',"
                         "'2026-01-02','2026-01-02','2026-01-02')"))
 
-        # downgrade drops the index; the same insert now succeeds
-        command.downgrade(self._alembic_cfg(), "-1")
+        # downgrade drops the index; the same insert now succeeds.
+        # Explicit target (pre-unique revision), not "-1": PIPE-18's
+        # system_locks.owner_token revision is now the head, so a
+        # relative downgrade would only pop that instead.
+        command.downgrade(self._alembic_cfg(), self.PRE)
         with eng.begin() as c:
             c.execute(text(
                 "INSERT INTO job_postings (source, source_id, title, url,"

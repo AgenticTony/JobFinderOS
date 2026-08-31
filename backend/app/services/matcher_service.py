@@ -22,12 +22,56 @@ from app.services.language_filter import passes_language_filter
 
 logger = logging.getLogger(__name__)
 
-# Process-wide flag so the UI can poll "is a matching run active?"
-_matching_in_progress = False
+# AI-14: per-USER running state. The old single process-global flag told
+# EVERY user's dashboard "matching in progress" whenever ANY user
+# matched. Readers scope the query: the status route asks about ITS
+# caller; a user_id=None ask is the deliberately-global view (worker
+# introspection), never a dashboard's.
+_matching_users: set = set()
+_matching_users_guard = threading.Lock()
 # Per-USER locks: one user's 7-minute hunt must never block another's.
 # Keyed by user_id; a global lock refused every other caller.
 _user_locks: dict = {}
 _user_locks_guard = threading.Lock()
+
+# PIPE-19: how many AI evaluations may pass between mid-run checks that
+# the user still exists. A GDPR erase (account.py) deletes the user row
+# while a scheduled hunt is matching them; without this the matcher fed
+# a ghost's CV to GLM for up to MAX_JOBS_PER_MATCH_RUN evaluations, every
+# INSERT failing the user_id FK on Postgres. Cheap query, generous
+# interval: an erase is rare, an evaluation is ~5-10s.
+USER_LIVENESS_CHECK_EVERY = 25
+
+
+def _mark_matching_started(user_id) -> None:
+    with _matching_users_guard:
+        _matching_users.add(user_id)
+
+
+def _mark_matching_done(user_id) -> None:
+    with _matching_users_guard:
+        _matching_users.discard(user_id)
+
+
+def _user_exists(db: Session, user_id) -> bool:
+    from app.models import User
+
+    return db.query(User.id).filter(User.id == user_id).first() is not None
+
+
+def _user_gone_summary(user_id, jobs_considered: int, matches_created: int) -> Dict:
+    """PIPE-19 abort summary: the account was erased mid-run."""
+    logger.warning(
+        "Matching aborted: user %s no longer exists (erased mid-run) after "
+        "%d match(es) — no further evaluations",
+        user_id, matches_created,
+    )
+    return {
+        "status": "aborted",
+        "jobs_considered": jobs_considered,
+        "matches_created": matches_created,
+        "error": "User deleted mid-run — matching aborted",
+    }
 
 
 def _get_user_lock(user_id):
@@ -103,8 +147,15 @@ def needs_another_sample(samples: list) -> bool:
     return statistics.mean(s["score"] for s in samples) >= settings.MATCH_KEEP_MIN_SCORE
 
 
-def is_matching_running() -> bool:
-    return _matching_in_progress
+def is_matching_running(user_id=None) -> bool:
+    """Is a matching run active? user_id scopes the question to ONE user
+    (the dashboard contract — AI-14: the caller must not be told another
+    user's run is theirs). user_id=None asks globally, for the worker's
+    own introspection only."""
+    with _matching_users_guard:
+        if user_id is not None:
+            return user_id in _matching_users
+        return bool(_matching_users)
 
 
 def run_matching(
@@ -219,12 +270,25 @@ def _run_matching_inner(
     if not unmatched:
         return {"status": "completed", "jobs_considered": 0, "matches_created": 0}
 
-    global _matching_in_progress
-    _matching_in_progress = True
-    service = get_ai_service()
-    profile_context = build_profile_context(profile)
-    exclude_keywords = [k.lower() for k in parse_json_list(profile.exclude_keywords)]
-    languages = parse_json_list(profile.languages) or []
+    # AI-14: the running mark spans EVERYTHING that can fail from here —
+    # the cheap gates below used to sit outside the old flag's
+    # try/finally, so a gate error leaked the state (with the global
+    # flag that was cosmetic; per-user it would pin the caller's
+    # dashboard at "matching" forever).
+    _mark_matching_started(user_id)
+    try:
+        return _run_matching_loop(
+            db, unmatched, profile, user_id,
+            limit=limit, max_seconds=max_seconds,
+        )
+    finally:
+        _mark_matching_done(user_id)
+
+
+def _apply_cheap_gates(db, user_id, unmatched, service, languages):
+    """The pre-AI filters: language, PIPE-16 scope, cross-board dedupe,
+    fuzzy agency/direct dedupe. Pure trimming + per-user dismissals —
+    no evaluation slots spent here."""
 
     # Language gate on the backlog: previously-stored jobs written in a
     # language the user doesn't speak never consume matching budget
@@ -300,191 +364,230 @@ def _run_matching_inner(
         db.commit()
         logger.info("Fuzzy dedupe gate: dismissed %d agency/direct re-posts",
                     len(fuzzy_duped))
-    unmatched = [j for j in unmatched if j not in fuzzy_duped]
+    return [j for j in unmatched if j not in fuzzy_duped]
+
+
+def _run_matching_loop(
+    db, unmatched, profile, user_id, *, limit, max_seconds
+) -> Dict:
+    """The evaluation loop proper. Called with the per-user running mark
+    already set (AI-14) — returns the summary dict, aborts early when
+    the user is erased mid-run (PIPE-19)."""
+    service = get_ai_service()
+    profile_context = build_profile_context(profile)
+    exclude_keywords = [k.lower() for k in parse_json_list(profile.exclude_keywords)]
+    languages = parse_json_list(profile.languages) or []
+
+    unmatched = _apply_cheap_gates(db, user_id, unmatched, service, languages)
 
     deadline = time.time() + max_seconds
     matches_created = 0
     evaluated = 0
-    try:
-        for job in unmatched:
-            # Cheap pre-filter: hard excludes skip the AI call entirely
-            haystack = f"{job.title} {job.company or ''}".lower()
-            if any(kw in haystack for kw in exclude_keywords):
-                # THIS user's exclude list — never the shared job row, or one
-                # user's "senior" filter hides senior roles from everyone
-                _dismiss_for_user(db, user_id, job, "excluded_keyword", service.model)
-                db.commit()
-                continue
+    for job in unmatched:
+        # PIPE-19 liveness check: a GDPR erase mid-run deletes the
+        # user row; every later INSERT would fail its FK (and on
+        # SQLite, where FKs are off, silently write ghost rows).
+        # Checked every USER_LIVENESS_CHECK_EVERY evaluations so a
+        # 200-evaluation run stops within ~25 slots of the erase.
+        if (
+            evaluated
+            and evaluated % USER_LIVENESS_CHECK_EVERY == 0
+            and not _user_exists(db, user_id)
+        ):
+            return _user_gone_summary(user_id, len(unmatched), matches_created)
 
-            if not job.description:
-                # Nothing to assess — dismiss rather than waste an AI call
-                _dismiss_for_user(db, user_id, job, "no_description", service.model)
-                db.commit()
-                continue
+        # Cheap pre-filter: hard excludes skip the AI call entirely
+        haystack = f"{job.title} {job.company or ''}".lower()
+        if any(kw in haystack for kw in exclude_keywords):
+            # THIS user's exclude list — never the shared job row, or one
+            # user's "senior" filter hides senior roles from everyone
+            _dismiss_for_user(db, user_id, job, "excluded_keyword", service.model)
+            db.commit()
+            continue
 
-            # The evaluation cap counts AI SPEND, not candidates: the
-            # free gates above must never consume a slot.
-            if evaluated >= limit:
-                logger.info(
-                    "Evaluation cap (%d) reached after %d matches — "
-                    "remaining candidates stay queued for the next run",
-                    limit,
-                    matches_created,
-                )
-                break
+        if not job.description:
+            # Nothing to assess — dismiss rather than waste an AI call
+            _dismiss_for_user(db, user_id, job, "no_description", service.model)
+            db.commit()
+            continue
 
-            if time.time() > deadline:
-                logger.info(
-                    "Matching time budget (%ss) reached after %d matches — remaining jobs stay 'new'",
-                    max_seconds,
-                    matches_created,
-                )
-                break
+        # The evaluation cap counts AI SPEND, not candidates: the
+        # free gates above must never consume a slot.
+        if evaluated >= limit:
+            logger.info(
+                "Evaluation cap (%d) reached after %d matches — "
+                "remaining candidates stay queued for the next run",
+                limit,
+                matches_created,
+            )
+            break
 
-            evaluated += 1
-            started = time.time()
+        if time.time() > deadline:
+            logger.info(
+                "Matching time budget (%ss) reached after %d matches — remaining jobs stay 'new'",
+                max_seconds,
+                matches_created,
+            )
+            break
+
+        evaluated += 1
+        started = time.time()
+        try:
+            result = service.match_job(
+                profile_context=profile_context,
+                cv_text=profile.cv_text,
+                job_description=_job_text(job),
+            )
+        except Exception as e:  # noqa: BLE001 — any AI failure skips the job, never kills the run
+            logger.error("Match failed for job %s (%s): %s", job.id, type(e).__name__, e)
+            continue  # leave as 'new' for the next run
+
+        # SCORING PROTOCOL (review-hardened):
+        # - Collect full result dicts (not just scores) from each sample
+        # - Average scores once
+        # - Select the PAYLOAD (reasoning, recommendation, confidence,
+        #   skills) from the sample CLOSEST to the final
+        #   mean — prose must agree with the number the user sees
+        # - Check keep-min on the final averaged value
+        # - A dead-band sampling failure leaves the job 'new' for retry
+        #   (one ±11 sample is never enough for permanent dismissal)
+        #
+        # Cost: 41% of backlog rows clear keep-min → ~2.06× the single-
+        # sample cost. The embeddings prefilter (ROADMAP) is the lever.
+        samples = [result]  # full result dicts, not just scores
+
+        # How many samples this job earns comes from the SHARED policy
+        # (needs_another_sample) — dead-band second opinion, then top-up
+        # to 3 for anything heading into the queue. The re-score script
+        # calls the same function; duplicating the thresholds is what
+        # dismissed 62 rows on a single sample.
+        sampling_failed = False
+        while needs_another_sample(samples):
             try:
-                result = service.match_job(
-                    profile_context=profile_context,
-                    cv_text=profile.cv_text,
-                    job_description=_job_text(job),
-                )
-            except Exception as e:  # noqa: BLE001 — any AI failure skips the job, never kills the run
-                logger.error("Match failed for job %s (%s): %s", job.id, type(e).__name__, e)
-                continue  # leave as 'new' for the next run
-
-            # SCORING PROTOCOL (review-hardened):
-            # - Collect full result dicts (not just scores) from each sample
-            # - Average scores once
-            # - Select the PAYLOAD (reasoning, recommendation, confidence,
-            #   skills) from the sample CLOSEST to the final
-            #   mean — prose must agree with the number the user sees
-            # - Check keep-min on the final averaged value
-            # - A dead-band sampling failure leaves the job 'new' for retry
-            #   (one ±11 sample is never enough for permanent dismissal)
-            #
-            # Cost: 41% of backlog rows clear keep-min → ~2.06× the single-
-            # sample cost. The embeddings prefilter (ROADMAP) is the lever.
-            samples = [result]  # full result dicts, not just scores
-
-            # How many samples this job earns comes from the SHARED policy
-            # (needs_another_sample) — dead-band second opinion, then top-up
-            # to 3 for anything heading into the queue. The re-score script
-            # calls the same function; duplicating the thresholds is what
-            # dismissed 62 rows on a single sample.
-            sampling_failed = False
-            while needs_another_sample(samples):
-                try:
-                    samples.append(
-                        service.match_job(
-                            profile_context=profile_context,
-                            cv_text=profile.cv_text,
-                            job_description=_job_text(job),
-                        )
+                samples.append(
+                    service.match_job(
+                        profile_context=profile_context,
+                        cv_text=profile.cv_text,
+                        job_description=_job_text(job),
                     )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Re-sample failed for job %s: %s", job.id, e)
-                    # A failure while still inside the dead-band leaves one
-                    # ±11 sample in the uncertain zone — NOT enough for a
-                    # permanent dismissal. Leave the job 'new' for retry,
-                    # matching the convention for unparseable responses.
-                    # Above the band we already have enough to store.
-                    sampling_failed = len(samples) < 2 and (
-                        samples[0]["score"] < settings.MATCH_KEEP_MIN_SCORE
-                    )
-                    break
-            if sampling_failed:
-                continue
-
-            # Average once; F1: the payload comes from the sample closest to
-            # the mean — via resolve_samples, the shared protocol the
-            # re-score script also calls. The prose, recommendation,
-            # confidence and skills must agree with the
-            # displayed number — a score of 40 paired with
-            # recommendation='skip' and reasoning='barely match' (from a
-            # sample that scored 26) is incoherent and breaks MatchCard's
-            # 'AI says: apply' chip and the recommendation filter.
-            final_score, best_payload = resolve_samples(samples)
-            final_tier = AIService._tier_for_score(final_score)
-            if len(samples) > 1:
-                logger.info(
-                    "Scored job %s: scores=%s -> %d (%s), payload from sample scoring %d",
-                    job.id,
-                    sorted(s["score"] for s in samples),
-                    final_score, final_tier, best_payload["score"],
                 )
-
-            elapsed_ms = int((time.time() - started) * 1000)
-
-            # Keep-min check on the FINAL averaged value
-            if final_score < settings.MATCH_KEEP_MIN_SCORE:
-                auto_pass = MatchResult(
-                    user_id=user_id,
-                    job_id=job.id,
-                    score=final_score,
-                    tier=final_tier,
-                    reasoning="Auto-passed: below the score threshold for your CV.",
-                    matched_skills=dump_json_list(best_payload.get("matched_skills", [])),
-                    missing_skills=dump_json_list(best_payload.get("missing_skills", [])),
-                    transferable_skills=dump_json_list(best_payload.get("transferable_skills", [])),
-                    recommendation="skip",
-                    confidence=best_payload.get("confidence"),
-                    model_used=service.model,
-                    processing_time_ms=elapsed_ms,
-                    decision="rejected",
-                    dismissed_reason="below_threshold",
-                    prompt_version=AIService.matching_prompt_version(),
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Re-sample failed for job %s: %s", job.id, e)
+                # A failure while still inside the dead-band leaves one
+                # ±11 sample in the uncertain zone — NOT enough for a
+                # permanent dismissal. Leave the job 'new' for retry,
+                # matching the convention for unparseable responses.
+                # Above the band we already have enough to store.
+                sampling_failed = len(samples) < 2 and (
+                    samples[0]["score"] < settings.MATCH_KEEP_MIN_SCORE
                 )
-                db.add(auto_pass)
-                try:
-                    db.commit()
-                except Exception:
-                    db.rollback()
-                continue
+                break
+        if sampling_failed:
+            continue
 
-            match = MatchResult(
+        # Average once; F1: the payload comes from the sample closest to
+        # the mean — via resolve_samples, the shared protocol the
+        # re-score script also calls. The prose, recommendation,
+        # confidence and skills must agree with the
+        # displayed number — a score of 40 paired with
+        # recommendation='skip' and reasoning='barely match' (from a
+        # sample that scored 26) is incoherent and breaks MatchCard's
+        # 'AI says: apply' chip and the recommendation filter.
+        final_score, best_payload = resolve_samples(samples)
+        final_tier = AIService._tier_for_score(final_score)
+        if len(samples) > 1:
+            logger.info(
+                "Scored job %s: scores=%s -> %d (%s), payload from sample scoring %d",
+                job.id,
+                sorted(s["score"] for s in samples),
+                final_score, final_tier, best_payload["score"],
+            )
+
+        elapsed_ms = int((time.time() - started) * 1000)
+
+        # Keep-min check on the FINAL averaged value
+        if final_score < settings.MATCH_KEEP_MIN_SCORE:
+            auto_pass = MatchResult(
                 user_id=user_id,
                 job_id=job.id,
                 score=final_score,
                 tier=final_tier,
-                reasoning=best_payload.get("reasoning"),
+                reasoning="Auto-passed: below the score threshold for your CV.",
                 matched_skills=dump_json_list(best_payload.get("matched_skills", [])),
                 missing_skills=dump_json_list(best_payload.get("missing_skills", [])),
                 transferable_skills=dump_json_list(best_payload.get("transferable_skills", [])),
-                recommendation=best_payload.get("recommendation"),
+                recommendation="skip",
                 confidence=best_payload.get("confidence"),
                 model_used=service.model,
                 processing_time_ms=elapsed_ms,
+                decision="rejected",
+                dismissed_reason="below_threshold",
                 prompt_version=AIService.matching_prompt_version(),
             )
+            db.add(auto_pass)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+                # PIPE-19 belt: an erase inside the check window shows
+                # up here as the user_id FK failing on Postgres.
+                if not _user_exists(db, user_id):
+                    return _user_gone_summary(
+                        user_id, len(unmatched), matches_created
+                    )
+            continue
+
+        match = MatchResult(
+            user_id=user_id,
+            job_id=job.id,
+            score=final_score,
+            tier=final_tier,
+            reasoning=best_payload.get("reasoning"),
+            matched_skills=dump_json_list(best_payload.get("matched_skills", [])),
+            missing_skills=dump_json_list(best_payload.get("missing_skills", [])),
+            transferable_skills=dump_json_list(best_payload.get("transferable_skills", [])),
+            recommendation=best_payload.get("recommendation"),
+            confidence=best_payload.get("confidence"),
+            model_used=service.model,
+            processing_time_ms=elapsed_ms,
+            prompt_version=AIService.matching_prompt_version(),
+        )
+        job.status = "matched"
+        db.add(job)
+        db.add(match)
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            db.commit()  # per-job commit, contained
+            matches_created += 1
+        except IntegrityError:
+            db.rollback()
+            # PIPE-19: an insert failing because the USER row is gone
+            # (a GDPR erase inside the liveness-check window) must
+            # abort — every further evaluation would fail the same
+            # FK after spending the GLM call. Verified against the
+            # live row, not the exception text: an IntegrityError
+            # pointing at anything else (a duplicate MatchResult, a
+            # job deleted mid-run) takes the reconcile path below.
+            if not _user_exists(db, user_id):
+                return _user_gone_summary(user_id, len(unmatched), matches_created)
+            # Duplicate MatchResult (job reset to 'new', manual job, race):
+            # reconcile instead of aborting the whole batch
             job.status = "matched"
             db.add(job)
-            db.add(match)
-            from sqlalchemy.exc import IntegrityError
+            db.commit()
+            logger.warning(
+                "Job %s already had a match — reconciled status, batch continues", job.id
+            )
+            continue
 
-            try:
-                db.commit()  # per-job commit, contained
-                matches_created += 1
-            except IntegrityError:
-                # Duplicate MatchResult (job reset to 'new', manual job, race):
-                # reconcile instead of aborting the whole batch
-                db.rollback()
-                job.status = "matched"
-                db.add(job)
-                db.commit()
-                logger.warning(
-                    "Job %s already had a match — reconciled status, batch continues", job.id
-                )
-                continue
+    logger.info("Matching run: %d jobs considered, %d matches created", len(unmatched), matches_created)
+    return {
+        "status": "completed",
+        "jobs_considered": len(unmatched),
+        "matches_created": matches_created,
+    }
 
-        logger.info("Matching run: %d jobs considered, %d matches created", len(unmatched), matches_created)
-        return {
-            "status": "completed",
-            "jobs_considered": len(unmatched),
-            "matches_created": matches_created,
-        }
-    finally:
-        _matching_in_progress = False
 
 
 def _dismiss_for_user(db, user_id, job: JobPosting, reason: str, model: str) -> None:
