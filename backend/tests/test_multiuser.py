@@ -73,6 +73,25 @@ def _clear_auth(client):
     client.headers.pop("Authorization", None)
 
 
+def _clear_ip_buckets():
+    """Zero the per-IP auth buckets before a per-IP test.
+
+    Every request in this module rides the SAME TestClient source IP
+    ("testclient"), so regip:/loginip: entries accumulate across tests —
+    a per-IP test that monkeypatches the SHIPPED limit (10/day) down from
+    the suite's raised limit (see tests/conftest.py) would start already
+    full and 429 on its first request. Email-keyed buckets need no such
+    clearing: tests use unique addresses."""
+    from app.core import ratelimit
+
+    with ratelimit.limiter._lock:
+        for key in [
+            k for k in ratelimit.limiter._hits
+            if k[0].startswith(("regip:", "loginip:"))
+        ]:
+            del ratelimit.limiter._hits[key]
+
+
 class TestAuthGate:
     def test_every_route_requires_auth(self, client):
         _clear_auth(client)
@@ -349,6 +368,62 @@ class TestGDPR:
         # Token is dead after erasure
         r = client.get("/api/v1/users/me")
         assert r.status_code == 401
+
+
+class TestGDPRErasurePurgesAuthBuckets:
+    """P1-8: clear_user() purged only USER-ID-keyed buckets. The auth
+    throttles are keyed by EMAIL (reg:{email}, login:{email}), so those
+    entries survived 'erasure' — the deleted address kept live in-memory
+    state for up to an hour and could 429 the same person's re-signup.
+    Erasure must purge them with the account."""
+
+    def test_erasure_purges_email_keyed_auth_buckets(self, client):
+        from app.core import ratelimit
+
+        _clear_auth(client)
+        email = f"ep-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        # Fill reg:{email} to its ceiling (auth_register is 5/hour) —
+        # 4 more attempts land, the 5th trips the per-address bucket
+        codes = [
+            client.post("/api/v1/auth/register",
+                        json={"email": email, "password": PASSWORD}).status_code
+            for _ in range(5)
+        ]
+        assert 429 in codes, (
+            f"same-address hammering never tripped reg:{{email}}: {codes} — "
+            "the pre-erasure bucket state this test needs is missing"
+        )
+        r = client.post("/api/v1/auth/register",
+                        json={"email": email, "password": PASSWORD})
+        assert r.status_code == 429, "reg:{email} bucket not actually full"
+
+        _auth_client(client, email)  # login:{email} now carries state too
+        assert client.delete("/api/v1/account/delete").status_code == 200
+
+        # White-box: erasure dropped BOTH email-keyed buckets for the
+        # address (checked before the re-signup below, which legitimately
+        # recreates reg:{email} with a fresh single hit)
+        with ratelimit.limiter._lock:
+            keys = {k[0] for k in ratelimit.limiter._hits}
+        assert f"reg:{email.lower()}" not in keys, (
+            "reg:{email} survived erasure — deleted address still has "
+            "live in-memory limiter state"
+        )
+        assert f"login:{email.lower()}" not in keys, (
+            "login:{email} survived erasure — deleted address still has "
+            "live in-memory limiter state"
+        )
+
+        # The erased address can sign up again IMMEDIATELY — before the
+        # fix this 429'd until the hour window expired
+        r = client.post("/api/v1/auth/register",
+                        json={"email": email, "password": PASSWORD})
+        assert r.status_code == 201, (
+            f"re-register after erasure returned {r.status_code} — the "
+            "deleted user's email-keyed limiter buckets outlived the "
+            "account (P1-8)"
+        )
 
 
 class TestGDPRErasureFKChain:
@@ -1064,6 +1139,150 @@ class TestSignupHardening:
         assert all(c == 400 for c in codes[1:codes.index(429)]) if 429 in codes else True
         assert 429 in codes, (
             f"8 registration attempts on one address and no 429 ever fired: {codes}"
+        )
+
+
+class TestPerIpAuthThrottles:
+    """P0-3 / P1-8 (live-confirmed): the auth throttles keyed ONLY on
+    attacker-chosen strings — reg:{email} for signup, login:{account} for
+    login. A fresh address is a fresh bucket, so a distinct-email signup
+    burst created 8 accounts in ~8s with zero throttle (each carrying
+    full AI budgets), and a distinct-account password spray from one IP
+    was untouched. These tests pin the per-IP layer.
+
+    The "different IP passes" halves matter: without them a GLOBAL
+    signup freeze would false-pass the burst assertions."""
+
+    # The shipped limits (core/ratelimit.py defaults). The suite runs with
+    # them raised via env (conftest.py — one TestClient IP for ~60 suite
+    # signups), so each test restores the production value on the bucket.
+    SHIPPED_SIGNUP_IP = (10, 86400)
+    SHIPPED_LOGIN_IP = (30, 900)
+
+    def test_distinct_email_signup_burst_from_one_ip(self, client, monkeypatch):
+        """The live attack shape: N never-seen emails from one source —
+        every per-email bucket has one hit, so only the per-IP bucket can
+        stop it."""
+        from app.core import ratelimit
+
+        monkeypatch.setitem(ratelimit.BUCKETS, "auth_register_ip",
+                            self.SHIPPED_SIGNUP_IP)
+        _clear_ip_buckets()
+        _clear_auth(client)
+        codes = []
+        for n in range(11):
+            r = client.post("/api/v1/auth/register",
+                            json={"email": f"ip-{n}-{uuid.uuid4().hex[:6]}@test.example",
+                                  "password": PASSWORD})
+            codes.append(r.status_code)
+        assert all(c == 201 for c in codes[:10]), (
+            f"first 10 signups should all create accounts: {codes} — the "
+            "per-IP limit must not fire before its 10th signup"
+        )
+        assert codes[10] == 429, (
+            f"11 distinct-email signups from one IP and the 11th was "
+            f"{codes[10]} — no working per-IP signup throttle (P0-3: live "
+            "8-in-8s factory, each account carrying full AI budgets)"
+        )
+        # Same shape from a DIFFERENT IP passes — proves the bucket keys on
+        # the source IP, not a global signup freeze. IP varied via the
+        # trusted-proxy header (see the trust-gate test below for why the
+        # header only counts when trust is on).
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
+        r = client.post("/api/v1/auth/register",
+                        json={"email": f"ip-x-{uuid.uuid4().hex[:6]}@test.example",
+                              "password": PASSWORD},
+                        headers={"X-Forwarded-For": "203.0.113.9"})
+        assert r.status_code == 201, (
+            f"signup from a fresh IP blocked ({r.status_code}) — the "
+            "per-IP bucket is behaving as a global block"
+        )
+        # ...and the ORIGINAL IP is still throttled
+        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", False)
+        r = client.post("/api/v1/auth/register",
+                        json={"email": f"ip-y-{uuid.uuid4().hex[:6]}@test.example",
+                              "password": PASSWORD})
+        assert r.status_code == 429, "original IP's bucket emptied early"
+
+    def test_proxy_headers_not_trusted_by_default(self, client, monkeypatch):
+        """Spoof gate: with TRUST_PROXY_HEADERS off (the default outside a
+        proxy-fronted deployment), a client-supplied X-Forwarded-For must
+        NOT move the bucket — otherwise anyone NOT behind a proxy rotates
+        fake IPs and bypasses the throttle entirely."""
+        from app.core import ratelimit
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", False)
+        monkeypatch.setitem(ratelimit.BUCKETS, "auth_register_ip", (3, 86400))
+        _clear_ip_buckets()
+        _clear_auth(client)
+        for n in range(3):
+            r = client.post("/api/v1/auth/register",
+                            json={"email": f"sp-{n}-{uuid.uuid4().hex[:6]}@test.example",
+                                  "password": PASSWORD})
+            assert r.status_code == 201, r.status_code
+        # bucket full for the real peer IP; a forged header must not help
+        r = client.post("/api/v1/auth/register",
+                        json={"email": f"sp-f-{uuid.uuid4().hex[:6]}@test.example",
+                              "password": PASSWORD},
+                        headers={"X-Forwarded-For": "198.51.100.7"})
+        assert r.status_code == 429, (
+            "untrusted X-Forwarded-For moved the bucket — header spoofing "
+            "bypasses the per-IP throttle when no proxy is in front"
+        )
+        # With trust ON (the Render deployment shape, render.yaml), the
+        # same header identifies a genuinely different source and passes
+        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
+        r = client.post("/api/v1/auth/register",
+                        json={"email": f"sp-t-{uuid.uuid4().hex[:6]}@test.example",
+                              "password": PASSWORD},
+                        headers={"X-Forwarded-For": "198.51.100.7"})
+        assert r.status_code == 201, (
+            f"trusted-proxy header ignored: {r.status_code} — behind "
+            "Render every request shares the proxy's address, so the "
+            "header MUST key the bucket there"
+        )
+
+    def test_password_spray_across_accounts_from_one_ip(self, client, monkeypatch):
+        """P1-8: login throttling was per-account only (10/15min keyed by
+        the TARGET account) — spraying MANY accounts from one IP is
+        untouched. Small limit here for speed; the shipped value is
+        (30, 900), restored on the bucket by SHIPPED_LOGIN_IP shape."""
+        from app.core import ratelimit
+        from app.core.config import settings
+
+        monkeypatch.setitem(ratelimit.BUCKETS, "auth_login_ip", (3, 900))
+        _clear_ip_buckets()
+        _clear_auth(client)
+        accounts = [f"spray-{n}-{uuid.uuid4().hex[:6]}@test.example"
+                    for n in range(5)]
+        for email in accounts:
+            _register(client, email)
+        codes = []
+        for email in accounts[:4]:
+            r = client.post("/api/v1/auth/jwt/login",
+                            data={"username": email, "password": "wrong"})
+            codes.append(r.status_code)
+        assert codes[:3] == [400, 400, 400], (
+            f"first three sprays should be plain bad-credentials 400s: "
+            f"{codes} — every account's own bucket saw one hit, so an "
+            "early 429 means the wrong bucket fired"
+        )
+        assert codes[3] == 429, (
+            f"4th DISTINCT-account login from one IP returned {codes[3]} — "
+            "password spraying across accounts is unthrottled (P1-8)"
+        )
+        # Different source IP, 5th distinct account: bad credentials, not
+        # a throttle — per-IP, not global.
+        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
+        r = client.post("/api/v1/auth/jwt/login",
+                        data={"username": accounts[4], "password": "wrong"},
+                        headers={"X-Forwarded-For": "203.0.113.10"})
+        assert r.status_code == 400, (
+            f"fresh IP got {r.status_code} — the login spray bucket is "
+            "behaving as a global block"
         )
 
 

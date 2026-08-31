@@ -53,6 +53,17 @@ services:
         value: "false"
       - key: ENVIRONMENT
         value: production
+      # P0-3/P1-8: the per-IP auth throttles (signup factory / password
+      # spray) key on the client IP. Render's edge proxies EVERY request,
+      # so request.client.host would be the proxy's address — every user
+      # sharing one 10-signups/day bucket. True here because a proxy front
+      # is guaranteed on Render web services (the app then prefers
+      # True-Client-IP, falling back to X-Forwarded-For — see
+      # backend/app/api/deps.py _client_ip); a LITERAL value so it
+      # survives service recreation (OPS-7 sync:false lesson). The cron
+      # service never serves HTTP, so it doesn't need the flag.
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
       # CORS — explicit origins only (allow_credentials=True forbids *).
       # Set to the Pages URL after the frontend project exists, e.g.
       # https://jobfinderos.pages.dev[,https://www.yourdomain.com]

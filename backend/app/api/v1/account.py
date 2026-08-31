@@ -80,8 +80,15 @@ async def delete_account(
         except Exception:
             logger.warning("GDPR delete: CV removal failed for %s", cv_path)
 
-    from app.core.ratelimit import clear_user
+    from app.core.ratelimit import clear_email, clear_user
     clear_user(uid)
+    # P1-8: the auth throttles are keyed by EMAIL (reg:{email},
+    # login:{email}), not user id — those entries outlived the account for
+    # up to an hour, keeping live in-memory state for the erased address
+    # and 429ing its same-address re-signup. The per-IP buckets
+    # (regip:/loginip:) cannot be keyed to a user and expire with their
+    # window.
+    clear_email(user_email)
     logger.info(
         "GDPR erasure: user=%s (%s) — %d matches, %d drafts, %d applications, "
         "%d profiles, %d ai_usage rows, %d CV file(s)",
