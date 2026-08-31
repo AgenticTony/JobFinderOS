@@ -58,6 +58,13 @@ def _scope_key(ctx: Dict) -> str:
     plan = geo_plan(ctx)
     if plan is not None:
         key += f"|r{plan[2]}"
+    elif not key and ctx.get("region"):
+        # PIPE-15: region-only scopes (the wizard's whole-region path)
+        # must not all share the "" bucket — two SE region groups with a
+        # shared query would watermark each other's first fetch and skip
+        # its backfill. Municipality-bearing keys stay byte-identical to
+        # their historical form, so no live watermark is invalidated.
+        key = f"region:{str(ctx['region']).strip().lower()}"
     return key
 
 
@@ -244,6 +251,35 @@ def passes_radius_gate(job: NormalizedJob, ctx: Dict) -> bool:
     if blocked_for_user(location_countries(job.location), ctx.get("country")):
         return False
     return True
+
+
+def stored_job_in_user_scope(job, ctx: Dict) -> bool:
+    """PIPE-16: the ingest gate, mirrored at MATCH time for a stored row.
+
+    The scheduled hunt stores a job when it fits ANY user's scope, so
+    the shared pool always contained rows this user's own fetch would
+    never have kept — remote ads for a strictly-local seeker, other
+    cities' on-site roles. Matching had no location dimension, so those
+    rows entered EVERY strictly-local user's AI window (live 2026-08-30:
+    a London lead backend engineer's entire first hunt went to remote
+    marketing/intern ads, each permanently dismissed AFTER the AI call).
+
+    Both gates read only `.remote` and `.location`, so the stored
+    JobPosting row (remote is a 0/1 int — same truthiness) is passed to
+    the SAME predicates the scrape path used. There is deliberately no
+    second location policy to drift from the first.
+
+    The gate SELECTION mirrors scrape_source exactly: a jobtech row for
+    a radius user was stored through the API-side geo filter, so the
+    reduced gate is the honest predicate for it (a strict-only mirror
+    would strand exactly the neighbouring-kommun jobs the radius fetch
+    exists to catch); every other row gets the full gate.
+    """
+    from app.services.geo import geo_plan
+
+    if job.source == "jobtech" and geo_plan(ctx) is not None:
+        return passes_radius_gate(job, ctx)
+    return passes_location_filter(job, ctx)
 
 
 def scrape_source(db: Session, source_name: str, ctx: Optional[Dict] = None) -> ScrapeRun:
@@ -615,22 +651,114 @@ def run_pipeline(
         db.close()
 
 
+def _merge_ctx_list(dst: Dict, key: str, values) -> None:
+    """Order-preserving union of `values` into dst[key]. First-seen
+    order wins (query order is the AI-suggested priority order, never
+    re-sorted), duplicates dropped — the same semantics the union
+    context merge always used, extracted so the PIPE-15 scope groups
+    cannot grow a subtly different one."""
+    lst = dst.setdefault(key, [])
+    for v in values or []:
+        if v and v not in lst:
+            lst.append(v)
+
+
+def _occupation_codes_of(p) -> List[str]:
+    """PLAIN CODE STRINGS — the exact shape build_scrape_context emits
+    and the scraper/watermark consume. This shipped once appending
+    {"code","label"} dicts: the scraper stringified them into
+    occupation-name={'code': ...} which the live API answers with 200
+    and zero hits — the recall feature silently no-op'd on every
+    SCHEDULED hunt (review finding, verified live)."""
+    codes = []
+    for pick in parse_json_list(getattr(p, "occupation_codes", None)) or []:
+        code = pick.get("code") if isinstance(pick, dict) else None
+        if code:
+            codes.append(str(code))
+    return codes
+
+
+# PIPE-15 cost bound: besides the per-country union context, a scheduled
+# hunt may emit per-anchor radius contexts and region-carrying contexts.
+# Each extra context is a full country-pack scrape (~2 non-remote boards
+# per country), so the count is bounded TWICE:
+#   1. DEDUPE on the fetch identity — users sharing (anchor position,
+#      radius) or (country, region) share ONE context; ten Malmö+30km
+#      users cost exactly one extra fetch, regardless of N.
+#   2. THIS CAP per country — a pathological base (every user in a
+#      different kommun) is truncated, most-served groups first, so the
+#      worst case is 1 union + 6 extras = 7 country-pack scrapes.
+MAX_EXTRA_SCOPE_CONTEXTS_PER_COUNTRY = 6
+
+
 def build_union_contexts(db: Session) -> List[Dict]:
-    """One scrape context per country, unioned across EVERY onboarded
-    user — the scheduled hunt fetches the union of everyone's queries
-    and municipalities, so the shared pool stops being shaped by whoever
+    """Scrape contexts for the scheduled hunt, unioned across EVERY
+    onboarded user — the shared pool stops being shaped by whoever
     triggered the last hunt, and a new user's municipalities join the
     union (forcing a backfill for the new scope key automatically).
 
-    Union semantics: a job is stored if it fits ANY user's scope;
-    per-user relevance is (still) decided at matching time.
+    Per country this emits:
+      1. The UNION context (query breadth): every user's queries and
+         municipalities, region=None, no radius — the strict-gate fetch
+         that serves non-radius users.
+      2. PIPE-15 per-anchor RADIUS contexts: for every DISTINCT
+         (anchor position, radius) among radius users, a context with
+         municipalities=[THE USER'S OWN primary town] and THEIR radius —
+         geo_plan then centres the commute zone exactly where the
+         per-user API path would. The union is never max-radiused: its
+         municipalities[0] is an arbitrary town and would mis-centre
+         everyone. Radius users whose primary town has no centroid get
+         no extra context — their fetch is byte-identical to the strict
+         one the union already performs (and _scope_key proves it).
+      3. PIPE-15 REGION contexts: one per DISTINCT region among
+         region-only users (no municipality — the wizard's whole-region
+         path). The union pins region=None, so without these the
+         region clause of the location gate never fired for them and
+         they got no local on-site jobs from scheduled hunts at all.
+
+    Union semantics throughout: a job is stored if it fits ANY user's
+    scope; per-user relevance is decided at matching time (PIPE-16's
+    match-time scope gate).
     """
+    from app.services.geo import geo_plan
+
     profiles = (
         db.query(Profile)
         .filter(Profile.country.isnot(None), Profile.user_id.isnot(None))
         .all()
     )
     by_country: Dict[str, Dict] = {}
+    # (kind, country, fetch-identity) -> group context (+ a "_members"
+    # counter used only for the cap ranking, popped before return)
+    scope_groups: Dict[tuple, Dict] = {}
+
+    def _new_group(c: str, *, region=None, municipalities=None, radius=None) -> Dict:
+        grp = {
+            "country": c,
+            "region": region,
+            "municipality": None,
+            "municipalities": municipalities or [],
+            "queries": [],
+            "occupation_codes": [],
+            "languages": [],
+            "remote_only": False,  # union semantics: a shared context
+            # never drops on-site rows for its non-remote-only members;
+            # each member's remote_only holds at MATCH time instead.
+            # include_remote stays False for the same cost reason the
+            # remote BOARDS are skipped: every group member's opt-in
+            # already ORs into this country's UNION context, which
+            # fetches the (query-less, worldwide, anchor-blind) remote
+            # boards and stores their remote jobs — re-fetching them per
+            # extra context would multiply identical requests for zero
+            # new coverage. PIPE-16's match-time gate re-checks each
+            # user's remote preference on every stored row anyway.
+            "include_remote": False,
+            "_members": 0,
+        }
+        if radius:
+            grp["search_radius_km"] = radius
+        return grp
+
     for p in profiles:
         c = (p.country or "").upper()
         g = by_country.setdefault(
@@ -650,28 +778,56 @@ def build_union_contexts(db: Session) -> List[Dict]:
         munis = parse_json_list(getattr(p, "municipalities", None))
         if not munis and p.municipality:
             munis = [p.municipality]
-        for m in munis or []:
-            if m and m not in g["municipalities"]:
-                g["municipalities"].append(m)
-        for q in parse_json_list(p.search_queries) or []:
-            if q and q not in g["queries"]:
-                g["queries"].append(q)
-        # PLAIN CODE STRINGS — the exact shape build_scrape_context
-        # emits and the scraper/watermark consume. This shipped once
-        # appending {"code","label"} dicts: the scraper stringified them
-        # into occupation-name={'code': ...} which the live API answers
-        # with 200 and zero hits — the recall feature silently no-op'd
-        # on every SCHEDULED hunt (review finding, verified live).
-        for pick in parse_json_list(getattr(p, "occupation_codes", None)) or []:
-            code = pick.get("code") if isinstance(pick, dict) else None
-            if code and code not in g["occupation_codes"]:
-                g["occupation_codes"].append(str(code))
-        for lang in parse_json_list(p.languages) or []:
-            if lang and lang not in g["languages"]:
-                g["languages"].append(lang)
+        _merge_ctx_list(g, "municipalities", munis)
+        _merge_ctx_list(g, "queries", parse_json_list(p.search_queries))
+        _merge_ctx_list(g, "occupation_codes", _occupation_codes_of(p))
+        _merge_ctx_list(g, "languages", parse_json_list(p.languages))
         if p.include_remote:
             g["include_remote"] = True
-    return list(by_country.values())
+
+        # ---- PIPE-15 scope groups (dedupe on the fetch identity) ----
+        radius = int(getattr(p, "search_radius_km", None) or 0)
+        if munis and radius > 0:
+            plan = geo_plan({"municipalities": munis, "search_radius_km": radius})
+            if plan is not None:
+                # Key on the PLAN (anchor position + km), not spellings:
+                # "Göteborg" and "Goteborg" are the same fetch. Members'
+                # secondary towns are deliberately NOT merged — in radius
+                # mode the API ignores municipality codes, and a
+                # membership-dependent scope key would churn watermarks.
+                key = ("radius", c, plan)
+                grp = scope_groups.setdefault(
+                    key, _new_group(c, municipalities=[munis[0]], radius=radius)
+                )
+                grp["_members"] += 1
+                _merge_ctx_list(grp, "queries", parse_json_list(p.search_queries))
+                _merge_ctx_list(grp, "occupation_codes", _occupation_codes_of(p))
+                _merge_ctx_list(grp, "languages", parse_json_list(p.languages))
+            # plan is None (unanchorable primary town): no extra context —
+            # the strict fetch the union already runs is byte-identical.
+        elif not munis and p.region:
+            region = str(p.region).strip()
+            key = ("region", c, region.lower())
+            grp = scope_groups.setdefault(
+                key, _new_group(c, region=region, municipalities=[])
+            )
+            grp["_members"] += 1
+            _merge_ctx_list(grp, "queries", parse_json_list(p.search_queries))
+            _merge_ctx_list(grp, "occupation_codes", _occupation_codes_of(p))
+            _merge_ctx_list(grp, "languages", parse_json_list(p.languages))
+
+    contexts: List[Dict] = []
+    for c, g in by_country.items():
+        contexts.append(g)
+        extras = [grp for (kind, cc, _), grp in scope_groups.items() if cc == c]
+        # Most-served groups survive the cap — the truncated tail is the
+        # long tail of one-user kommuns, whose members still get their
+        # jobs on their own per-user hunts.
+        extras.sort(key=lambda grp: -grp["_members"])
+        for grp in extras[:MAX_EXTRA_SCOPE_CONTEXTS_PER_COUNTRY]:
+            grp.pop("_members", None)
+            contexts.append(grp)
+    return contexts
 
 
 def scrape_for_context(db: Session, ctx: Dict) -> List[Dict]:
