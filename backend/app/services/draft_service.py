@@ -292,6 +292,30 @@ def save_draft_edits(
     return draft
 
 
+def _probe_apply_portal(apply_url: Optional[str]) -> Optional[str]:
+    """One HEAD request against the hand-off URL (6s, redirects followed).
+
+    Warn, never block: a transient hiccup must not stop a manual apply
+    the user can still complete. Only a DEFINITE HTTP >= 400 warns — 405
+    aside (HEAD unsupported, but the server answered, so it is alive).
+    Timeouts and connection errors stay silent: 'unknown' is not 'dead',
+    and probe noise must never cry wolf."""
+    if not apply_url:
+        return None
+    try:
+        import httpx
+
+        response = httpx.head(apply_url, follow_redirects=True, timeout=6.0)
+        if response.status_code != 405 and response.status_code >= 400:
+            return (
+                f"Apply portal returned HTTP {response.status_code} at hand-off — "
+                "this posting may have expired. Check the page loads before applying."
+            )
+    except Exception:  # noqa: BLE001 — a probe failure is context, never a submit failure
+        return None
+    return None
+
+
 def submit_draft(
     db: Session,
     draft: ApplicationDraft,
@@ -401,6 +425,16 @@ def submit_draft(
             _send_with_pdfs(db, application, draft, job, profile)
         else:
             application.status = "manual_pending"
+            # Liveness probe at hand-off (2026-08-31 incident: a
+            # careerjet redirect 502'd while the original posting
+            # lived at its source — the user was handed a dead link
+            # under a 'sent' label). The warning rides the application
+            # row: the Applications card renders `error` right beside
+            # the "Open posting" link. It never blocks the hand-off.
+            warning = _probe_apply_portal(apply_url)
+            if warning:
+                logger.warning("Browser hand-off %s: %s", apply_url, warning)
+                application.error = warning
     except Exception:
         # _send_with_pdfs swallows its own failures onto the application
         # row; anything raised PAST it must not strand the 'sending'

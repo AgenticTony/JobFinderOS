@@ -19,3 +19,6 @@ alembic>=1.19.1
 aiosqlite>=0.21
 psycopg[binary]>=3.3.4
 sentry-sdk>=2.0
+
+# Composio integrations layer (Settings page; official SDK per docs.composio.dev)
+composio>=0.21.0

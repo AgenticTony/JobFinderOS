@@ -886,7 +886,7 @@ function MatchesView({
       {approved ? (
         <ViewHeader
           title="Approved"
-          sub="Approved and in flight — jobs stay here until they're sent, then move to Applications → Sent."
+          sub="Approved and in flight — jobs stay here until they're sent, then move to Applications."
         />
       ) : (
         <ViewHeader
@@ -977,7 +977,7 @@ function ApplicationsView({
       forceVisible={subTabsAlways}
       options={[
         { id: 'apps-review', label: 'Review & send', active: page === 'apps-review' },
-        { id: 'apps-sent', label: 'Sent', active: page === 'apps-sent' },
+        { id: 'apps-sent', label: 'Applications', active: page === 'apps-sent' },
       ]}
     />
   );
@@ -986,15 +986,15 @@ function ApplicationsView({
     return (
       <section>
         <ViewHeader
-          title="Sent"
-          sub="Everything you've released — by email or through a browser. Open one to re-read the letter or re-download the PDFs."
+          title="Applications"
+          sub="Sent by email, or handed off to finish on the employer's portal. Open one to re-read the letter or re-download the PDFs."
         />
         {subTabs}
         {applications.length === 0 ? (
           <Empty
             icon={<Send className="h-8 w-8" />}
             title="Nothing sent yet"
-            body="Once you approve a draft, it lands here — sent by email or opened in your browser."
+            body="Once you approve a draft, it lands here — sent by email, or handed off to finish on the employer's portal."
           />
         ) : (
           <div className="space-y-3">
@@ -1936,11 +1936,12 @@ function SettingsView() {
       <div className="rounded-xl border border-line bg-surface/80 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-semibold text-hi">Composio</h3>
+            <h3 className="font-semibold text-hi">Gmail</h3>
             <p className="mt-1 max-w-md text-sm text-low">
-              The integrations layer — connect your Gmail once and JobFinderOS can send
-              applications from your own email (coming next), plus any other tool Composio
-              offers as the platform grows.
+              Connect your Gmail account once and your applications can be sent from
+              your own email address — you approve every send before it goes out.
+              Sign-in happens on Google's own page: your password never reaches
+              JobFinderOS.
             </p>
           </div>
           {composio?.configured ? (
@@ -1949,7 +1950,7 @@ function SettingsView() {
               disabled={busy}
               className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
             >
-              {busy ? 'Opening…' : 'Connect Gmail'}
+              {busy ? 'Opening…' : 'Connect Gmail account'}
             </button>
           ) : (
             <span className="rounded-full bg-surface-2 px-2.5 py-1 text-xs text-low">
@@ -1960,9 +1961,7 @@ function SettingsView() {
 
         {composio && !composio.configured && (
           <p className="mt-4 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
-            Add <code className="text-signal">COMPOSIO_API_KEY</code> to{' '}
-            <code className="text-signal">backend/.env</code> to enable — grab one from your
-            Composio dashboard (composio.dev), then restart the backend.
+            Gmail connections aren't available on this deployment yet — check back soon.
           </p>
         )}
 
