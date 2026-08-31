@@ -11,6 +11,38 @@
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/anthonyforan/Desktop/JobFinderOS</string>
+    <!-- OPS-2: without this dict, launchd exports NOTHING, so the nightly
+         run always saw OFFSITE_BACKUP_TARGET unset and silently took the
+         "backups exist on ONE disk only" branch. Values are deliberately
+         EMPTY STRINGS in the committed file (same convention as
+         backend/.env.example placeholders — no real secrets in git): an
+         empty value behaves exactly like an unset variable to backup.sh,
+         which then falls back to parsing backend/.env. The owner fills
+         real values in the ~/Library/LaunchAgents copy at install time.
+         See docs/deploy/WO-07-runbook.md → Operations → Backups. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- REQUIRED AT INSTALL for off-site copies: an rsync target
+             (user@host:/path) or an rclone remote (remote:bucket, with
+             OFFSITE_CMD=rclone — Backblaze B2 example in the runbook).
+             Empty = nightly runs log the ONE-DISK warning and exit 0. -->
+        <key>OFFSITE_BACKUP_TARGET</key>
+        <string></string>
+        <key>OFFSITE_CMD</key>
+        <string></string>
+        <!-- DB + Storage creds: leave EMPTY to read from backend/.env
+             (backup.sh's documented fallback); fill ONLY if that .env is
+             absent at run time. -->
+        <key>DATABASE_URL</key>
+        <string></string>
+        <key>SUPABASE_URL</key>
+        <string></string>
+        <key>SUPABASE_SERVICE_KEY</key>
+        <string></string>
+        <!-- Not a secret — the provisioned bucket name. -->
+        <key>SUPABASE_STORAGE_BUCKET</key>
+        <string>cvs</string>
+    </dict>
     <key>StartCalendarInterval</key>
     <array>
         <dict>
