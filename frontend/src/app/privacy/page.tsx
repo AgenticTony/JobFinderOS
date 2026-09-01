@@ -127,8 +127,10 @@ export default function PrivacyPage() {
               <li>
                 <span className="text-hi">Site analytics</span> — Google
                 Analytics cookies measuring which pages and features are used,
-                so we can see what to improve. Google processes this
-                measurement data, which can involve transfers outside the EU.
+                so we can see what to improve. Analytics loads only after you
+                accept it in the consent banner — decline and no analytics
+                script runs at all. Google processes this measurement data,
+                which can involve transfers outside the EU.
               </li>
             </ul>
           </Section>
