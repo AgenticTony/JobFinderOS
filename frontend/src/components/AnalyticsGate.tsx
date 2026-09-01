@@ -13,6 +13,9 @@ import Script from 'next/script';
 declare global {
   interface Window {
     Cookiebot?: { consent?: { statistics?: boolean } };
+    // Present once gtm.js has processed — the "container is live" flag
+    // the language toggle waits on before sending its GA event.
+    google_tag_manager?: unknown;
   }
 }
 
