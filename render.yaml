@@ -44,6 +44,14 @@ services:
       # AI — Z.ai GLM (scoring + tailoring + judge)
       - key: GLM_API_KEY
         sync: false
+      # Beta (2026-09-01): lift the trial scoring caps on Render — the GLM
+      # key is a flat-rate subscription, so testers are effectively
+      # uncapped. Dashboard sets e.g. 9999/9999; remove the values after
+      # beta to reinstate the 25/10 code defaults (CLAUDE.md open items).
+      - key: TRIAL_DAILY_SCORE_CAP
+        sync: false
+      - key: TRIAL_DAY1_SCORE_CAP
+        sync: false
       # Auth — Render generates a 256-bit value ONCE and persists it
       # across deploys (blueprint-spec: generateValue). DEBUG=false
       # rejects weak/short secrets at boot (config.py _production_guards).
@@ -126,6 +134,14 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: GLM_API_KEY
+        sync: false
+      # Beta (2026-09-01): lift the trial scoring caps on Render — the GLM
+      # key is a flat-rate subscription, so testers are effectively
+      # uncapped. Dashboard sets e.g. 9999/9999; remove the values after
+      # beta to reinstate the 25/10 code defaults (CLAUDE.md open items).
+      - key: TRIAL_DAILY_SCORE_CAP
+        sync: false
+      - key: TRIAL_DAY1_SCORE_CAP
         sync: false
       # Settings validates AUTH_SECRET even in the worker (DEBUG=false
       # guard is global); the worker never signs tokens, its value just
