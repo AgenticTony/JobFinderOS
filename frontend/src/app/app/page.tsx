@@ -331,7 +331,10 @@ export default function Home() {
     await refresh();
   };
 
-  // Show the onboarding wizard once a CV exists but setup hasn't been done
+  // Show the onboarding wizard until setup is done. The wizard collects
+  // the CV itself (step 1), so a brand-new account starts the wizard
+  // WITHOUT one — the old flow opened it CV-less and the AI titles step
+  // dead-ended (suggest route 400s with no cv_text).
   useEffect(() => {
     if (profile && !profile.onboarded) setShowWizard(true);
   }, [profile?.onboarded]);
@@ -589,6 +592,8 @@ export default function Home() {
         <OnboardingWizard
           onComplete={handleOnboardingComplete}
           onClose={() => setShowWizard(false)}
+          onUploadCv={handleUpload}
+          initialHasCv={!!profile.cv_file_name}
           initialLanguages={profile.languages}
           initialIncludeRemote={profile.include_remote || profile.remote_only}
           initialCountry={profile.country ?? ''}

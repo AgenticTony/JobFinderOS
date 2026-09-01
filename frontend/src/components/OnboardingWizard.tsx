@@ -1,8 +1,13 @@
 'use client';
 
 // Onboarding wizard — first-time setup that personalizes the whole OS:
-// country (source pack) -> region/city + remote (location filter) ->
-// AI-suggested job titles from the CV (search queries) -> confirm.
+// CV (the source of truth every later step reads) -> country (source
+// pack) -> region/city + remote (location filter) -> AI-suggested job
+// titles from the CV (search queries) -> confirm. The CV is step 1 by
+// design: users expect to hand it over on a job platform, and the AI
+// titles step cannot work without it (the suggest route 400s on a
+// CV-less profile — previously the wizard opened for CV-less users and
+// dead-ended there with only manual entry).
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -11,6 +16,7 @@ import {
   ArrowRight,
   Check,
   Compass,
+  FileText,
   Globe2,
   Languages,
   Loader2,
@@ -21,6 +27,7 @@ import {
   Target,
   X,
 } from 'lucide-react';
+import CvUpload from '@/components/CvUpload';
 import { apiErrorMessage, getGeo, suggestQueries } from '@/lib/api';
 import type { GeoData, OnboardingPayload, OccupationSuggestion, SearchMode } from '@/types';
 import { cn } from '@/lib/utils';
@@ -28,6 +35,10 @@ import { cn } from '@/lib/utils';
 interface Props {
   onComplete: (payload: OnboardingPayload) => Promise<void>;
   onClose?: () => void; // optional — wizard is modal but re-openable from Profile
+  // Step 1's upload target — the parent owns the API call (and the
+  // profile refresh after it), exactly like the Profile tab's upload.
+  onUploadCv: (file: File) => Promise<void>;
+  initialHasCv?: boolean; // edit-mode re-runs: CV already on file, step 1 passes
   initialLanguages?: string[]; // prefill when re-running setup
   initialIncludeRemote?: boolean; // prefill when re-running setup
   // Edit-mode prefill: existing setup so "Edit setup" never wipes the
@@ -46,7 +57,7 @@ interface Props {
   initialQueries?: string[];
 }
 
-const STEPS = ['Country', 'Location', 'Languages', 'Job titles', 'Confirm'] as const;
+const STEPS = ['Your CV', 'Country', 'Location', 'Languages', 'Job titles', 'Confirm'] as const;
 
 const LANGUAGE_OPTIONS = [
   'English',
@@ -163,6 +174,8 @@ function useFocusTrap(active: boolean) {
 export default function OnboardingWizard({
   onComplete,
   onClose,
+  onUploadCv,
+  initialHasCv,
   initialLanguages,
   initialIncludeRemote,
   initialCountry,
@@ -174,6 +187,17 @@ export default function OnboardingWizard({
   initialQueries,
 }: Props) {
   const [step, setStep] = useState(0);
+  // Step 1 (Your CV): true once a CV is on file — seeded from
+  // initialHasCv for "Edit setup" re-runs, set by this run's upload.
+  // Gates the step: the AI titles step reads the CV server-side.
+  const [cvReady, setCvReady] = useState(Boolean(initialHasCv));
+  const handleCvUpload = useCallback(
+    async (file: File) => {
+      await onUploadCv(file); // throws on failure — CvUpload renders the error
+      setCvReady(true);
+    },
+    [onUploadCv]
+  );
   // FE-10: the wizard is a true modal — trap/restore focus + scroll lock
   // (see useFocusTrap above). Always active: the component only mounts
   // while the dialog is shown.
@@ -277,7 +301,7 @@ export default function OnboardingWizard({
 
   useEffect(() => {
     const key = `${country}|${mode}`;
-    if (step !== 3 || !country || fetchedKeyRef.current === key) return;
+    if (step !== 4 || !country || fetchedKeyRef.current === key) return;
     // Edit mode with existing titles: keep the user's curated list — no
     // auto-overwrite; they can request fresh suggestions explicitly.
     if ((initialQueries?.length ?? 0) > 0 && fetchedKeyRef.current === null) {
@@ -337,6 +361,7 @@ export default function OnboardingWizard({
     geo !== null && !radiusAnchorSupported;
 
   const canProceed = [
+    cvReady, // a CV must exist before anything downstream can work
     Boolean(country),
     Boolean(region), // municipality optional (whole region is valid)
     languages.length > 0,
@@ -427,6 +452,25 @@ export default function OnboardingWizard({
             >
               {step === 0 && (
                 <div>
+                  <StepTitle icon={<FileText className="h-4 w-4" />} title="First — your CV" />
+                  <p className="mt-3 text-sm leading-relaxed text-mid">
+                    Every job you see is scored against your CV — it&apos;s the
+                    source of truth for your whole hunt. Have it ready as a PDF.
+                  </p>
+                  <div className="mt-4">
+                    <CvUpload onUploaded={handleCvUpload} hasExistingCv={cvReady} />
+                  </div>
+                  {cvReady && (
+                    <p className="mt-3 flex items-center gap-1.5 text-sm text-ok">
+                      <Check className="h-4 w-4" aria-hidden />
+                      CV on file — continue when ready (or drop a new one to replace it).
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {step === 1 && (
+                <div>
                   <StepTitle icon={<Globe2 className="h-4 w-4" />} title="Where are you job hunting?" />
                   <div className="mt-5 grid grid-cols-2 gap-3">
                     {(geo?.countries ?? []).map((c) => (
@@ -461,7 +505,7 @@ export default function OnboardingWizard({
                 </div>
               )}
 
-              {step === 1 && (
+              {step === 2 && (
                 <div>
                   <StepTitle icon={<MapPin className="h-4 w-4" />} title="Which area should we search?" />
                   <div className="mt-5 space-y-4">
@@ -620,7 +664,7 @@ export default function OnboardingWizard({
                 </div>
               )}
 
-              {step === 2 && (
+              {step === 3 && (
                 <div>
                   <StepTitle icon={<Languages className="h-4 w-4" />} title="Which languages do you work in?" />
                   <p className="mt-2 text-sm text-low">
@@ -651,7 +695,7 @@ export default function OnboardingWizard({
                 </div>
               )}
 
-              {step === 3 && (
+              {step === 4 && (
                 <div>
                   <StepTitle title="What roles should we hunt for?" />
                   {/* Strategy — always the user's own choice, never inferred */}
@@ -828,7 +872,7 @@ export default function OnboardingWizard({
                 </div>
               )}
 
-              {step === 4 && (
+              {step === 5 && (
                 <div>
                   <StepTitle title="Ready — here's your setup" />
                   <div className="mt-5 space-y-2.5 rounded-xl border border-line bg-ink/60 p-4 text-sm">
@@ -885,7 +929,7 @@ export default function OnboardingWizard({
           {step < STEPS.length - 1 ? (
             <button
               onClick={() => canProceed && setStep((s) => s + 1)}
-              disabled={!canProceed || (step === 2 && loadingQueries)}
+              disabled={!canProceed || (step === 3 && loadingQueries)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-40"
             >
               Continue <ArrowRight className="h-4 w-4" />
