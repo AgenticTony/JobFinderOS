@@ -42,12 +42,14 @@ export function shouldRedirectToSv(): boolean {
 }
 
 // The toggle: remember the choice, then swap the language-scoped path
-// (keeping any query string, e.g. /login?mode=register). Navigates
-// itself — but only once the GA hit has actually been SENT: a
-// navigation in the same tick as gtag('event') tears the page down
-// before the collect request flushes and the hit is lost (verified on
-// production). event_callback fires when the container has processed
-// the event; the timeout is the fallback if it never does.
+// (keeping any query string, e.g. /login?mode=register). The analytics
+// wrinkle, production-proven: GTM/gtag initialize ~5s after a cold
+// page load (tfd≈5100ms in the collect URLs) — an event pushed before
+// the container is live sits queued, and navigating destroys it, so
+// the language_switched hit is lost. So: wait for the container
+// (google_tag_manager appears once gtm.js has processed), THEN send
+// with event_callback (fires once the hit is out) and navigate on the
+// callback, with fallbacks so nothing can ever trap the user.
 export function switchLocale(to: Locale, currentPath: string): void {
   storeLocale(to);
   const query = window.location.search;
@@ -63,13 +65,33 @@ export function switchLocale(to: Locale, currentPath: string): void {
     window.location.href = href;
   };
 
-  // GA4 (consent-gated): the EN<->SV toggle is the language-interest
-  // signal pageviews can't give (same URL either way after redirect).
-  if (typeof window.gtag === 'function') {
-    window.gtag('event', 'language_switched', {
-      to,
-      event_callback: navigate,
-    });
+  const send = () => {
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'language_switched', {
+        to,
+        event_callback: navigate,
+      });
+    }
+    // Container live: the callback is the fast path; 1.5s covers a
+    // container that processed the push but never invoked the callback.
+    setTimeout(navigate, 1500);
+  };
+
+  // No analytics consent -> nothing to wait for, navigate now.
+  if (!window.Cookiebot?.consent?.statistics) {
+    navigate();
+    return;
   }
-  setTimeout(navigate, 800);
+
+  let tries = 0;
+  const trySend = () => {
+    if (navigated) return;
+    if (window.google_tag_manager || tries >= 40) {
+      send();
+    } else {
+      tries += 1;
+      setTimeout(trySend, 100);
+    }
+  };
+  trySend();
 }
