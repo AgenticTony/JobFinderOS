@@ -2414,3 +2414,100 @@ class TestEmailApplyGatedDuringBeta:
         profile = db.query(ProfileModel).filter(ProfileModel.user_id == uid).one()
         with pytest.raises(ApplyError, match="beta"):
             retry_application(db, application, profile)
+
+
+class TestPersonalFunnelStats:
+    """Owner decision 2026-09-01: the hunt pulse is the USER'S funnel.
+
+    Regression: the shared pool's totals leaked into every dashboard —
+    a day-one account showed the platform-wide 471 hunted / 103
+    matched, and 'Matched · ranked against your CV' counted
+    job.status='matched' rows other users' hunts had set. Hunted must
+    count only jobs stored in THIS user's scope since they joined;
+    Matched must count only THIS user's match rows."""
+
+    def test_funnel_is_personal_not_shared_pool(self, client, db):
+        from datetime import timedelta
+
+        from app.core.timeutil import utc_now
+        from app.crud import get_stats
+        from app.models import User
+
+        a_email = f"fa-{uuid.uuid4().hex[:6]}@test.example"
+        b_email = f"fb-{uuid.uuid4().hex[:6]}@test.example"
+        a_id = _register(client, a_email)
+        b_id = _register(client, b_email)
+        a_uid, b_uid = uuid.UUID(a_id), uuid.UUID(b_id)
+
+        # A: strictly-local Malmö seeker (no remote opt-in). Register
+        # already created A's profile row — set the scope on it.
+        a_profile = db.query(Profile).filter(Profile.user_id == a_uid).one()
+        a_profile.country = "SE"
+        a_profile.municipality = "Malmö"
+        a_profile.remote_only = 0
+        a_profile.include_remote = 0
+        db.flush()
+
+        now = utc_now()
+        jobs = {
+            # In A's scope, arrived after A joined -> HUNTED
+            "in_scope": JobPosting(
+                source="manual", source_id=uuid.uuid4().hex[:8],
+                title="Baker Malmö", url=f"https://x/{uuid.uuid4().hex[:6]}",
+                location="Malmö central", remote=0, scraped_at=now),
+            # Remote, A never opted in -> NOT A's feed
+            "remote": JobPosting(
+                source="manual", source_id=uuid.uuid4().hex[:8],
+                title="Remote dev", url=f"https://x/{uuid.uuid4().hex[:6]}",
+                location=None, remote=1, scraped_at=now),
+            # Another city's on-site role -> NOT A's feed
+            "other_city": JobPosting(
+                source="manual", source_id=uuid.uuid4().hex[:8],
+                title="Stockholm chef", url=f"https://x/{uuid.uuid4().hex[:6]}",
+                location="Stockholm", remote=0, scraped_at=now),
+            # In scope but scraped BEFORE A created the account -> excluded
+            "pre_join": JobPosting(
+                source="manual", source_id=uuid.uuid4().hex[:8],
+                title="Old Malmö role", url=f"https://x/{uuid.uuid4().hex[:6]}",
+                location="Malmö", remote=0,
+                scraped_at=now - timedelta(days=3)),
+            # In scope, but 'matched' status was set by B's hunt -> in the
+            # feed, yet must NOT count as ranked against A's CV
+            "b_matched": JobPosting(
+                source="manual", source_id=uuid.uuid4().hex[:8],
+                title="Malmö dev", url=f"https://x/{uuid.uuid4().hex[:6]}",
+                location="Malmö", remote=0, status="matched", scraped_at=now),
+        }
+        for j in jobs.values():
+            db.add(j)
+        db.flush()
+
+        # B's match on the status='matched' job; A's own match on the
+        # in-scope job (kept, undecided)
+        db.add(MatchResult(user_id=b_uid, job_id=jobs["b_matched"].id,
+                           score=85, tier="good_match"))
+        db.add(MatchResult(user_id=a_uid, job_id=jobs["in_scope"].id,
+                           score=78, tier="good_match"))
+        db.commit()
+
+        stats = get_stats(db, user_id=a_uid)
+
+        # Hunted: A's in-scope feed since joining — the remote ad, the
+        # other city, and the pre-join role never counted
+        assert stats["jobs_total"] == 2, (
+            f"Hunted counted the shared pool: {stats['jobs_total']} "
+            "(expected only the two post-join Malmö jobs)"
+        )
+        assert stats["jobs_last_24h"] == 2
+
+        # Matched: A's own rows only — B's match (and the job.status
+        # bookkeeping) must not surface as 'ranked against your CV'
+        assert stats["jobs_matched"] == 1, (
+            f"Matched leaked other users' rankings: {stats['jobs_matched']}"
+        )
+        assert stats["matches_total"] == 1
+        assert stats["matches_pending_decision"] == 1
+
+        # Sanity: the stats read A's account, not the newest user
+        a_user = db.query(User).filter(User.id == a_uid).one()
+        assert a_user.created_at > jobs["pre_join"].scraped_at
