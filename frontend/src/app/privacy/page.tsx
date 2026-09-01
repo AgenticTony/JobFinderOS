@@ -124,6 +124,12 @@ export default function PrivacyPage() {
                 and cover letter drafted for each, and a record of applications
                 you approved and sent.
               </li>
+              <li>
+                <span className="text-hi">Site analytics</span> — Google
+                Analytics cookies measuring which pages and features are used,
+                so we can see what to improve. Google processes this
+                measurement data, which can involve transfers outside the EU.
+              </li>
             </ul>
           </Section>
 
