@@ -423,9 +423,7 @@ export default function LandingView({ locale }: { locale: Locale }) {
                 path. Explicit choice beats auto-detection forever. */}
             <button
               type="button"
-              onClick={() => {
-                window.location.href = switchLocale(otherLocale, '/');
-              }}
+              onClick={() => switchLocale(otherLocale, '/')}
               className="transition hover:text-paper/70"
             >
               {t.langToggle}

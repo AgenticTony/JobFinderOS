@@ -43,16 +43,22 @@ export function shouldRedirectToSv(): boolean {
 }
 
 // The toggle: remember the choice, then swap the language-scoped path
-// (keeping any query string, e.g. /login?mode=register).
-export function switchLocale(
-  to: Locale,
-  currentPath: string,
-): string {
+// (keeping any query string, e.g. /login?mode=register). Navigates
+// itself, after a beat — a synchronous location.href right after
+// gtag('event') tears the page down before the GA collect request
+// flushes, and the language_switched hit is lost every time (verified
+// on production: page_views arrived, the toggle event never did).
+export function switchLocale(to: Locale, currentPath: string): void {
   storeLocale(to);
   // GA4 (consent-gated): the EN<->SV toggle is the language-interest
   // signal pageviews can't give (same URL either way after redirect).
   track('language_switched', { to });
   const query = window.location.search;
-  if (to === 'sv') return `/sv${currentPath === '/' ? '' : currentPath}${query}`;
-  return `${currentPath.replace(/^\/sv(?=\/|$)/, '') || '/'}${query}`;
+  const href =
+    to === 'sv'
+      ? `/sv${currentPath === '/' ? '' : currentPath}${query}`
+      : `${currentPath.replace(/^\/sv(?=\/|$)/, '') || '/'}${query}`;
+  setTimeout(() => {
+    window.location.href = href;
+  }, 150);
 }

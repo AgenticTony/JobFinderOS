@@ -200,12 +200,7 @@ export default function LoginView({ locale }: { locale: Locale }) {
         <p className="mt-3 text-center">
           <button
             type="button"
-            onClick={() => {
-              window.location.href = switchLocale(
-                otherLocale,
-                window.location.pathname,
-              );
-            }}
+            onClick={() => switchLocale(otherLocale, window.location.pathname)}
             className="text-xs text-low underline underline-offset-2 transition hover:text-mid"
           >
             {dicts[locale].langToggle}
