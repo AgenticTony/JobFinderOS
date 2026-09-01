@@ -25,6 +25,8 @@ import {
   Send,
 } from 'lucide-react';
 import CvUpload from '@/components/CvUpload';
+// GA4 funnel events — consent-gated (lib/analytics.ts).
+import { track } from '@/lib/analytics';
 import MatchCard from '@/components/MatchCard';
 import OnboardingWizard from '@/components/OnboardingWizard';
 import Sidebar, { NAV, type View } from '@/components/Sidebar';
@@ -290,6 +292,7 @@ export default function Home() {
       //    history for the new queries/municipalities, not just the
       //    last day's delta.
       const result = await runPipeline({ match: false, backfill });
+      track('hunt_run', { backfill });
       setPipelineResult(result);
       // 2) Kick AI matching into the background and stream results via polling
       const mr = await runMatching();
@@ -353,6 +356,7 @@ export default function Home() {
       setActionError(`Couldn't save your setup: ${apiErrorMessage(err)}`);
       throw err;
     }
+    track('onboarding_completed');
     setShowWizard(false);
     await refresh();
     handleRunPipeline(true); // first targeted run: deep backfill, straight away
@@ -362,6 +366,7 @@ export default function Home() {
     setActionError(null);
     try {
       await decideMatch(matchId, decision);
+      track('match_decision', { decision });
       await refresh();
     } catch (err) {
       // FE-21: on a cold-starting free-tier backend this rejection was the
@@ -1954,6 +1959,7 @@ function FeedbackView() {
     setSent(false);
     try {
       await api.post('/api/v1/feedback', { category, message });
+      track('feedback_submitted', { category });
       setMessage('');
       setSent(true);
     } catch (err) {
