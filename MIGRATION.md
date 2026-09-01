@@ -8,9 +8,13 @@ is available on any managed Postgres).
 
 Execution ledger:
 
-- **MIG-WO0** (off-site backups): mechanics done and verified locally; the
-  one human step — pointing `OFFSITE_BACKUP_TARGET` at the real target —
-  remains outstanding.
+- **MIG-WO0** (off-site backups): **executed 2026-08-28, verified 2026-09-01**
+  — the installed launchd agent has carried the real target since install
+  (`jfos-b2-crypt:backups`: Backblaze B2 behind an rclone crypt remote);
+  nightly pg_dumps verified off-site for every day since the Postgres move,
+  and a clean manual end-to-end run on 2026-09-01 (42 files off-site,
+  count-verification green). The old "target remains outstanding" note was
+  stale — the plist was filled at install time.
 - **MIG-WO1** (move to Supabase Postgres): **executed 2026-08-28** — 797
   rows migrated, counts snapshot-verified, zero invariant violations;
   details in `docs/work-orders/README.md` under WO-03.
