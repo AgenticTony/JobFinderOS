@@ -5,7 +5,6 @@
 // always wins over detection — /sv never redirects away — and the
 // footer toggle stores the user's choice so it sticks.
 
-import { track } from '../lib/analytics';
 import type { Locale } from './dict';
 
 const LANG_KEY = 'jfos-lang';
@@ -44,21 +43,33 @@ export function shouldRedirectToSv(): boolean {
 
 // The toggle: remember the choice, then swap the language-scoped path
 // (keeping any query string, e.g. /login?mode=register). Navigates
-// itself, after a beat — a synchronous location.href right after
-// gtag('event') tears the page down before the GA collect request
-// flushes, and the language_switched hit is lost every time (verified
-// on production: page_views arrived, the toggle event never did).
+// itself — but only once the GA hit has actually been SENT: a
+// navigation in the same tick as gtag('event') tears the page down
+// before the collect request flushes and the hit is lost (verified on
+// production). event_callback fires when the container has processed
+// the event; the timeout is the fallback if it never does.
 export function switchLocale(to: Locale, currentPath: string): void {
   storeLocale(to);
-  // GA4 (consent-gated): the EN<->SV toggle is the language-interest
-  // signal pageviews can't give (same URL either way after redirect).
-  track('language_switched', { to });
   const query = window.location.search;
   const href =
     to === 'sv'
       ? `/sv${currentPath === '/' ? '' : currentPath}${query}`
       : `${currentPath.replace(/^\/sv(?=\/|$)/, '') || '/'}${query}`;
-  setTimeout(() => {
+
+  let navigated = false;
+  const navigate = () => {
+    if (navigated) return;
+    navigated = true;
     window.location.href = href;
-  }, 150);
+  };
+
+  // GA4 (consent-gated): the EN<->SV toggle is the language-interest
+  // signal pageviews can't give (same URL either way after redirect).
+  if (typeof window.gtag === 'function') {
+    window.gtag('event', 'language_switched', {
+      to,
+      event_callback: navigate,
+    });
+  }
+  setTimeout(navigate, 800);
 }
