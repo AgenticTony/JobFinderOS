@@ -242,6 +242,6 @@ async def profile_status(
         "has_profile": profile is not None,
         "has_cv_text": bool(profile and profile.cv_text),
         "ai_enabled": ai_service_available(),
-        "email_apply_enabled": bool(settings.RESEND_API_KEY),
+        "email_apply_enabled": settings.EMAIL_APPLY_ENABLED,
         "stats": get_stats(db, user_id=user.id),
     }

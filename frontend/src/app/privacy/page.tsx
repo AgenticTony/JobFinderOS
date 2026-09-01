@@ -16,7 +16,7 @@ import { ArrowLeft, Radar } from 'lucide-react';
 export const metadata: Metadata = {
   title: 'Privacy notice · JobFinderOS',
   description:
-    'What JobFinderOS collects, who processes it (Z.ai, Supabase, Resend), where it lives, how long we keep it, and your export and deletion rights.',
+    'What JobFinderOS collects, who processes it, where it lives, how long we keep it, and your export and deletion rights.',
 };
 
 function Section({
@@ -207,16 +207,23 @@ export default function PrivacyPage() {
                   Frankfurt, in the same region as the database.
                 </p>
               </li>
-              {/* Resend: application emails are sent through resend with the
-                  tailored CV + cover letter as attachments
-                  (backend/app/services/apply_service.py:88-118). */}
+              {/* Email apply (owner decision 2026-09-01): applications ship
+                  from the USER'S OWN connected Gmail — no platform sender.
+                  Sending is off during beta (backend EMAIL_APPLY_ENABLED
+                  gate + first-party Google OAuth build post-beta; Composio
+                  Gmail actions can't carry our PDF attachments). Browser
+                  and manual apply remain available. */}
               <li className="rounded-lg border border-line bg-surface/60 p-3">
-                <p className="text-sm font-medium text-hi">Resend — email delivery</p>
+                <p className="text-sm font-medium text-hi">
+                  Your own Gmail — application emails{' '}
+                  <span className="font-normal text-signal">· optional, you connect it</span>
+                </p>
                 <p className="mt-1 text-sm">
-                  When you approve and send an application by email, it is
-                  delivered through Resend to the employer&apos;s published
-                  application address, with your tailored CV and cover letter
-                  attached.
+                  Email applications are sent from{' '}
+                  <span className="text-hi">your own Gmail account</span>, which you connect under
+                  Settings — they carry your address, never ours. Sending runs through Google&apos;s
+                  infrastructure. During the beta rollout of this feature, email sending is briefly
+                  offline; browser and manual apply are available throughout.
                 </p>
               </li>
               {/* Sentry: init_sentry() is a no-op without SENTRY_DSN
@@ -247,10 +254,11 @@ export default function PrivacyPage() {
               text and job-ad text sent to{' '}
               <span className="text-hi">Z.ai</span> for matching, tailoring and
               fact-checking, as described above. Your stored account data and
-              CV file remain in the EU (Frankfurt). Applications you approve
-              are delivered by Resend and the employer&apos;s own mail system,
-              whose locations are outside our control — and once delivered, we
-              cannot recall an application you have approved and sent.
+              CV file remain in the EU (Frankfurt). Applications you send go
+              out from your own Gmail account and are delivered by Google and
+              the employer&apos;s mail system, whose locations are outside our
+              control — and once delivered, we cannot recall an application
+              you have approved and sent.
             </p>
             {/* Beta scope: same MIG-WO5 migration note as section 04 —
                 the Z.ai transfer is a beta-phase state, moving to an EU
@@ -264,36 +272,22 @@ export default function PrivacyPage() {
           </Section>
 
           <Section n="06" title="How long we keep it">
+            {/* Deliberately less technical (owner decision 2026-09-01): no
+                retention constants, no log field inventories — the load-
+                bearing facts for a user are WHAT is kept and THAT it ends
+                with account deletion. The engineering detail stays in the
+                repo, out of the notice. */}
             <ul className="list-disc space-y-1.5 pl-5">
-              {/* Job pool: MAX_POSTING_AGE_DAYS = 30, "postings older than this
-                  are never stored" (backend/app/core/config.py:84), purged in
-                  backend/app/services/pipeline.py:581. */}
               <li>
-                <span className="text-hi">Job postings</span> — a shared pool of
-                scraped ads; nothing older than 30 days is stored.
+                <span className="text-hi">Job ads</span> — kept only while
+                they are plausibly still open; we do not build an archive of
+                postings.
               </li>
-              {/* Account data: kept until the user deletes the account — the
-                  delete endpoint is the only removal path
-                  (backend/app/api/v1/account.py:17). */}
               <li>
-                <span className="text-hi">Your account, CV and applications</span>{' '}
-                — kept until you delete your account. Deleting it removes the
-                profile, the CV file from storage, matches, drafts,
-                applications, your AI usage logs and the account itself.
-              </li>
-              {/* ai_usage rows (kind/model/endpoint/tokens/cost — no CV text,
-                  backend/app/models/ai_usage.py) are written by
-                  ai_service.record_ai_usage and are DELETED with the account:
-                  the erasure path removes them alongside applications, drafts,
-                  matches and profiles (backend/app/api/v1/account.py, PR #3
-                  fix/p0-2-gdpr-erasure, commit 3b6d06a — "ai_usage rows are
-                  user-linked telemetry ... account death takes its telemetry"). */}
-              <li>
-                <span className="text-hi">AI usage logs</span> — one row per AI
-                call recording the model, endpoint, token counts and cost. These
-                rows contain no CV text and are kept for cost and audit purposes
-                only while your account exists; they are deleted together with
-                your account when you delete it.
+                <span className="text-hi">Everything personal</span> — your
+                account, CV, profile, matches, drafts, applications and
+                processing logs — is kept until you delete your account.
+                Deleting it removes all of it, permanently.
               </li>
             </ul>
           </Section>

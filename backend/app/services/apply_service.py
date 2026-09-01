@@ -42,6 +42,14 @@ def retry_application(db: Session, application: Application, profile) -> Applica
     """
     if application.method != "email":
         raise ApplyError("Only email applications can be retried")
+    # Beta gate (owner decision 2026-09-01) — same rule as submit_draft:
+    # no platform-sender dispatches while email apply is retooled to the
+    # user's own Gmail.
+    if not settings.EMAIL_APPLY_ENABLED:
+        raise ApplyError(
+            "Email apply is moving to your own Gmail account and returns "
+            "at the end of beta"
+        )
     if profile is None:
         raise ApplyError("No CV on file for this account")
     from app.models import ApplicationDraft

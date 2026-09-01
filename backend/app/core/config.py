@@ -104,6 +104,20 @@ class Settings(BaseSettings):
     MAX_POSTING_AGE_DAYS: int = 30  # postings older than this are never stored
     MATCH_TIME_BUDGET_SECONDS: int = 420  # hard stop; frontend pipeline timeout is 600s
     COMPOSIO_API_KEY: str = ""  # integrations layer (Settings page)
+    # Beta (owner decision 2026-09-01): email applications ship from the
+    # USER'S OWN connected Gmail, not a platform sender. The interim
+    # Resend path is OFF (applications carried the platform address).
+    # Composio's Gmail actions can't attach our PDFs (s3key-only), so
+    # sending stays off until the first-party Google OAuth build lands
+    # post-beta. Browser and manual apply remain available throughout.
+    EMAIL_APPLY_ENABLED: bool = False
+    # Spare Cloudflare R2 credentials (owner-provided 2026-09-01, in
+    # backend/.env). DECLARED ONLY so the strict Settings gate accepts
+    # them — the live off-site backup target is the B2 rclone remote
+    # (ops/com.jobfinderos.backup.plist); nothing reads these yet.
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_ENDPOINT: str = ""
 
     # Auth (fastapi-users) — generate with: python -c "import secrets; print(secrets.token_urlsafe(48))"
     AUTH_SECRET: str = "dev-insecure-secret-change-me"
