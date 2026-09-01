@@ -72,16 +72,15 @@ export default function PrivacyPage() {
         </p>
 
         <div className="mt-8">
-          {/* Controller identity: owner named in README.md ("Author: Anthony
-              Foran"), PRD.md ("Owner: Anthony Foran"). Framing per owner
-              decision 2026-09-01: production-grade product, not "personal
-              project". No legal entity is claimed — the named individual
-              remains the controller (that part is a fact, not tone). */}
+          {/* Controller presentation: owner decision 2026-09-01 — the
+              public face is "the JobFinderOS team" (repo owner Anthony
+              Foran remains the controller in fact; the contact address in
+              this section reaches them). No legal entity is claimed. */}
           <Section n="01" title="Who is responsible">
             <p>
               JobFinderOS is a production-grade job-search platform built and
-              operated by <span className="text-hi">Anthony Foran</span>, who
-              is the data controller for everything described here.
+              operated by <span className="text-hi">the JobFinderOS team</span>,
+              the data controller for everything described here.
             </p>
             {/* Contact: owner-published address 2026-09-01
                 (anthony@flutterhive.dev) — interim until dedicated
