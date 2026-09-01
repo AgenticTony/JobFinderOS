@@ -5,6 +5,7 @@
 // always wins over detection — /sv never redirects away — and the
 // footer toggle stores the user's choice so it sticks.
 
+import { track } from '../lib/analytics';
 import type { Locale } from './dict';
 
 const LANG_KEY = 'jfos-lang';
@@ -48,6 +49,9 @@ export function switchLocale(
   currentPath: string,
 ): string {
   storeLocale(to);
+  // GA4 (consent-gated): the EN<->SV toggle is the language-interest
+  // signal pageviews can't give (same URL either way after redirect).
+  track('language_switched', { to });
   const query = window.location.search;
   if (to === 'sv') return `/sv${currentPath === '/' ? '' : currentPath}${query}`;
   return `${currentPath.replace(/^\/sv(?=\/|$)/, '') || '/'}${query}`;

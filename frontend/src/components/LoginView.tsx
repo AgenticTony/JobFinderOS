@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Radar, Loader2, ArrowLeft } from 'lucide-react';
+import { track } from '@/lib/analytics';
 import { api, apiErrorMessage, setAuthToken } from '@/lib/api';
 import { dicts, type Locale } from '@/i18n/dict';
 import { shouldRedirectToSv, switchLocale } from '@/i18n/locale';
@@ -56,6 +57,7 @@ export default function LoginView({ locale }: { locale: Locale }) {
     try {
       if (mode === 'register') {
         await api.post('/api/v1/auth/register', { email, password });
+        track('signup_completed', { locale });
       }
       await signIn(email, password);
     } catch (err) {
