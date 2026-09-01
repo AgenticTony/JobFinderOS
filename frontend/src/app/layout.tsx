@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
-import Script from 'next/script';
 import { Familjen_Grotesk, Geist, Geist_Mono } from 'next/font/google';
+import AnalyticsGate from '@/components/AnalyticsGate';
 import './globals.css';
 
 const geistSans = Geist({
@@ -39,6 +39,15 @@ export default function RootLayout({
           hydrates, causing spurious mismatch warnings. This suppresses
           attribute-level warnings on this element only. */}
       <body className="antialiased" suppressHydrationWarning>
+        {/* Cookiebot consent banner — loads unconditionally (it must,
+            to ask). Raw script per Cookiebot's install spec; React 19
+            hoists it into <head>. */}
+        <script
+          id="Cookiebot"
+          src="https://consent.cookiebot.com/uc.js"
+          data-cbid="631a989b-0195-4173-ac38-1e82867cec37"
+          async
+        />
         {/* Google Tag Manager (noscript) — first thing inside <body>,
             per GTM's install spec. */}
         <noscript>
@@ -50,26 +59,9 @@ export default function RootLayout({
           />
         </noscript>
         {children}
-        {/* Google Tag Manager + Google Analytics (owner, 2026-09-01).
-            afterInteractive keeps the static export's first paint free
-            of third-party scripts. */}
-        <Script id="gtm-init" strategy="afterInteractive">
-          {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-})(window,document,'script','dataLayer','GTM-MBKZHZVB');`}
-        </Script>
-        <Script
-          src="https://www.googletagmanager.com/gtag/js?id=G-YHFHWWL4TF"
-          strategy="afterInteractive"
-        />
-        <Script id="ga-init" strategy="afterInteractive">
-          {`window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', 'G-YHFHWWL4TF');`}
-        </Script>
+        {/* GTM + GA4 mount only after Cookiebot statistics consent —
+            decline and no Google script executes at all. */}
+        <AnalyticsGate />
       </body>
     </html>
   );
