@@ -3,8 +3,9 @@
 # Usage: bash ops/verify_deployment.sh [https://jobfinderos-api.onrender.com] [https://jobfinderos.pages.dev]
 #
 # Checks: API /health (DB up), CORS preflight from the frontend origin,
-# a full register/login/me roundtrip against the live API (creates one
-# clearly-named probe account), email-apply provisioning (P0-6:
+# a full register/login/me roundtrip against the live API (reuses ONE
+# permanent, clearly-named service account — run 1 registers it, later
+# runs get the accepted 400 'already exists' and log straight in), email-apply provisioning (P0-6:
 # /api/v1/profile/status reports email_apply_enabled from RESEND_API_KEY),
 # and that the Pages site serves the app with the API URL inlined in its
 # bundle. Manual remainder: only a real apply proves APPLY_FROM_EMAIL is
@@ -13,10 +14,14 @@ set -uo pipefail
 
 API="${1:-https://jobfinderos-api.onrender.com}"
 FRONTEND="${2:-https://jobfinderos.pages.dev}"
-# Unique probe per run (plus-addressing): a timestamped password broke
-# re-runs — the account exists from run 1, and every run generates a new
-# password that no longer matches it. Fresh address + fixed password.
-PROBE_EMAIL="deploy-check+$(date +%s)@jobfinderos.dev"
+# One FIXED service account. The earlier unique-per-run address (plus-
+# addressing timestamp) was itself the workaround for a timestamped
+# PASSWORD breaking re-runs — but register's 400 'already exists' is
+# already accepted below and the login roundtrip proves the fixed
+# credentials, so a permanent account verifies exactly the same paths
+# without accumulating a probe row in users per deploy (294 test rows
+# were cleaned out of production on 2026-09-01; don't regrow them).
+PROBE_EMAIL="deploy-check@jobfinderos.dev"
 PROBE_PASS="DeployCheck-Probe-2026!"
 PASS=0; FAIL=0
 
