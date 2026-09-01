@@ -48,11 +48,15 @@ export default function RadarScope() {
         <span className="absolute left-[64%] top-[17%] h-1.5 w-1.5 rounded-full bg-signal/50" />
         <span className="absolute left-[14%] top-[24%] h-1.5 w-1.5 rounded-full bg-signal/35" />
 
-        {/* The scope makes an argument: this contact is tonight's match. */}
+        {/* The scope makes an argument: this contact is tonight's match.
+            Labels are JOB TITLES across industries (owner decision
+            2026-09-01) — the product scores roles against your CV, so a
+            role·industry pair says what the scope is sweeping for; the
+            old label named one company. */}
         <div className="absolute left-[30%] top-[9%] -translate-x-1/2 -translate-y-[calc(100%+14px)]">
           <div className="flex items-center gap-3.5 rounded-full border border-signal/25 bg-ink/85 py-2.5 pl-5 pr-6 backdrop-blur-md">
             <span className="num text-[11px] uppercase tracking-[0.16em] text-paper/55">
-              Pågen · Malmö
+              Backend developer · fintech
             </span>
             <span className="h-3.5 w-px bg-signal/25" aria-hidden />
             <span
@@ -69,9 +73,13 @@ export default function RadarScope() {
           <span className="absolute left-1/2 top-full h-[13px] w-px -translate-x-1/2 bg-signal/30" />
         </div>
 
-        {/* A second contact, quieter: the hunt has breadth. */}
+        {/* Second and third contacts, quieter: the hunt has breadth
+            across industries, not one employer. */}
         <p className="num absolute left-[64%] top-[17%] ml-4 text-[9px] uppercase tracking-[0.16em] text-paper/35">
-          Lund · 74
+          UX designer · 74
+        </p>
+        <p className="num absolute left-[14%] top-[24%] ml-3 text-[9px] uppercase tracking-[0.16em] text-paper/30">
+          Automation tech · 68
         </p>
       </div>
     </div>
