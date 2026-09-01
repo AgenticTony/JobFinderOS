@@ -2534,3 +2534,84 @@ class TestPersonalFunnelStats:
         )
         assert c_stats["jobs_last_24h"] == 0
         assert c_stats["jobs_matched"] == 0
+
+
+class TestBetaFeedback:
+    """The console's one-box feedback page (owner decision 2026-09-01):
+    auth-only, account-linked BY DESIGN (disclosed on the page), schema-
+    validated chips/message, rate-limited so a stuck button can't flood
+    the owner's notification inbox."""
+
+    def test_feedback_requires_auth(self, client):
+        # The shared TestClient carries whatever Authorization header the
+        # previous test left behind — clear it or this "anonymous" post
+        # is authenticated and the 401 never happens.
+        _clear_auth(client)
+        r = client.post(
+            "/api/v1/feedback", json={"category": "bug", "message": "x"}
+        )
+        assert r.status_code == 401, "anonymous feedback posted"
+
+    def test_feedback_stores_and_notifies(self, client, db, monkeypatch):
+        from app.models import Feedback
+        from app.services import feedback_service
+
+        email = f"fb-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+
+        sent: dict = {}
+        monkeypatch.setattr(
+            feedback_service, "notify_owner",
+            lambda fb, *, user_email: sent.update(
+                category=fb.category, to=user_email
+            ) or True,
+        )
+        r = client.post(
+            "/api/v1/feedback",
+            json={"category": "confusing", "message": "  Scores look odd  "},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json() == {"ok": True, "stored": True, "notified": True}
+
+        row = db.query(Feedback).filter(Feedback.user_id == uid).one()
+        assert row.category == "confusing"
+        assert row.message == "Scores look odd", "message not trimmed"
+        assert sent["category"] == "confusing"
+        assert sent["to"] == email, "notification reply-to lost the account"
+
+    def test_feedback_validation(self, client):
+        email = f"fbv-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+
+        r = client.post(
+            "/api/v1/feedback", json={"category": "praise", "message": "x"}
+        )
+        assert r.status_code == 422, "unknown category accepted"
+        r = client.post(
+            "/api/v1/feedback", json={"category": "bug", "message": "   "}
+        )
+        assert r.status_code == 422, "whitespace-only message accepted"
+        r = client.post(
+            "/api/v1/feedback",
+            json={"category": "bug", "message": "x" * 1001},
+        )
+        assert r.status_code == 422, "1001-char message accepted"
+
+    def test_feedback_rate_limited(self, client):
+        email = f"fbr-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+
+        for _ in range(5):
+            r = client.post(
+                "/api/v1/feedback",
+                json={"category": "idea", "message": "thing"},
+            )
+            assert r.status_code == 200, r.text
+        r = client.post(
+            "/api/v1/feedback",
+            json={"category": "idea", "message": "one too many"},
+        )
+        assert r.status_code == 429, "6th submission within the hour accepted"

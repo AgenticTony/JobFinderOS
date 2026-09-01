@@ -3,6 +3,7 @@
 from app.models.ai_usage import AIUsage  # noqa: F401 — registered on Base
 from app.models.application import Application
 from app.models.draft import ApplicationDraft
+from app.models.feedback import Feedback  # noqa: F401 — registered on Base
 from app.models.job import JobPosting
 from app.models.match import MatchResult
 from app.models.profile import Profile
@@ -12,6 +13,7 @@ from app.models.system_lock import SystemLock  # noqa: F401
 from app.models.user import User
 
 __all__ = [
+    "Feedback",
     "Profile",
     "JobPosting",
     "MatchResult",

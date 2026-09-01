@@ -14,6 +14,7 @@ import {
   Crosshair,
   LayoutDashboard,
   LogOut,
+  MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
   Radar,
@@ -33,7 +34,8 @@ export type View =
   | 'apps-review'
   | 'apps-sent'
   | 'profile'
-  | 'settings';
+  | 'settings'
+  | 'feedback';
 
 export const NAV: {
   id: View;
@@ -62,6 +64,9 @@ export const NAV: {
   },
   { id: 'profile', label: 'Profile', icon: User },
   { id: 'settings', label: 'Settings', icon: Settings },
+  // Beta-only page (owner decision 2026-09-01): the one-box feedback
+  // form. Drops off the nav when beta ends.
+  { id: 'feedback', label: 'Beta feedback', icon: MessageSquarePlus },
 ];
 
 export default function Sidebar({

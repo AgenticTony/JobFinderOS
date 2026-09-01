@@ -37,6 +37,7 @@ import {
   getPipelineStatus,
   getProfile,
   getProfileStatus,
+  api,
   prepareDraft,
   retryApplication,
   runMatching,
@@ -571,6 +572,8 @@ export default function Home() {
                 )}
 
                 {view === 'settings' && <SettingsView />}
+
+                {view === 'feedback' && <FeedbackView />}
 
                 {view === 'profile' && (
                   <ProfileView
@@ -1924,6 +1927,100 @@ function YourDataCard() {
         </p>
       )}
     </div>
+  );
+}
+
+const FEEDBACK_CATEGORIES: { id: string; label: string }[] = [
+  { id: 'bug', label: 'Bug' },
+  { id: 'confusing', label: 'Confusing' },
+  { id: 'missing', label: 'Missing feature' },
+  { id: 'idea', label: 'Idea' },
+  { id: 'love_it', label: 'Love it' },
+];
+
+function FeedbackView() {
+  // The beta one-box (owner decision 2026-09-01): chips + text, no
+  // fields. Rows are account-linked server-side — the note under the
+  // box says so; that link is what makes "scores are wrong" actionable.
+  const [category, setCategory] = useState('bug');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    setSent(false);
+    try {
+      await api.post('/api/v1/feedback', { category, message });
+      setMessage('');
+      setSent(true);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="space-y-6">
+      <ViewHeader
+        title="Beta feedback"
+        sub="You are shaping the product. One box — tell us anything."
+      />
+
+      <div className="rounded-xl border border-line bg-surface/80 p-5">
+        <div className="flex flex-wrap gap-2">
+          {FEEDBACK_CATEGORIES.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setCategory(c.id)}
+              className={
+                category === c.id
+                  ? 'rounded-full border border-signal/50 bg-signal/10 px-3.5 py-1.5 text-sm font-medium text-hi transition'
+                  : 'rounded-full border border-line px-3.5 py-1.5 text-sm text-mid transition hover:border-line-2 hover:text-hi'
+              }
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          maxLength={1000}
+          rows={6}
+          placeholder="What worked, what didn't, what's missing…"
+          className="mt-4 w-full resize-y rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
+        />
+        <div className="mt-2 flex items-center justify-between gap-4 text-xs text-low">
+          <span>Feedback is linked to your account so we can follow you up.</span>
+          <span className="num shrink-0">{message.length}/1000</span>
+        </div>
+
+        {error && (
+          <p className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
+            {error}
+          </p>
+        )}
+        {sent && !error && (
+          <p className="mt-3 rounded-lg bg-ok/10 p-3 text-sm text-hi">
+            Thank you — received. We read every one.
+          </p>
+        )}
+
+        <button
+          onClick={submit}
+          disabled={busy || !message.trim()}
+          className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
+        >
+          {busy ? 'Sending…' : 'Send feedback'}
+        </button>
+      </div>
+    </section>
   );
 }
 
