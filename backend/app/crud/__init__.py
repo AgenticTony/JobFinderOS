@@ -145,18 +145,28 @@ def list_scrape_runs(db: Session, limit: int = 20) -> List[ScrapeRun]:
 # ---------------- Stats ----------------
 
 def get_stats(db: Session, *, user_id) -> dict:
-    """Dashboard stats for ONE user.
+    """Dashboard stats for ONE user — the hunt-pulse funnel.
 
-    Per-user derivations: decision/approval state comes from match_results,
-    applied state from applications — job.status carries no user state.
-    (job_* counts describe the shared scraped pool, which is not per-user.)
+    PERSONAL FUNNEL (owner decision 2026-09-01): every count is the
+    user's own. Hunted / +N-in-24h count jobs that arrived IN THIS
+    USER'S SCOPE (the same stored_job_in_user_scope predicate matching
+    applies) since the account was created — a brand-new user's funnel
+    starts at zero instead of inheriting every other user's hunts
+    (live case: a day-one account showed the shared pool's 471 hunted /
+    103 matched). Matched is this user's kept match rows (jobs ranked
+    against THEIR CV); job.status carries no user state, so the old
+    global status='matched' count was never "ranked against your CV"
+    despite the label. Decision/approval state stays per-user from
+    match_results, applied state from applications.
     """
+    from app.models import User
+    from app.services.pipeline import build_scrape_context, stored_job_in_user_scope
+
     # Stats describe the user's real queue — pipeline-dismissed rows are
     # bookkeeping, not matches, and would inflate every count
     match_q = db.query(MatchResult).filter(
         MatchResult.user_id == user_id, MatchResult.dismissed_reason.is_(None)
     )
-    job_q = db.query(JobPosting)
     app_q = db.query(Application).filter(Application.user_id == user_id)
 
     matches = match_q.all()
@@ -164,21 +174,33 @@ def get_stats(db: Session, *, user_id) -> dict:
     def count(query):
         return query.count()
 
+    # The user's feed: everything stored in their scope since they
+    # joined. Bounded by MAX_POSTING_AGE_DAYS sweeps, so the in-Python
+    # scope pass (matching runs the same predicate per run) stays cheap.
+    user = db.query(User).filter(User.id == user_id).first()
+    feed_q = db.query(JobPosting)
+    if user is not None:
+        feed_q = feed_q.filter(JobPosting.scraped_at >= user.created_at)
+    feed_jobs = feed_q.all()
+    scope_ctx = build_scrape_context(db, user_id=user_id)
+    if scope_ctx:
+        feed_jobs = [j for j in feed_jobs if stored_job_in_user_scope(j, scope_ctx)]
+    day_ago = utc_now() - timedelta(hours=24)
+    feed_last_24h = [j for j in feed_jobs if j.scraped_at >= day_ago]
+
     user_decisions = {
         "approved": match_q.filter(MatchResult.decision == "approved").count(),
         "rejected": match_q.filter(MatchResult.decision == "rejected").count(),
     }
 
     return {
-        "jobs_total": count(job_q),
-        "jobs_last_24h": count(
-            job_q.filter(JobPosting.scraped_at >= utc_now() - timedelta(hours=24))
-        ),
-        "jobs_new": count(job_q.filter(JobPosting.status == "new")),
-        "jobs_matched": count(job_q.filter(JobPosting.status == "matched")),
+        "jobs_total": len(feed_jobs),
+        "jobs_last_24h": len(feed_last_24h),
+        "jobs_new": sum(1 for j in feed_jobs if j.status == "new"),
+        "jobs_matched": len(matches),
         "jobs_approved": user_decisions["approved"],
         "jobs_rejected": user_decisions["rejected"],
-        "jobs_dismissed": count(job_q.filter(JobPosting.status == "dismissed")),
+        "jobs_dismissed": sum(1 for j in feed_jobs if j.status == "dismissed"),
         "jobs_applied": app_q.filter(Application.status.in_(["sent", "manual_pending"])).count(),
         "matches_total": len(matches),
         "matches_excellent": sum(1 for m in matches if m.tier == "excellent_match"),
