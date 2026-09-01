@@ -118,7 +118,7 @@ export default function LandingPage() {
               <em className="italic">found for you.</em>
             </h1>
             <p className="landing-rise landing-rise-2 mx-auto mt-6 max-w-lg text-lg leading-relaxed text-paper/60">
-              Sweden&apos;s and the UK&apos;s job markets, hunted, deduped and
+              Sweden&apos;s and the UK&apos;s job markets, hunted, cleaned and
               scored against your CV. You approve everything.
             </p>
             <div className="landing-rise landing-rise-3 mt-9 flex flex-wrap items-center justify-center gap-x-7 gap-y-4">
