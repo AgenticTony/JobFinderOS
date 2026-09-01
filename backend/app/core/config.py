@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # Email applications (Resend — same provider TalentHive used)
     RESEND_API_KEY: str = ""
     APPLY_FROM_EMAIL: str = ""
+    # Beta feedback notifications land here (feedback_service.notify_owner);
+    # reply-to is set to the submitter's account email for one-click follow-up.
+    FEEDBACK_NOTIFY_EMAIL: str = "anthony@flutterhive.dev"
 
     # Matching
     # Safety ceiling on AI EVALUATIONS per run — a spend guard, never a

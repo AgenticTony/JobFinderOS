@@ -81,6 +81,9 @@ BUCKETS = {
     # employers a day from the shared APPLY_FROM_EMAIL domain — a
     # deliverability and spam vector for every other user's applications.
     "send_daily": (50, 86400),       # employer emails per account per day
+    # Beta feedback page — the ceiling exists so a stuck submit button
+    # (or a script) can't flood the owner's notification inbox.
+    "feedback": (5, 3600),           # feedback submissions per hour
 }
 
 
