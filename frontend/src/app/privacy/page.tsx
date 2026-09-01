@@ -73,27 +73,27 @@ export default function PrivacyPage() {
 
         <div className="mt-8">
           {/* Controller identity: owner named in README.md ("Author: Anthony
-              Foran"), PRD.md ("Owner: Anthony Foran") and CLAUDE.md
-              ("Owner: Anthony Foran (GitHub: AgenticTony). Solo project"). */}
+              Foran"), PRD.md ("Owner: Anthony Foran"). Framing per owner
+              decision 2026-09-01: production-grade product, not "personal
+              project". No legal entity is claimed — the named individual
+              remains the controller (that part is a fact, not tone). */}
           <Section n="01" title="Who is responsible">
             <p>
-              JobFinderOS is a personal project run by{' '}
-              <span className="text-hi">Anthony Foran</span>, who is the data
-              controller for everything described here.
+              JobFinderOS is a production-grade job-search platform built and
+              operated by <span className="text-hi">Anthony Foran</span>, who
+              is the data controller for everything described here.
             </p>
-            {/* No public privacy contact exists anywhere in the repo or the
-                landing — the placeholder below is deliberately marked as a
-                TODO for the owner rather than inventing an address. */}
+            {/* Contact: owner-published address 2026-09-01
+                (anthony@flutterhive.dev) — interim until dedicated
+                JobFinderOS mailboxes exist; in-app tools remain the
+                first-class route for data requests. */}
             <p>
               Contact:{' '}
-              <span className="rounded border border-signal/30 bg-signal/10 px-1.5 py-0.5 font-mono text-xs text-signal">
-                TODO-for-owner: publish a contact address
-              </span>{' '}
-              — until a dedicated address is published, sign in and use the
-              in-app account tools in <span className="text-hi">Settings → Your data</span>,
-              or reach the owner via the project&apos;s GitHub presence
-              (AgenticTony). No data protection officer is appointed (not
-              required for a project of this size).
+              <span className="text-hi">anthony@flutterhive.dev</span> — for
+              anything about your data you can also sign in and use the
+              in-app account tools in{' '}
+              <span className="text-hi">Settings → Your data</span>. No data
+              protection officer has been appointed.
             </p>
           </Section>
 
@@ -166,6 +166,18 @@ export default function PrivacyPage() {
                   (api.z.ai). Z.ai processes this outside the EU. Each call is
                   logged with the endpoint and model it used (no CV text in the
                   log) so the transfer is auditable.
+                </p>
+                {/* Beta scope + EU migration: owner decision 2026-09-01;
+                    the EU endpoint plan is MIGRATION.md MIG-WO5 (Mistral EU
+                    regional endpoint hosting the same GLM models, switch
+                    armed in config). "By end of beta" is the owner's stated
+                    timeline — quoted as a plan, not a completed fact. */}
+                <p className="mt-1.5 text-xs leading-relaxed text-low">
+                  Beta: during the current beta phase, AI processing runs on
+                  Z.ai. We are migrating AI processing to an EU-hosted
+                  endpoint of the same models, planned to be in place by the
+                  end of the beta phase — this notice will be updated when
+                  that change lands.
                 </p>
               </li>
               {/* Supabase: DATABASE_URL host ...aws-1-eu-west-1.pooler.supabase.com
@@ -240,6 +252,15 @@ export default function PrivacyPage() {
               are delivered by Resend and the employer&apos;s own mail system,
               whose locations are outside our control — and once delivered, we
               cannot recall an application you have approved and sent.
+            </p>
+            {/* Beta scope: same MIG-WO5 migration note as section 04 —
+                the Z.ai transfer is a beta-phase state, moving to an EU
+                endpoint by end of beta (owner timeline, 2026-09-01). */}
+            <p className="text-sm text-low">
+              The Z.ai transfer above applies during the beta phase: we are
+              moving AI processing to an EU-hosted endpoint of the same models,
+              planned to be live by the end of beta, after which CV and job-ad
+              text no longer leave the EU for AI processing.
             </p>
           </Section>
 
