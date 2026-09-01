@@ -46,7 +46,10 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         {`window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
 gtag('js', new Date());
-gtag('config', 'G-YHFHWWL4TF');`}
+// transport_type beacon: hits go out via sendBeacon, which survives
+// the page teardown that follows events fired right before a
+// navigation (the language toggle) — a plain XHR flush can lose them.
+gtag('config', 'G-YHFHWWL4TF', { transport_type: 'beacon' });`}
       </Script>
     </>
   );
