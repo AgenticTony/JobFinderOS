@@ -239,6 +239,17 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
 
 ## Open items / next steps
 
+- [ ] **Restore point-of-collection privacy panels after beta** (owner
+      decision 2026-09-01): both PrivacyNotice placements (account box,
+      CV upload) removed for the tester phase; /privacy is the disclosure
+      of record and stays linked from the login footer. Restore
+      `<PrivacyNotice context="cv" />` in CvUpload and the account-box
+      placement in login/page.tsx when beta ends — component kept.
+- [ ] **Beta trial caps are env-lifted** — set TRIAL_DAILY_SCORE_CAP and
+      TRIAL_DAY1_SCORE_CAP high on Render (BOTH services) so testers are
+      effectively uncapped on the flat-rate GLM subscription key; remove
+      the two env vars after beta to reinstate the 25/10 defaults.
+
 - [x] **Re-score the legacy-unversioned matches** — done: 241/243 rows are on
       `m2-62c2452b`, 2 stragglers remain (verified 2026-08-31)
 - [x] **Phase 1a-static: landing page** — shipped at `/` with the console
