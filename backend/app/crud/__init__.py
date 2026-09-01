@@ -148,18 +148,25 @@ def get_stats(db: Session, *, user_id) -> dict:
     """Dashboard stats for ONE user — the hunt-pulse funnel.
 
     PERSONAL FUNNEL (owner decision 2026-09-01): every count is the
-    user's own. Hunted / +N-in-24h count jobs that arrived IN THIS
-    USER'S SCOPE (the same stored_job_in_user_scope predicate matching
-    applies) since the account was created — a brand-new user's funnel
-    starts at zero instead of inheriting every other user's hunts
-    (live case: a day-one account showed the shared pool's 471 hunted /
-    103 matched). Matched is this user's kept match rows (jobs ranked
-    against THEIR CV); job.status carries no user state, so the old
-    global status='matched' count was never "ranked against your CV"
-    despite the label. Decision/approval state stays per-user from
-    match_results, applied state from applications.
+    user's own. Hunted / +N-in-24h count jobs stored in THIS user's
+    scope (the same stored_job_in_user_scope predicate matching
+    applies — no second location policy to drift). Deliberately NOT
+    bounded by the join date: the first match run scores the
+    pre-existing pool by design (instant day-one value), so bounding
+    Hunted but not Matched would invert the funnel — Matched greater
+    than Hunted on day one. A user with no onboarded profile has no
+    scope, hence no feed: zeros, never the shared pool.
+
+    Matched is this user's kept match rows (jobs ranked against THEIR
+    CV); job.status carries no user state, so it is not read at all —
+    jobs_new/jobs_dismissed were removed with it (they derived from
+    the shared status column and moved with other users' activity).
+
+    Perf: only the location gate's columns are loaded (no description
+    Text hydration). job_postings rows are NEVER deleted — the stale
+    sweep flips status to 'dismissed' only — so this scan must stay
+    slim as the pool grows; both calling endpoints poll it.
     """
-    from app.models import User
     from app.services.pipeline import build_scrape_context, stored_job_in_user_scope
 
     # Stats describe the user's real queue — pipeline-dismissed rows are
@@ -174,19 +181,21 @@ def get_stats(db: Session, *, user_id) -> dict:
     def count(query):
         return query.count()
 
-    # The user's feed: everything stored in their scope since they
-    # joined. Bounded by MAX_POSTING_AGE_DAYS sweeps, so the in-Python
-    # scope pass (matching runs the same predicate per run) stays cheap.
-    user = db.query(User).filter(User.id == user_id).first()
-    feed_q = db.query(JobPosting)
-    if user is not None:
-        feed_q = feed_q.filter(JobPosting.scraped_at >= user.created_at)
-    feed_jobs = feed_q.all()
     scope_ctx = build_scrape_context(db, user_id=user_id)
-    if scope_ctx:
-        feed_jobs = [j for j in feed_jobs if stored_job_in_user_scope(j, scope_ctx)]
-    day_ago = utc_now() - timedelta(hours=24)
-    feed_last_24h = [j for j in feed_jobs if j.scraped_at >= day_ago]
+    if scope_ctx is None:
+        feed_total = 0
+        feed_last_24h = 0
+    else:
+        # Attribute access on Row works for the gate (source/remote/
+        # location), so the slim column load is a drop-in for the ORM
+        # objects without loading descriptions.
+        pool_rows = db.query(
+            JobPosting.source, JobPosting.remote, JobPosting.location, JobPosting.scraped_at
+        ).all()
+        feed = [j for j in pool_rows if stored_job_in_user_scope(j, scope_ctx)]
+        feed_total = len(feed)
+        day_ago = utc_now() - timedelta(hours=24)
+        feed_last_24h = sum(1 for j in feed if j.scraped_at >= day_ago)
 
     user_decisions = {
         "approved": match_q.filter(MatchResult.decision == "approved").count(),
@@ -194,13 +203,11 @@ def get_stats(db: Session, *, user_id) -> dict:
     }
 
     return {
-        "jobs_total": len(feed_jobs),
-        "jobs_last_24h": len(feed_last_24h),
-        "jobs_new": sum(1 for j in feed_jobs if j.status == "new"),
+        "jobs_total": feed_total,
+        "jobs_last_24h": feed_last_24h,
         "jobs_matched": len(matches),
         "jobs_approved": user_decisions["approved"],
         "jobs_rejected": user_decisions["rejected"],
-        "jobs_dismissed": sum(1 for j in feed_jobs if j.status == "dismissed"),
         "jobs_applied": app_q.filter(Application.status.in_(["sent", "manual_pending"])).count(),
         "matches_total": len(matches),
         "matches_excellent": sum(1 for m in matches if m.tier == "excellent_match"),

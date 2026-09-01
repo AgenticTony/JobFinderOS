@@ -149,11 +149,9 @@ export interface QuerySuggestions {
 export interface Stats {
   jobs_total: number;
   jobs_last_24h: number;
-  jobs_new: number;
   jobs_matched: number;
   jobs_approved: number;
   jobs_rejected: number;
-  jobs_dismissed: number;
   jobs_applied: number;
   matches_total: number;
   matches_excellent: number;
