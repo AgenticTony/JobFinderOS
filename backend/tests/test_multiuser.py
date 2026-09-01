@@ -2423,24 +2423,31 @@ class TestPersonalFunnelStats:
     a day-one account showed the platform-wide 471 hunted / 103
     matched, and 'Matched · ranked against your CV' counted
     job.status='matched' rows other users' hunts had set. Hunted must
-    count only jobs stored in THIS user's scope since they joined;
-    Matched must count only THIS user's match rows."""
+    count only jobs stored in THIS user's scope (NOT join-date
+    bounded — the first match run scores the pre-existing pool by
+    design, so a join bound would invert the funnel with Matched >
+    Hunted); Matched must count only THIS user's match rows; a user
+    with no onboarded scope gets zeros, never the shared pool."""
 
     def test_funnel_is_personal_not_shared_pool(self, client, db):
         from datetime import timedelta
 
         from app.core.timeutil import utc_now
         from app.crud import get_stats
-        from app.models import User
 
         a_email = f"fa-{uuid.uuid4().hex[:6]}@test.example"
         b_email = f"fb-{uuid.uuid4().hex[:6]}@test.example"
+        c_email = f"fc-{uuid.uuid4().hex[:6]}@test.example"
         a_id = _register(client, a_email)
         b_id = _register(client, b_email)
-        a_uid, b_uid = uuid.UUID(a_id), uuid.UUID(b_id)
+        c_id = _register(client, c_email)
+        a_uid, b_uid, c_uid = (
+            uuid.UUID(a_id), uuid.UUID(b_id), uuid.UUID(c_id),
+        )
 
         # A: strictly-local Malmö seeker (no remote opt-in). Register
         # already created A's profile row — set the scope on it.
+        # C stays unonboarded (Profile.country NULL -> no scope).
         a_profile = db.query(Profile).filter(Profile.user_id == a_uid).one()
         a_profile.country = "SE"
         a_profile.municipality = "Malmö"
@@ -2450,7 +2457,7 @@ class TestPersonalFunnelStats:
 
         now = utc_now()
         jobs = {
-            # In A's scope, arrived after A joined -> HUNTED
+            # In A's scope -> HUNTED
             "in_scope": JobPosting(
                 source="manual", source_id=uuid.uuid4().hex[:8],
                 title="Baker Malmö", url=f"https://x/{uuid.uuid4().hex[:6]}",
@@ -2465,7 +2472,9 @@ class TestPersonalFunnelStats:
                 source="manual", source_id=uuid.uuid4().hex[:8],
                 title="Stockholm chef", url=f"https://x/{uuid.uuid4().hex[:6]}",
                 location="Stockholm", remote=0, scraped_at=now),
-            # In scope but scraped BEFORE A created the account -> excluded
+            # In scope, scraped BEFORE A joined -> still HUNTED: the
+            # first match run scores the pre-existing pool, so the feed
+            # must include it or the funnel inverts (Matched > Hunted)
             "pre_join": JobPosting(
                 source="manual", source_id=uuid.uuid4().hex[:8],
                 title="Old Malmö role", url=f"https://x/{uuid.uuid4().hex[:6]}",
@@ -2492,22 +2501,36 @@ class TestPersonalFunnelStats:
 
         stats = get_stats(db, user_id=a_uid)
 
-        # Hunted: A's in-scope feed since joining — the remote ad, the
-        # other city, and the pre-join role never counted
-        assert stats["jobs_total"] == 2, (
+        # Hunted: A's in-scope feed — the remote ad and the other
+        # city never counted; the pre-join Malmö role DID (the first
+        # match run scores the backlog by design)
+        assert stats["jobs_total"] == 3, (
             f"Hunted counted the shared pool: {stats['jobs_total']} "
-            "(expected only the two post-join Malmö jobs)"
+            "(expected the three Malmö jobs, including the pre-join one)"
         )
-        assert stats["jobs_last_24h"] == 2
+        assert stats["jobs_last_24h"] == 2  # pre-join job is 3 days old
 
         # Matched: A's own rows only — B's match (and the job.status
-        # bookkeeping) must not surface as 'ranked against your CV'
+        # bookkeeping) must not surface as 'ranked against your CV'.
+        # Monotone funnel: Hunted >= Matched >= Awaiting.
         assert stats["jobs_matched"] == 1, (
             f"Matched leaked other users' rankings: {stats['jobs_matched']}"
         )
         assert stats["matches_total"] == 1
         assert stats["matches_pending_decision"] == 1
+        assert stats["jobs_total"] >= stats["jobs_matched"] >= (
+            stats["matches_pending_decision"]
+        )
 
-        # Sanity: the stats read A's account, not the newest user
-        a_user = db.query(User).filter(User.id == a_uid).one()
-        assert a_user.created_at > jobs["pre_join"].scraped_at
+        # The dead shared-status fields are gone from the response
+        assert "jobs_new" not in stats and "jobs_dismissed" not in stats
+
+        # C never onboarded: no scope, so no feed — zeros, NOT the
+        # shared pool (the original '471 hunted' symptom would otherwise
+        # recur in the pre-onboarding window)
+        c_stats = get_stats(db, user_id=c_uid)
+        assert c_stats["jobs_total"] == 0, (
+            f"Unscoped user inherited the shared pool: {c_stats['jobs_total']}"
+        )
+        assert c_stats["jobs_last_24h"] == 0
+        assert c_stats["jobs_matched"] == 0
