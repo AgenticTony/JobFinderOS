@@ -912,6 +912,7 @@ class TestOutboundEmailBoundary:
         # Make the email path live and capture the real payload
         monkeypatch.setattr(settings, "RESEND_API_KEY", "test-key")
         monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "apply@jobfinderos.test")
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate off in these path tests
         # Bob has a stored CV file; Alice does not. If the wrong profile is
         # resolved, Bob's bytes get attached — exactly the original P0.
         monkeypatch.setattr(
@@ -1087,7 +1088,10 @@ class TestLayer1Routes:
         app_row.error = "boom"
         db.commit()
 
+        from app.core.config import settings
         from app.services import draft_service
+
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate
         monkeypatch.setattr(
             draft_service, "_send_with_pdfs",
             lambda db_, app_, draft_, job_, profile_: setattr(app_, "status", "sent"),
@@ -1920,6 +1924,10 @@ def _live_email_settings(monkeypatch):
 
     monkeypatch.setattr(settings, "RESEND_API_KEY", "test-key")
     monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "apply@jobfinderos.test")
+    # Beta gate (2026-09-01): email apply is OFF by default — these tests
+    # exercise the dispatch code that returns with the Gmail build, so
+    # they re-enable it locally.
+    monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)
 
 
 class TestOutboundReplyTo:
@@ -2013,9 +2021,11 @@ class TestRetryIdempotence:
         """Prepare + submit through the real routes, then flip the result
         into the failed state a retry exists for. Returns
         (email, draft_id, application_id)."""
+        from app.core.config import settings as _settings
         from app.services import draft_service
         from app.services.ai_service import AIService
 
+        monkeypatch.setattr(_settings, "EMAIL_APPLY_ENABLED", True)  # beta gate: exercise the live path
         email = f"p12-{uuid.uuid4().hex[:6]}@test.example"
         uid = uuid.UUID(_register(client, email))
         _auth_client(client, email)
@@ -2351,3 +2361,56 @@ class TestRouteCeilingsAgree:
             "and must pass validation — the two route ceilings must agree; "
             f"got {under_max.status_code}: {under_max.text[:120]}"
         )
+
+
+class TestEmailApplyGatedDuringBeta:
+    """Owner decision 2026-09-01: email apply is OFF until it ships from
+    the user's own connected Gmail (Composio's Gmail actions can't carry
+    our PDF attachments, so a first-party Google OAuth build replaces the
+    platform-sender path post-beta). Every email entry point must refuse
+    with the beta message — never fall back to the platform sender."""
+
+    def _seed_ready_draft(self, db, tag):
+        from app.models import ApplicationDraft
+        from app.models import User as UserModel
+
+        uid = uuid.uuid4()
+        db.add(UserModel(id=uid, email=f"{tag}-{uuid.uuid4().hex[:6]}@test.example",
+                         hashed_password="test-only"))
+        db.flush()
+        profile = Profile(user_id=uid, is_active=1, cv_text="CV", cv_file_name="cv.pdf")
+        job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         application_email="jobs@acme.example")
+        db.add_all([profile, job])
+        db.flush()
+        draft = ApplicationDraft(user_id=uid, job_id=job.id, status="ready",
+                                 cover_letter="Dear Acme", tailored_cv="CV",
+                                 changes_summary="[]")
+        db.add(draft)
+        db.commit()
+        return uid, draft
+
+    def test_submit_email_refused_with_beta_message(self, client, db):
+        from app.services.draft_service import EmailApplyDisabledError, submit_draft
+
+        uid, draft = self._seed_ready_draft(db, "gate1")
+        with pytest.raises(EmailApplyDisabledError, match="beta"):
+            submit_draft(db, draft, "email", None, user_id=uid)
+
+    def test_retry_email_refused_with_beta_message(self, client, db):
+        from app.models import Application
+        from app.models import Profile as ProfileModel
+        from app.services.apply_service import ApplyError, retry_application
+
+        uid, draft = self._seed_ready_draft(db, "gate2")
+        application = Application(user_id=uid, job_id=draft.job_id, method="email",
+                                  status="failed", error="old failure",
+                                  target_email="jobs@acme.example",
+                                  subject="Application: Dev", body="Dear Acme")
+        db.add(application)
+        db.commit()
+        profile = db.query(ProfileModel).filter(ProfileModel.user_id == uid).one()
+        with pytest.raises(ApplyError, match="beta"):
+            retry_application(db, application, profile)

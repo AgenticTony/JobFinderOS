@@ -171,11 +171,13 @@ class TestSubmitStateMachine:
     """B6: a FAILED email send must not mark the job applied / lock the draft."""
 
     def test_failed_send_keeps_draft_ready(self, db, monkeypatch):
+        from app.core.config import settings
         from app.services import draft_service
 
         def boom(*a, **k):
             raise RuntimeError("resend down")
 
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate
         monkeypatch.setattr(draft_service, "_send_with_pdfs", boom)
         profile = _profile(db)
         job = _job_row(db)
@@ -1395,9 +1397,11 @@ class TestTenancyLayer1:
         db.commit()
 
         captured = {}
+        from app.core.config import settings
         from app.services import draft_service
         from app.services.apply_service import retry_application
 
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate
         monkeypatch.setattr(
             draft_service, "_send_with_pdfs",
             lambda db_, app_, draft_, job_, profile_: captured.update(
@@ -3184,6 +3188,7 @@ class TestEmailApplyErrorsAreEnvironmentNeutral:
         from app.services import draft_service
         monkeypatch.setattr(settings, "RESEND_API_KEY", "")
         monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "")
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate: exercise the failure path
 
         application = SimpleNamespace(status=None, error=None)
         draft_service._send_with_pdfs(None, application, None, None, None)
@@ -3198,6 +3203,7 @@ class TestEmailApplyErrorsAreEnvironmentNeutral:
         from app.services import apply_service
         monkeypatch.setattr(settings, "RESEND_API_KEY", "")
         monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "")
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate: exercise the failure path
 
         application = SimpleNamespace(status=None, error=None)
         apply_service._send_email_application(None, application, None, None)

@@ -350,9 +350,11 @@ class TestDraftCvSnapshot:
     def test_submit_attaches_the_snapshotted_cv_not_the_current(self, db, monkeypatch):
         """The brain invariant: a package tailored against CV-old must not
         email CV-new as its 'original CV' — the pair contradicts."""
+        from app.core.config import settings
         from app.services import draft_service
         from app.services.storage import get_storage
 
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate
         old_key = get_storage().save(
             f"snap-old-{uuid.uuid4().hex[:8]}.pdf", b"%PDF-OLD-ORIGINAL",
             "application/pdf",
@@ -396,9 +398,11 @@ class TestDraftCvSnapshot:
     def test_legacy_draft_without_snapshot_falls_back_to_current(self, db, monkeypatch):
         """Pre-migration drafts (NULL snapshot) keep the old behavior: the
         profile's current path."""
+        from app.core.config import settings
         from app.services import draft_service
         from app.services.storage import get_storage
 
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate
         current_key = get_storage().save(
             f"snap-cur-{uuid.uuid4().hex[:8]}.pdf", b"%PDF-CURRENT-CV",
             "application/pdf",
@@ -494,12 +498,14 @@ class TestDoubleSubmitWindow:
         ])
         db.commit()  # must not raise
 
-    def test_failed_send_returns_draft_to_ready_and_resubmit_reuses_row(self, db):
+    def test_failed_send_returns_draft_to_ready_and_resubmit_reuses_row(self, db, monkeypatch):
         """Failure path: the draft returns to 'ready' (retry stays
         possible) and a second submit must REUSE the failed application
         row, not insert a duplicate (the unique index would fire)."""
+        from app.core.config import settings
         from app.services import draft_service
 
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate
         uid, profile, job = _make_user_with_profile(db, cv_text="FAIL CV")
         draft = _make_ready_draft(db, uid, job)
 

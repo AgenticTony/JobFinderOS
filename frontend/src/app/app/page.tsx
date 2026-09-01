@@ -818,8 +818,7 @@ function DashboardView({
             {profileStatus && !profileStatus.ai_enabled && (
               <Warning>
                 <Cpu className="mr-1.5 inline h-4 w-4" />
-                GLM_API_KEY not set on the backend — set it in <code>backend/.env</code> to enable AI
-                matching.
+                AI matching is temporarily unavailable — please try again later.
               </Warning>
             )}
             {matchFailed && pipelineResult?.match?.error && (
@@ -1584,14 +1583,13 @@ function DraftCard({
             <span className="mx-1 h-6 w-px bg-line" />
 
             {canEmail ? (
-              <button
-                onClick={() => submit('email')}
-                disabled={busy !== null}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-ok px-4 py-2 text-sm font-medium text-ink transition hover:bg-ok/90 active:scale-[0.98] disabled:opacity-50"
+              <span
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line px-4 py-2 text-sm text-low"
+                title="Email apply is being retooled to send from your own connected Gmail and returns at the end of beta"
               >
                 <Mail className="h-4 w-4" />
-                {busy === 'submit-email' ? 'Sending…' : 'Approve & send by email'}
-              </button>
+                Email apply returns at end of beta (from your own Gmail)
+              </span>
             ) : (
               <span className="text-xs text-low">no application email published</span>
             )}

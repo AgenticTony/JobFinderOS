@@ -59,6 +59,12 @@ class DraftConflictError(DraftError):
     route maps this to 409, not 400."""
 
 
+class EmailApplyDisabledError(DraftError):
+    """Email apply is switched off (beta, 2026-09-01: it returns sending
+    from the user's own Gmail). Not a conflict and not a bad package —
+    the DraftError handler maps this to 400 with the beta message."""
+
+
 def get_draft(db: Session, draft_id: int) -> Optional[ApplicationDraft]:
     return db.query(ApplicationDraft).filter(ApplicationDraft.id == draft_id).first()
 
@@ -380,6 +386,16 @@ def submit_draft(
     if method == "email" and not target_email:
         # No published email — degrade to the browser flow
         method = "browser"
+    # Owner decision 2026-09-01 (beta): email apply ships from the USER'S
+    # OWN connected Gmail, not a platform sender. Composio's Gmail actions
+    # cannot carry our PDF attachments (s3key-only), so sending is OFF
+    # until the first-party Google OAuth build lands post-beta. The gate
+    # lives HERE so every caller — route, retry, script — inherits it.
+    if method == "email" and not settings.EMAIL_APPLY_ENABLED:
+        raise EmailApplyDisabledError(
+            "Email apply is moving to your own Gmail account and returns "
+            "at the end of beta — use browser or manual apply for now"
+        )
 
     applicant = profile.full_name if profile else None
     subject = f"Application: {job.title}" + (f" — {applicant}" if applicant else "")

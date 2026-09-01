@@ -78,9 +78,12 @@ app = FastAPI(lifespan=lifespan,
         "recommend -> approve -> auto-apply. Built on the TalentHive engine."
     ),
     version=settings.APP_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    # 2026-09-01: the public OpenAPI surface is a full map of the
+    # backend (routes, schemas, validation bounds) for anyone who opens
+    # the URL — off in production. Dev keeps it; tests never read it.
+    docs_url=None if settings.ENVIRONMENT == "production" else "/docs",
+    redoc_url=None if settings.ENVIRONMENT == "production" else "/redoc",
+    openapi_url=None if settings.ENVIRONMENT == "production" else "/openapi.json",
 )
 
 app.add_middleware(
