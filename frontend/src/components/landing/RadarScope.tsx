@@ -15,29 +15,27 @@
 
 import { useEffect, useState } from 'react';
 
+import { dicts } from '@/i18n/dict';
+
 const FINAL_SCORE = 87;
 
-// [label, score, x, y] — pill CENTRE, in % of the 150vmin scope.
-// Rows follow the arc: the circle narrows towards the crest, so upper
-// rows sit tighter to the middle; the score chip owns x 12..48, y 5..13.
-const FIELD: [string, number, number, number][] = [
-  // Upper arc, clear of the chip on the left.
-  ['Nurse', 82, 36, 4], ['Teacher', 76, 45, 4],
-  ['Chef', 73, 54, 4], ['Pilot', 84, 63, 4],
-  ['Vet nurse', 76, 35, 9], ['Pharmacist', 81, 56, 9],
-  ['Accountant', 79, 64, 9], ['Optician', 79, 71, 9],
-  // Mid arc — chip cleared, full width of the cap.
-  ['Postman', 68, 31, 14], ['Electrician', 71, 41, 14],
-  ['IT support', 78, 51, 14], ['Physio', 83, 61, 14],
-  ['Midwife', 81, 71, 14],
-  ['Police officer', 70, 32, 19], ['Firefighter', 65, 42, 19],
-  ['Bus driver', 64, 52, 19], ['Journalist', 67, 62, 19],
-  ['Social worker', 74, 71, 19],
-  // Lower arc, drifting wider as the cap opens out.
-  ['Barista', 57, 27, 24], ['Plumber', 62, 36, 24],
-  ['Welder', 59, 46, 24], ['Hairdresser', 56, 56.5, 24],
-  ['Gardener', 55, 66, 24], ['Courier', 63, 74, 24],
+// Pill CENTRES, in % of the 150vmin scope. Rows follow the arc: the
+// circle narrows towards the crest, so upper rows sit tighter to the
+// middle; the score chip owns x 12..48, y 5..13. Index-aligned with the
+// localized title lists (dict.radar.titles).
+const FIELD_COORDS: [number, number][] = [
+  [36, 4], [45, 4], [54, 4], [63, 4],
+  [35, 9], [56, 9], [64, 9], [71, 9],
+  [31, 14], [41, 14], [51, 14], [61, 14], [71, 14],
+  [32, 19], [42, 19], [52, 19], [62, 19], [71, 19],
+  [27, 24], [36, 24], [46, 24], [56.5, 24], [66, 24], [74, 24],
 ];
+
+type RadarScopeProps = {
+  chipRole?: string;
+  matchWord?: string;
+  titles?: [string, number][];
+};
 
 const TIER_STYLES = [
   'border-signal/20 text-paper/60',
@@ -45,7 +43,11 @@ const TIER_STYLES = [
   'border-paper/[0.08] text-paper/40',
 ];
 
-export default function RadarScope() {
+export default function RadarScope({
+  chipRole = dicts.en.radar.chipRole,
+  matchWord = dicts.en.radar.match,
+  titles = dicts.en.radar.titles,
+}: RadarScopeProps) {
   // SSR renders the final score; the count-up only starts on the client.
   const [score, setScore] = useState(FINAL_SCORE);
 
@@ -91,7 +93,7 @@ export default function RadarScope() {
         <div className="absolute left-[30%] top-[9%] -translate-x-1/2 -translate-y-[calc(100%+14px)]">
           <div className="flex items-center gap-3.5 rounded-full border border-signal/25 bg-ink/85 py-2.5 pl-5 pr-6 backdrop-blur-md">
             <span className="num text-[11px] uppercase tracking-[0.16em] text-paper/55">
-              Backend developer · fintech
+              {chipRole}
             </span>
             <span className="h-3.5 w-px bg-signal/25" aria-hidden />
             <span
@@ -101,7 +103,7 @@ export default function RadarScope() {
               {score}
             </span>
             <span className="num text-[10px] uppercase tracking-[0.16em] text-paper/45">
-              match
+              {matchWord}
             </span>
           </div>
           {/* Connector down to the contact. */}
@@ -112,20 +114,23 @@ export default function RadarScope() {
             the whole labour market on scope. Each is a miniature of the
             score chip (role · score in a pill), centre-anchored on its
             hand-set coordinate; three tiers give the depth. */}
-        {FIELD.map(([label, fieldScore, x, y], i) => (
-          <div
-            key={i}
-            className={`absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border bg-ink/80 py-1 pl-3 pr-2.5 backdrop-blur-md ${TIER_STYLES[i % 3]}`}
-            style={{ left: `${x}%`, top: `${y}%` }}
-          >
-            <span className="num text-[9px] uppercase tracking-[0.16em]">
-              {label}
-            </span>
-            <span className="num ml-2 text-[9px] font-semibold text-signal/80">
-              {fieldScore}
-            </span>
-          </div>
-        ))}
+        {titles.map(([label, fieldScore], i) => {
+          const [x, y] = FIELD_COORDS[i];
+          return (
+            <div
+              key={i}
+              className={`absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border bg-ink/80 py-1 pl-3 pr-2.5 backdrop-blur-md ${TIER_STYLES[i % 3]}`}
+              style={{ left: `${x}%`, top: `${y}%` }}
+            >
+              <span className="num text-[9px] uppercase tracking-[0.16em]">
+                {label}
+              </span>
+              <span className="num ml-2 text-[9px] font-semibold text-signal/80">
+                {fieldScore}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
