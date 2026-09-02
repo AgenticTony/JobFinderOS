@@ -47,9 +47,55 @@ def dedupe_key_for(title: str | None, company: str | None, location: str | None 
     return hashlib.md5(f"{t}|{c}".encode()).hexdigest()[:16]
 
 
+_HTML_TAGS = re.compile(r"<[^>]+>")
+# Word-shingle width for ad-text identity (see _descriptions_same_ad).
+_SHINGLE_WIDTH = 5
+# Below this many words a snippet carries too little identity signal to
+# collapse on (the live fragments ran 15-22 words; the guard exists so
+# a two-line teaser can never match anything).
+_MIN_FRAGMENT_WORDS = 15
+# Near-containment threshold on shingle sets, measured against the
+# SHORTER text (aggregator fragments are verbatim slices of the full
+# ad, so fragment shingles sit inside the full ad's set).
+_DESC_CONTAINMENT = 0.8
+
+
+def _desc_tokens(desc: str | None) -> list[str]:
+    return [
+        t for t in re.split(r"[^a-z0-9åäö]+", _HTML_TAGS.sub(" ", (desc or "")).lower()) if t
+    ]
+
+
+def _shingles(tokens: list[str]) -> frozenset:
+    if len(tokens) < _SHINGLE_WIDTH:
+        return frozenset()
+    return frozenset(
+        tuple(tokens[i : i + _SHINGLE_WIDTH]) for i in range(len(tokens) - _SHINGLE_WIDTH + 1)
+    )
+
+
+def _descriptions_same_ad(desc_a: str | None, desc_b: str | None) -> bool:
+    """Sister-brand re-posts share no company string and name no client
+    in the title (the ManpowerGroup case, live 2026-09-02: one Dispatcher
+    ad under Experis AB / Manpower / Jefferson Wells scored 90/83/68 as
+    three separate jobs). What they DO share is the ad text itself —
+    aggregators re-slice the same copy the employer feed carries, so a
+    fragment's shingles are ~fully contained in the full ad's. That is
+    a stronger identity signal than any name heuristic, and it
+    generalises past any hardcoded brand list."""
+    a, b = _desc_tokens(desc_a), _desc_tokens(desc_b)
+    if len(a) < _MIN_FRAGMENT_WORDS or len(b) < _MIN_FRAGMENT_WORDS:
+        return False
+    sa, sb = _shingles(a), _shingles(b)
+    if not sa or not sb:
+        return False
+    return len(sa & sb) / min(len(sa), len(sb)) >= _DESC_CONTAINMENT
+
+
 def likely_same_job(
     *, title_a: str | None, company_a: str | None, location_a: str | None,
     title_b: str | None, company_b: str | None, location_b: str | None,
+    desc_a: str | None = None, desc_b: str | None = None,
 ) -> bool:
     """Fuzzy second gate for the exact key's blind spot: the same job
     posted DIRECTLY by the employer and AGAIN by an agency — every exact
@@ -68,8 +114,10 @@ def likely_same_job(
          collapsed live pairs like 'Senior Data Engineer (Python)' into
          'Senior Data Scientist (Python)' — Engineer vs Scientist is
          role identity, not noise; AND
-      3. EMPLOYER LINK — companies equal, OR one company is named in the
-         other posting's title (the agency pattern), AND
+      3. EMPLOYER LINK — companies equal, OR one company is named in
+         the other posting's title (the agency pattern), OR the two
+         descriptions are near-containment slices of the same ad text
+         (the sister-brand pattern — see _descriptions_same_ad); AND
       4. no seniority divergence (Senior vs plain = different roles).
     """
     def muni(loc: str | None) -> str:
@@ -109,11 +157,15 @@ def likely_same_job(
     if sa != sb:
         return False
 
-    # Employer link
+    # Employer link — three routes:
+    #   a) companies equal (legal suffixes don't distinguish employers)
+    #   b) one company named in the OTHER posting's title (agency
+    #      pattern: 'till Pågen' names the client PÅGEN AKTIEBOLAG)
+    #   c) SAME AD TEXT: sister-brand re-posts (ManpowerGroup etc.)
+    #      share neither company string nor title naming, but the
+    #      descriptions are verbatim slices of one ad.
     ca, cb = _norm(company_a), _norm(company_b)
-    if not ca or not cb:
-        return False
-    if ca == cb:
+    if ca and cb and ca == cb:
         return True
 
     def company_tokens(company: str | None) -> set[str]:
@@ -132,4 +184,6 @@ def likely_same_job(
         ttoks = _tokens(title)
         return any(len(t) >= 4 and t in ttoks for t in ctoks)
 
-    return company_in(company_a, title_b) or company_in(company_b, title_a)
+    if company_in(company_a, title_b) or company_in(company_b, title_a):
+        return True
+    return _descriptions_same_ad(desc_a, desc_b)

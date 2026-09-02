@@ -3631,3 +3631,77 @@ class TestStarvationFix:
         assert db.query(MatchResult).filter(
             MatchResult.job_id == plausible.id, MatchResult.dismissed_reason.is_(None)
         ).count() == 1, "an excluded job must not consume the plausible job's slot"
+
+
+class TestSisterBrandDuplicateGate:
+    """The ManpowerGroup incident (live 2026-09-02): ONE Dispatcher ad in
+    Malmö circulated as Experis AB (jobtech, full 2,168-char ad) and two
+    careerjet fragments under the Manpower and Jefferson Wells brands —
+    scored 90 / 83 / 68 as three separate jobs. Sister brands share no
+    company string and name no client in the title, so the employer link
+    needed a third route: the descriptions are verbatim slices of the
+    same ad text."""
+
+    # Verbatim shapes from the live rows (trimmed for the test).
+    FULL_AD = (
+        "Brinner du för kundservice? Vill du vara den som får allt att flyta "
+        "och trivs i en roll där ingen dag är den andra lik? Då kan den här "
+        "tjänsten som Dispatcher vara något för dig! I rollen som dispatcher "
+        "arbetar du i en viktig och central funktion där du leder och "
+        "säkerställer att servicearbetet fungerar, och du är ett viktigt "
+        "stöd för både kunder och kollegor under dagen. Du kommer att "
+        "planera, fördela och följa upp uppdrag samt kommunicera med flera "
+        "olika avdelningar för att skapa bästa möjliga serviceupplevelse."
+    )
+    FRAGMENT_MID = (
+        "I rollen som <b>dispatcher</b> arbetar du i en viktig och central "
+        "funktion där du leder och säkerställer att servicearbetet"
+    )
+    FRAGMENT_INTRO = (
+        "är den andra lik? Då kan den här tjänsten som <b>Dispatcher</b> "
+        "vara något för dig! I rollen som <b>dispatcher</b> arbetar du i "
+        "en viktig och central"
+    )
+
+    def same(self, co_a, desc_a, co_b, desc_b):
+        from app.core.dedupe import likely_same_job
+        return likely_same_job(
+            title_a="Dispatcher", company_a=co_a, location_a="Malmö",
+            title_b="Dispatcher", company_b=co_b, location_b="Malmö, Skåne län",
+            desc_a=desc_a, desc_b=desc_b,
+        )
+
+    def test_full_ad_vs_mid_fragment_sister_brands(self):
+        # jobtech full ad (Experis) vs careerjet mid-paragraph (Manpower)
+        assert self.same("Experis AB", self.FULL_AD, "Manpower", self.FRAGMENT_MID) is True
+
+    def test_full_ad_vs_intro_fragment_sister_brands(self):
+        # jobtech full ad vs careerjet intro fragment (Jefferson Wells)
+        assert self.same("Experis AB", self.FULL_AD, "Jefferson Wells", self.FRAGMENT_INTRO) is True
+
+    def test_different_ads_same_title_and_municipality_stay_separate(self):
+        # The precision case: same generic title, same city, unrelated
+        # companies, DIFFERENT ad text -> never collapse.
+        other_ad = (
+            "Vi söker en serviceinriktad kollega till vår reception i Malmö. "
+            "Du möter besökare, besvarar telefon och e-post, och ser till "
+            "att dagen flyter på. Tidigare erfarenhet av servicedesken är "
+            "meriterande men inte ett krav. Vi erbjuder en trygg anställning "
+            "med trevliga kollegor och goda utvecklingsmöjligheter."
+        )
+        assert self.same("Experis AB", self.FULL_AD, "Jefferson Wells", other_ad) is False
+
+    def test_short_snippet_below_guard_never_collapses(self):
+        # A teaser under the 15-word floor carries too little signal —
+        # even against the identical full ad.
+        tiny = "Dispatcher wanted in Malmö, apply now"
+        assert self.same("Experis AB", self.FULL_AD, "Manpower", tiny) is False
+
+    def test_no_descriptions_falls_back_to_name_rules_only(self):
+        # Old callers without descriptions: unchanged semantics (the
+        # unrelated-company case still refuses without ad text).
+        from app.core.dedupe import likely_same_job
+        assert likely_same_job(
+            title_a="Dispatcher", company_a="Experis AB", location_a="Malmö",
+            title_b="Dispatcher", company_b="Manpower", location_b="Malmö",
+        ) is False
