@@ -779,6 +779,7 @@ def _dismiss_fuzzy_duplicates(db, user_id, unmatched, model: str):
         return likely_same_job(
             title_a=a.title, company_a=a.company, location_a=a.location,
             title_b=b.title, company_b=b.company, location_b=b.location,
+            desc_a=a.description, desc_b=b.description,
         )
 
     dismissed = []
