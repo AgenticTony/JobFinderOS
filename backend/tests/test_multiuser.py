@@ -2615,3 +2615,78 @@ class TestBetaFeedback:
             json={"category": "idea", "message": "one too many"},
         )
         assert r.status_code == 429, "6th submission within the hour accepted"
+
+
+class TestCvUploadFormats:
+    """CV upload accepts PDF and Word .docx (owner decision 2026-09-02);
+    legacy .doc is refused with instructions. GLM is unavailable in the
+    test env, so the happy path asserts the profile lands with extracted
+    text and the stored filename — the AI branch is covered elsewhere."""
+
+    _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+    def _docx(self) -> bytes:
+        import io
+        import zipfile
+
+        body = (
+            '<w:p><w:r><w:t>Anna Andersson, Malmö</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>Erfarenhet: dispatcher och kundservice</w:t></w:r></w:p>'
+        )
+        document = (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<w:document xmlns:w="{self._W}"><w:body>{body}</w:body></w:document>'
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("[Content_Types].xml", "<Types/>")
+            z.writestr("word/document.xml", document)
+        return buf.getvalue()
+
+    def test_docx_upload_creates_profile(self, client, db, monkeypatch):
+        from app.services import cv_service
+
+        email = f"dx-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+
+        monkeypatch.setattr(
+            cv_service, "_store_cv_file",
+            lambda content, filename: ("cvs/test.docx", "test.docx"),
+        )
+        r = client.post(
+            "/api/v1/profile/upload",
+            files={"file": ("cv.docx", self._docx(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        )
+        assert r.status_code == 200, r.text
+        # ProfileResponse doesn't expose cv_text — verify on the row.
+        from app.models import Profile as ProfileModel
+        from app.models import User
+        profile = db.query(ProfileModel).filter(
+            ProfileModel.user_id == db.query(User).filter(
+                User.email == email).one().id
+        ).one()
+        assert "dispatcher och kundservice" in (profile.cv_text or "")
+        assert profile.cv_file_name == "cv.docx"  # the user's original filename
+
+    def test_legacy_doc_refused_with_instructions(self, client):
+        email = f"dc-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        r = client.post(
+            "/api/v1/profile/upload",
+            files={"file": ("old.doc", b"\xd0\xcf\x11\xe0 junk", "application/msword")},
+        )
+        assert r.status_code == 400
+        assert ".docx" in r.json()["detail"]
+
+    def test_docx_name_with_junk_bytes_refused(self, client):
+        email = f"dj-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        r = client.post(
+            "/api/v1/profile/upload",
+            files={"file": ("fake.docx", b"definitely not a zip", "application/octet-stream")},
+        )
+        assert r.status_code == 400
+        assert "not a valid Word document" in r.json()["detail"]

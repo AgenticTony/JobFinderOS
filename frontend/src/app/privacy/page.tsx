@@ -109,8 +109,9 @@ export default function PrivacyPage() {
                 and password (hashed). No name is required to register.
               </li>
               <li>
-                <span className="text-hi">Your CV</span> — the PDF file you
-                upload, and the text the system extracts from it.
+                <span className="text-hi">Your CV</span> — the file you
+                upload (PDF or Word), and the text the system extracts
+                from it.
               </li>
               <li>
                 <span className="text-hi">Your profile</span> — the setup you

@@ -25,7 +25,7 @@ wording above is verifiable and defensible.
 ```
 CV upload (browser)
   └─> HTTPS POST → FastAPI on Render (Frankfurt, eu-central)
-        ├─ PDF stored → Supabase Storage (eu-west-1, Ireland)
+        ├─ CV file (PDF or Word .docx) stored → Supabase Storage (eu-west-1, Ireland)
         ├─ extracted text + profile → Supabase Postgres (eu-west-1)
         ├─ matching / tailoring / fact-guard → AI inference:
         │      TODAY:  Z.ai api.z.ai            — OUTSIDE EU ❌

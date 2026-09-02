@@ -471,7 +471,7 @@ class TestEmptyExtractionKeepsProfile:
             lambda msg, *a, **k: warnings.append(msg % a if a else msg),
         )
 
-        updated = cv_service.create_or_replace_profile_from_pdf(
+        updated = cv_service.create_or_replace_profile_from_cv(
             db, b"%PDF-fresh", "new_cv.pdf", user_id=profile.user_id
         )
 
@@ -501,7 +501,7 @@ class TestEmptyExtractionKeepsProfile:
                 raise RuntimeError("simulated Z.ai 503")
 
         self._patch_upload(monkeypatch, RaisingService())
-        updated = cv_service.create_or_replace_profile_from_pdf(
+        updated = cv_service.create_or_replace_profile_from_cv(
             db, b"%PDF-fresh", "new_cv.pdf", user_id=profile.user_id
         )
         assert updated.full_name == "Jane Doe"
@@ -525,7 +525,7 @@ class TestEmptyExtractionKeepsProfile:
                 }
 
         self._patch_upload(monkeypatch, GoodService())
-        updated = cv_service.create_or_replace_profile_from_pdf(
+        updated = cv_service.create_or_replace_profile_from_cv(
             db, b"%PDF-fresh", "new_cv.pdf", user_id=profile.user_id
         )
         assert updated.full_name == "New Name"
@@ -3705,3 +3705,78 @@ class TestSisterBrandDuplicateGate:
             title_a="Dispatcher", company_a="Experis AB", location_a="Malmö",
             title_b="Dispatcher", company_b="Manpower", location_b="Malmö",
         ) is False
+
+
+class TestDocxExtraction:
+    """Word .docx CV support (owner decision 2026-09-02): the extractor
+    is stdlib-only (zipfile + ElementTree over word/document.xml) so no
+    new dependency ships. These tests build real docx bytes in-test."""
+
+    _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+    def _docx(self, paragraphs: list[str]) -> bytes:
+        import io
+        import zipfile
+
+        body = "".join(
+            f'<w:p><w:r><w:t xml:space="preserve">{p}</w:t></w:r></w:p>'
+            for p in paragraphs
+        )
+        document = (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<w:document xmlns:w="{self._W}"><w:body>{body}</w:body></w:document>'
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("[Content_Types].xml", "<Types/>")
+            z.writestr("word/document.xml", document)
+        return buf.getvalue()
+
+    def test_extracts_paragraphs_with_swedish_chars(self):
+        from app.services.file_service import FileService
+
+        blob = self._docx(
+            ["Anna Andersson — Malmö", "Erfarenhet: bageri och kundservice"]
+        )
+        text = FileService.extract_text_from_docx(blob)
+        assert "Anna Andersson" in text and "Malmö" in text
+        assert "kundservice" in text
+
+    def test_table_cells_come_along(self):
+        # Tables are <w:tbl> of <w:p> — document order keeps their text.
+        import io
+        import zipfile
+
+        document = (
+            f'<?xml version="1.0"?><w:document xmlns:w="{self._W}"><w:body>'
+            '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Python 5 år</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+            "</w:body></w:document>"
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("[Content_Types].xml", "<Types/>")
+            z.writestr("word/document.xml", document)
+        from app.services.file_service import FileService
+
+        assert "Python 5 år" in FileService.extract_text_from_docx(buf.getvalue())
+
+    def test_is_docx_rejects_plain_zip_and_non_zip(self):
+        import io
+        import zipfile
+
+        from app.services.file_service import FileService
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("hello.txt", "not a word file")
+        assert FileService.is_docx(buf.getvalue()) is False
+        assert FileService.is_docx(b"PK\x03\x04 not really") is False
+        assert FileService.is_docx(b"%PDF-1.4") is False
+        assert FileService.is_docx(self._docx(["x" * 20])) is True
+
+    def test_empty_document_raises_value_error(self):
+        import pytest
+
+        from app.services.file_service import FileService
+        with pytest.raises(ValueError):
+            FileService.extract_text_from_docx(self._docx(["   "]))

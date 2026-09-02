@@ -20,7 +20,7 @@ from app.schemas.profile import (
 )
 from app.services.ai_service import ai_service_available, get_ai_service
 from app.services.cv_service import (
-    create_or_replace_profile_from_pdf,
+    create_or_replace_profile_from_cv,
     get_active_profile,
 )
 from app.services.source_packs import available_countries
@@ -36,24 +36,31 @@ async def upload_cv(
     user: User = Depends(get_authenticated_user),
 ):
     """
-    Upload a CV PDF: extracts text, stores the file, runs AI profile
-    extraction, and replaces the active profile.
+    Upload a CV (PDF or Word .docx): extracts text, stores the file,
+    runs AI profile extraction, and replaces the active profile.
 
-    The heavy work (PDF parsing + GLM call, up to ~2 min when Z.ai is slow)
+    The heavy work (parsing + GLM call, up to ~2 min when Z.ai is slow)
     runs in a threadpool so the rest of the API stays responsive.
     """
     enforce(user.id, "cv_upload")
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Please upload a PDF file")
+    lower = (file.filename or "").lower()
+    if not file.filename or not lower.endswith((".pdf", ".docx")):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Please upload a PDF or Word (.docx) file — older .doc "
+                "files need to be saved as .docx first"
+            ),
+        )
 
     content = await file.read()
     try:
-        # run_in_threadpool: create_or_replace_profile_from_pdf does blocking
-        # IO (pdfplumber, sync httpx) — running it inline would block the
+        # run_in_threadpool: create_or_replace_profile_from_cv does blocking
+        # IO (parsing, sync httpx) — running it inline would block the
         # event loop and freeze every other request during the GLM call.
         profile = await run_in_threadpool(
             partial(
-                create_or_replace_profile_from_pdf,
+                create_or_replace_profile_from_cv,
                 db,
                 content,
                 file.filename,

@@ -33,8 +33,8 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
   const handleFiles = async (files: FileList | null) => {
     const file = files?.[0];
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      setError('Please upload a PDF file');
+    if (!/\.(pdf|docx)$/i.test(file.name)) {
+      setError('Please upload a PDF or Word (.docx) file');
       return;
     }
     setError(null);
@@ -87,18 +87,18 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
           <p className="text-sm font-medium text-hi">
             {uploading
               ? statusLine
-              : label ?? (hasExistingCv ? 'Replace your CV' : 'Drop your CV (PDF) here')}
+              : label ?? (hasExistingCv ? 'Replace your CV' : 'Drop your CV (PDF or Word) here')}
           </p>
           {!uploading && (
             <p className="mt-1 text-xs text-low">
-              PDF up to 5MB — text is extracted and profiled by AI
+              PDF or Word (.docx) up to 5MB — text is extracted and profiled by AI
             </p>
           )}
         </div>
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,application/pdf"
+          accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
