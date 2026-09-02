@@ -3875,31 +3875,154 @@ class TestDocxHardening:
         assert text.count("BOXTEXT") == 1, f"text-box text duplicated: {text!r}"
         assert "OUTER" in text
 
-    def test_header_parts_are_read_and_come_first(self):
+    _R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+    def _doc_referencing(self, refs: list[str], body: str) -> str:
+        hdrs = "".join(f'<w:headerReference r:id="{r}"/>' for r in refs)
+        return (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<w:document xmlns:w="{self._W}" xmlns:r="{self._R}">'
+            f"<w:body>{hdrs}{body}</w:body></w:document>"
+        )
+
+    def _rels(self, targets: dict[str, str]) -> str:
+        rels = "".join(
+            f'<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="{t}"/>'
+            for rid, t in targets.items()
+        )
+        return (
+            '<?xml version="1.0"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            f"{rels}</Relationships>"
+        )
+
+    def _header(self, text: str) -> str:
+        return (
+            f'<?xml version="1.0"?><w:hdr xmlns:w="{self._W}">'
+            f'<w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:hdr>'
+        )
+
+    def test_referenced_header_read_orphan_skipped(self):
         # Word CV templates keep name/email/phone in the page header —
-        # without reading word/header*.xml the AI profile sees no
-        # contact block and the outbound paths fall back to Applicant.
+        # but ONLY parts the sections reference (via the package rels)
+        # are read; template-switch orphans stay out of cv_text.
         from app.services.file_service import FileService
 
-        header = (
-            f'<?xml version="1.0"?><w:hdr xmlns:w="{self._W}">'
-            '<w:p><w:r><w:t>anna@example.com</w:t></w:r></w:p></w:hdr>'
-        )
         text = FileService.extract_text_from_docx(
             self._zip(
                 {
                     "[Content_Types].xml": "<Types/>",
-                    "word/header1.xml": header,
-                    "word/document.xml": self._doc(
-                        "<w:p><w:r><w:t>Erfarenhet: bageri</w:t></w:r></w:p>"
+                    "word/_rels/document.xml.rels": self._rels(
+                        {"rId8": "header1.xml"}
+                    ),
+                    "word/header1.xml": self._header("anna@example.com"),
+                    "word/header9.xml": self._header("orphan@example.com"),
+                    "word/document.xml": self._doc_referencing(
+                        ["rId8"],
+                        "<w:p><w:r><w:t>Erfarenhet: bageri</w:t></w:r></w:p>",
                     ),
                 }
             )
         )
         assert "anna@example.com" in text
+        assert "orphan@example.com" not in text, "orphan header part was read"
         assert text.index("anna@example.com") < text.index("bageri"), (
             "contact header should precede the body in cv_text"
         )
+
+    def test_identical_header_copies_deduped(self):
+        # 'Different First Page' / odd-even headers => several referenced
+        # parts carrying the SAME contact text; it must land once.
+        from app.services.file_service import FileService
+
+        text = FileService.extract_text_from_docx(
+            self._zip(
+                {
+                    "[Content_Types].xml": "<Types/>",
+                    "word/_rels/document.xml.rels": self._rels(
+                        {"rId8": "header1.xml", "rId9": "header2.xml"}
+                    ),
+                    "word/header1.xml": self._header("Anna Andersson"),
+                    "word/header2.xml": self._header("Anna Andersson"),
+                    "word/document.xml": self._doc_referencing(
+                        ["rId8", "rId9"],
+                        "<w:p><w:r><w:t>Kompetens</w:t></w:r></w:p>",
+                    ),
+                }
+            )
+        )
+        assert text.count("Anna Andersson") == 1, (
+            f"identical header copies duplicated: {text!r}"
+        )
+
+    def test_tab_and_break_separate_header_fields(self):
+        # Word headers are built from tab stops and line breaks; without
+        # separators the contact block glues into one unparseable token.
+        from app.services.file_service import FileService
+
+        header = (
+            f'<?xml version="1.0"?><w:hdr xmlns:w="{self._W}">'
+            "<w:p><w:r>"
+            "<w:t>Anna Andersson</w:t><w:tab/><w:t>anna@example.com</w:t>"
+            "<w:br/><w:t>070-123 45 67</w:t>"
+            "</w:r></w:p></w:hdr>"
+        )
+        text = FileService.extract_text_from_docx(
+            self._zip(
+                {
+                    "[Content_Types].xml": "<Types/>",
+                    "word/_rels/document.xml.rels": self._rels(
+                        {"rId8": "header1.xml"}
+                    ),
+                    "word/header1.xml": header,
+                    "word/document.xml": self._doc_referencing(
+                        ["rId8"], "<w:p><w:r><w:t>Kropp</w:t></w:r></w:p>"
+                    ),
+                }
+            )
+        )
+        assert "Anna Andersson\tanna@example.com\n070-123 45 67" in text, (
+            f"header fields glued: {text!r}"
+        )
+
+    def test_many_small_parts_total_bomb_refused(self, monkeypatch):
+        # Review round 2: 20 legal-sized parts (each under the per-part
+        # bound) still OOM'd via the TOTAL; the running budget must
+        # refuse before the archive is read through.
+        import zipfile
+
+        from app.services.file_service import FileService
+
+        reads: list[str] = []
+        real_read = zipfile.ZipFile.read
+
+        def spying_read(self, name):
+            reads.append(name)
+            return real_read(self, name)
+
+        monkeypatch.setattr(zipfile.ZipFile, "read", spying_read)
+
+        import pytest
+
+        # Three legal-sized parts (15MB each, under the 20MB per-part
+        # bound, count under the cap) whose TOTAL blows the 40MB budget
+        parts = {
+            "[Content_Types].xml": "<Types/>",
+            "word/_rels/document.xml.rels": self._rels(
+                {f"rId{i}": f"header{i}.xml" for i in range(3)}
+            ),
+            "word/document.xml": self._doc_referencing(
+                [f"rId{i}" for i in range(3)],
+                "<w:p><w:r><w:t>hej</w:t></w:r></w:p>",
+            ),
+        }
+        for i in range(3):
+            parts[f"word/header{i}.xml"] = "<filler>" + ("y" * 15_000_000) + "</filler>"
+        with pytest.raises(ValueError, match="total"):
+            FileService.extract_text_from_docx(self._zip(parts))
+        # refused at getinfo after a few parts, not after reading them all
+        header_reads = [n for n in reads if n.startswith("word/header")]
+        assert len(header_reads) <= 3, f"read too many parts before refusing: {reads}"
 
 
 class TestCvFileStorageMime:
