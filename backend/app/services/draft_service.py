@@ -38,6 +38,63 @@ logger = logging.getLogger(__name__)
 # the CV does not support — block, don't retry again.
 MAX_FABRICATION_RETRIES = 2
 
+# Function words only — enough to tie a claim to the CV LINE it conflicts
+# with without pretending to do semantics. Swedish + English articles,
+# pronouns, conjunctions.
+_CLAIM_STOPWORDS = frozenset(
+    "the a an and or in of to for with my me i am is are both have has "
+    "was were this that och eller i på med för att som jag är av en ett "
+    "till från inte även".split()
+)
+
+
+def _cv_lines_near_claims(cv_text: str, high, max_lines: int = 2) -> list:
+    """CV lines sharing an informative token with an unsupported claim.
+
+    The live case this exists for (2026-09-02, owner account): the letter
+    claimed "Jag är obehindrad i både svenska och engelska" while the CV
+    line says "Svenska (god nivå, daglig användning)" — the block message
+    naming only the claim read as "the guard didn't see my languages".
+    Quoting the conflicting line puts the answer on screen. Pure token
+    overlap, casefolded, unicode-word tokens; bounded, no semantics.
+    """
+    import re
+
+    def toks(s: str) -> set:
+        return {t for t in re.findall(r"[^\W_]+", s.lower()) if len(t) >= 4}
+
+    claim_tokens: set = set()
+    for c in high:
+        claim_tokens |= toks(str(getattr(c, "value", ""))) - _CLAIM_STOPWORDS
+    if not claim_tokens:
+        return []
+    out: list = []
+    for line in cv_text.splitlines():
+        line = line.strip()
+        if len(line) < 8 or line in out:
+            continue
+        if toks(line) & claim_tokens:
+            out.append(line if len(line) <= 140 else line[:137] + "...")
+            if len(out) >= max_lines:
+                break
+    return out
+
+
+def fabrication_block_error(cv_text: str, high) -> str:
+    """The Layer C block message. Names the unsupported claims and, when
+    the CV has lines near them, quotes those lines — the fix is on screen
+    instead of a support question."""
+    named = ", ".join(sorted({str(c.value).split("|")[0] for c in high}))
+    msg = (
+        "Blocked by the fabrication guard: the tailored document "
+        f"repeatedly asserts claims your CV does not support ({named})."
+    )
+    near = _cv_lines_near_claims(cv_text, high)
+    if near:
+        quoted = "; ".join(f'"{line}"' for line in near)
+        msg += f" Your CV says: {quoted}."
+    return msg + " Edit your CV to include them, or regenerate."
+
 
 def get_ai_service_with_judge():
     """The AI service when the production judge is enabled; None when
@@ -242,11 +299,7 @@ def create_draft_for_job(
                 named = ", ".join(
                     sorted({c.value.split("|")[0] for c in high})
                 )
-                draft.error = (
-                    "Blocked by the fabrication guard: the tailored document "
-                    f"repeatedly asserts claims your CV does not support "
-                    f"({named}). Edit your CV to include them, or regenerate."
-                )
+                draft.error = fabrication_block_error(profile.cv_text, high)
                 db.add(draft)
                 db.commit()
                 logger.warning(

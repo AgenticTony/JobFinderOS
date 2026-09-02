@@ -4050,3 +4050,80 @@ class TestCvFileStorageMime:
         assert captured[0][1] == docx_mime, "docx stored with wrong content type"
         assert captured[1][1] == "application/pdf"
         assert captured[0][0].endswith("mitt_cv.docx")
+
+
+class TestTailorPromptLanguageRule:
+    """2026-09-02 owner live case: Swedish letters claimed "obehindrad i
+    både svenska och engelska" against a CV saying "Svenska (god nivå)".
+    The tailoring prompt must forbid proficiency upgrades at the source."""
+
+    def test_tailor_prompt_forbids_language_proficiency_upgrades(self, monkeypatch):
+        import json as _json
+
+        from app.services.ai_service import AIService
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        captured = {}
+
+        def fake_complete(system_prompt, user_message, kind="tailor"):
+            captured["system"] = system_prompt
+            return _json.dumps({
+                "cover_letter": "Hej, jag söker rollen. Med vänlig hälsning",
+                "tailored_cv": "Tony Foran — Fullstack Developer",
+                "changes_summary": [],
+            })
+
+        monkeypatch.setattr(svc, "_complete", fake_complete)
+        svc.tailor_application(
+            profile_context="p", cv_text="c", job_description="j"
+        )
+        prompt = captured["system"]
+        assert "never upgraded" in prompt
+        assert "god nivå" in prompt and "obehindrad" in prompt
+
+
+class TestFabricationBlockMessage:
+    """The block error must quote the CV lines the claims conflict with —
+    naming only the claim read as "the guard didn't see my languages"."""
+
+    @staticmethod
+    def _claim(value):
+        return type("Claim", (), {"value": value, "kind": "judge",
+                                  "tier": "high"})
+
+    def test_quotes_the_conflicting_cv_line(self):
+        from app.services.draft_service import fabrication_block_error
+
+        cv = "\n".join([
+            "Tony Foran — Fullstack Developer",
+            "Språk: Engelska (modersmål), Svenska (god nivå, daglig användning)",
+            "Erfarenhet: 20 år på Casino Cosmopol, Malmö",
+        ])
+        msg = fabrication_block_error(
+            cv, [self._claim("Jag är obehindrad i både svenska och engelska")]
+        )
+        assert "obehindrad" in msg                    # the claim, named
+        assert "Your CV says:" in msg                 # the confrontation
+        assert "god nivå" in msg                      # the CV's actual level
+        assert "Edit your CV" in msg                  # the way out, kept
+
+    def test_no_token_overlap_omits_quote_not_guesses(self):
+        from app.services.draft_service import fabrication_block_error
+
+        msg = fabrication_block_error(
+            "Erfarenhet: Python, FastAPI, PostgreSQL",
+            [self._claim("Certified Kubernetes Administrator")],
+        )
+        assert "Certified Kubernetes Administrator" in msg
+        assert "Your CV says" not in msg              # nothing near — omit
+
+    def test_long_cv_line_is_truncated_in_quote(self):
+        from app.services.draft_service import fabrication_block_error
+
+        long_line = "Språk: " + ("svenska och engelska i arbete, " * 12)
+        msg = fabrication_block_error(
+            long_line, [self._claim("obehindrad i svenska")]
+        )
+        quoted = msg.split('Your CV says: "')[1].split('"')[0]
+        assert len(quoted) <= 140
