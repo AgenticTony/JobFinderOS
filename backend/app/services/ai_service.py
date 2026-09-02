@@ -307,6 +307,13 @@ RULES — READ BEFORE WRITING ANYTHING
   languages or is ambiguous, use its dominant language; if still unclear,
   use the first of my working languages listed in My Profile. The
   changes_summary always matches the CV's original language.
+- Language proficiency is QUOTED, never upgraded: whenever the documents
+  mention language skills, state them exactly as the CV does — the CV's own
+  wording and level. A CV that says "Svenska (god nivå)" must stay "god
+  nivå" (or its exact translation); it must NEVER become "flytande",
+  "obehindrad", "fluent", or any stronger term in any language. Swedish
+  cover letters conventionally open with fluency claims — do not follow
+  that convention when the CV states a lower level.
 
 Output plain text with clear section headers (e.g. "PROFESSIONAL SUMMARY",
 "SKILLS", "EXPERIENCE") — no markdown asterisks or hashes.
