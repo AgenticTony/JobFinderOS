@@ -76,25 +76,41 @@ class FileService:
         except zipfile.BadZipFile:
             return False
 
-    # Bound on the DECOMPRESSED size of any single docx XML part. The
-    # 5MB upload cap bounds the compressed archive only: XML deflates
-    # ~1000x (measured), so a 4.9MB zip can declare a multi-GB
-    # word/document.xml and OOM the single Render worker at z.read().
-    # A real CV's largest part runs a few hundred KB; 20MB is generous.
+    # Decompression bounds. The 5MB upload cap bounds the COMPRESSED
+    # archive only: XML deflates ~1000x (measured), so z.read() can
+    # materialise gigabytes from a small upload and OOM the single
+    # Render worker. TWO doors had to close (review round 2):
+    #   - per-part: one oversized part (a 4.9MB zip declaring a ~5GB
+    #     document.xml);
+    #   - TOTAL: many legal-sized parts (20 headers x 19.9MB = 398MB
+    #     from a 0.374MB upload; the same OOM through a different door).
+    # zipfile stops read() at the declared size and raises BadZipFile on
+    # CRC mismatch, so the declared file_size is a sound bound.
     _MAX_DOCX_PART_BYTES = 20 * 1024 * 1024
+    _MAX_DOCX_TOTAL_BYTES = 40 * 1024 * 1024
+    # A real document references at most a handful of header/footer
+    # parts (first/even/odd per section); more means junk padding.
+    _MAX_DOCX_PART_COUNT = 12
 
     @staticmethod
     def extract_text_from_docx(file_content: bytes) -> str:
         """Text from a .docx with ONLY the standard library — no new
         dependency.
 
-        Parts read: word/document.xml (the body) plus word/header*.xml
-        and word/footer*.xml — Word CV templates routinely put the
-        contact block (name, email, phone) in the page header, and
-        without those parts the AI profile extraction sees no contact
-        block at all.
+        Parts read: word/document.xml (the body) plus ONLY the
+        header/footer parts its sections actually reference (resolved
+        through word/_rels/document.xml.rels). Word CV templates
+        routinely put the contact block (name, email, phone) in the
+        page header; reference resolution skips orphaned parts (left
+        behind by template switches) and first/even/odd copies of the
+        same block are additionally de-duplicated by text, so the
+        contact block lands once, not 2-3x, at the top of cv_text.
 
         Fidelity guards on the paragraph walk:
+        - w:tab emits a tab, w:br/w:cr a newline: Word headers are
+          built from tab stops and breaks, and without separators the
+          contact block arrives at extract_profile as one glued token
+          ('Anna Anderssonanna@example.com...') — unparseable;
         - nested <w:p> (text boxes) is emitted ONCE: each paragraph's
           run sweep skips nested paragraph subtrees, which root.iter
           visits on their own pass — without this, two-column templates
@@ -103,6 +119,10 @@ class FileService:
           boxes twice (mc:Choice drawing + mc:Fallback VML copy for old
           readers), so keeping both would double every boxed section.
 
+        Memory: parts are streamed (read -> parse -> drop bytes) under
+        per-part, total, and part-count budgets, never materialised as
+        a list of decompressed blobs.
+
         Any failure — missing part, encrypted archive (RuntimeError),
         unsupported compression (NotImplementedError), bad XML, bomb,
         or no text at all — becomes ValueError, the upload path's 400
@@ -110,25 +130,38 @@ class FileService:
         500 from here surfaces in the browser as a CORS-less network
         error, which helps nobody.
         """
-        import re as _re
+        import posixpath
         import xml.etree.ElementTree as ET
 
         W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
         FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
 
+        budget = {"total": 0, "parts": 0}
+
         def part_bytes(z: zipfile.ZipFile, name: str) -> bytes:
-            # The declared uncompressed size bounds z.read's
-            # materialisation before it happens.
-            if z.getinfo(name).file_size > FileService._MAX_DOCX_PART_BYTES:
+            # Declared sizes bound z.read() BEFORE it happens; the
+            # running total closes the many-small-parts door.
+            declared = z.getinfo(name).file_size
+            if declared > FileService._MAX_DOCX_PART_BYTES:
                 raise ValueError(
                     f"Word document part '{name}' expands beyond "
                     f"{FileService._MAX_DOCX_PART_BYTES // (1024 * 1024)}MB — "
                     "file refused"
                 )
+            budget["total"] += declared
+            budget["parts"] += 1
+            if budget["total"] > FileService._MAX_DOCX_TOTAL_BYTES:
+                raise ValueError(
+                    "Word document parts expand beyond "
+                    f"{FileService._MAX_DOCX_TOTAL_BYTES // (1024 * 1024)}MB "
+                    "in total — file refused"
+                )
+            if budget["parts"] > FileService._MAX_DOCX_PART_COUNT:
+                raise ValueError("Word document has too many parts — file refused")
             return z.read(name)
 
-        def paragraphs_from(xml: bytes) -> list[str]:
-            root = ET.fromstring(xml)
+        def paragraphs_from(root) -> list[str]:
 
             # Elements inside mc:Fallback are duplicates by design —
             # id-set them once, skip everywhere below (ET has no parent
@@ -147,6 +180,10 @@ class FileService:
                         continue
                     if child.tag == f"{W}t":
                         parts.append(child.text or "")
+                    elif child.tag == f"{W}tab":
+                        parts.append("\t")
+                    elif child.tag in (f"{W}br", f"{W}cr"):
+                        parts.append("\n")
                     parts.append(runs_text(child))
                 return "".join(parts)
 
@@ -159,12 +196,47 @@ class FileService:
                     out.append(text)
             return out
 
+        def referenced_furniture(z: zipfile.ZipFile, document_root) -> list[str]:
+            """Header/footer part names the document's sections actually
+            reference, via the package relationships — orphans and
+            unreferenced copies stay unread."""
+            rels_name = "word/_rels/document.xml.rels"
+            try:
+                if rels_name not in z.namelist():
+                    return []
+                rels_root = ET.fromstring(part_bytes(z, rels_name))
+            except ET.ParseError:
+                return []
+            id_to_target = {
+                el.get("Id"): el.get("Target")
+                for el in rels_root
+                if el.get("Id") and el.get("Target")
+            }
+            names: list[str] = []
+            for ref in document_root.iter():
+                if not (ref.tag.endswith("}headerReference") or ref.tag.endswith("}footerReference")):
+                    continue
+                target = id_to_target.get(ref.get(f"{R}id"))
+                if target:
+                    names.append(posixpath.normpath(posixpath.join("word", target)))
+            return list(dict.fromkeys(names))  # stable de-dup by name
+
+        header_blocks: list[str] = []
+        footer_blocks: list[str] = []
+        body_blocks: list[str] = []
         try:
             with zipfile.ZipFile(io.BytesIO(file_content)) as z:
-                names = z.namelist()
-                headers = sorted(n for n in names if _re.fullmatch(r"word/header\d*\.xml", n))
-                footers = sorted(n for n in names if _re.fullmatch(r"word/footer\d*\.xml", n))
-                parts = [(n, part_bytes(z, n)) for n in [*headers, "word/document.xml", *footers]]
+                doc_root = ET.fromstring(part_bytes(z, "word/document.xml"))
+                body_blocks = paragraphs_from(doc_root)
+                for name in referenced_furniture(z, doc_root):
+                    blocks = paragraphs_from(ET.fromstring(part_bytes(z, name)))
+                    seen, target = set(), header_blocks if "header" in name else footer_blocks
+                    for b in blocks:
+                        # first/even/odd variants carry the same contact
+                        # text — identical blocks land once
+                        if b not in seen and b not in target:
+                            seen.add(b)
+                            target.append(b)
         except ValueError:
             raise
         except Exception as e:
@@ -172,11 +244,7 @@ class FileService:
             # archive), NotImplementedError (Deflate64) — all 400s.
             raise ValueError("File is not a valid Word document (.docx)") from e
 
-        try:
-            blocks = [p for _, xml in parts for p in paragraphs_from(xml)]
-        except ET.ParseError as e:
-            raise ValueError("File is not a valid Word document (.docx)") from e
-
+        blocks = header_blocks + body_blocks + footer_blocks
         full_text = "\n".join(blocks)
         if not full_text.strip():
             raise ValueError("No text could be extracted from the document")
