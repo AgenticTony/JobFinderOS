@@ -3780,3 +3780,150 @@ class TestDocxExtraction:
         from app.services.file_service import FileService
         with pytest.raises(ValueError):
             FileService.extract_text_from_docx(self._docx(["   "]))
+
+
+class TestDocxHardening:
+    """Review round on PR #73 (2026-09-02): the docx path must refuse
+    bombs before decompression, turn every zipfile failure mode into
+    the 400 shape, read page headers (where Word CV templates keep the
+    contact block), and emit text-box content exactly once."""
+
+    _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    _MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+
+    def _zip(self, parts: dict[str, str]) -> bytes:
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for name, content in parts.items():
+                z.writestr(name, content)
+        return buf.getvalue()
+
+    def _doc(self, body: str) -> str:
+        return (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<w:document xmlns:w="{self._W}"><w:body>{body}</w:body></w:document>'
+        )
+
+    def test_zip_bomb_refused_before_decompression(self, monkeypatch):
+        import zipfile
+
+        from app.services.file_service import FileService
+
+        read_calls = []
+        real_read = zipfile.ZipFile.read
+
+        def spying_read(self, name):
+            read_calls.append(name)
+            return real_read(self, name)
+
+        monkeypatch.setattr(zipfile.ZipFile, "read", spying_read)
+        # 30MB of compressible XML inside a tiny zip: passes the 5MB
+        # upload cap, declares a part beyond the 20MB decompression bound
+        bomb = self._zip(
+            {
+                "[Content_Types].xml": "<Types/>",
+                "word/document.xml": "<filler>" + ("x" * 30_000_000) + "</filler>",
+            }
+        )
+        import pytest
+        with pytest.raises(ValueError, match="expands beyond"):
+            FileService.extract_text_from_docx(bomb)
+        assert read_calls == [], "the bomb must be refused at getinfo, before read()"
+
+    def test_encrypted_archive_becomes_400_shape(self, monkeypatch):
+        import zipfile
+
+        import pytest
+
+        from app.services.file_service import FileService
+
+        def encrypted_read(self, name):
+            raise RuntimeError("File is encrypted, password required for extraction")
+
+        monkeypatch.setattr(zipfile.ZipFile, "read", encrypted_read)
+        blob = self._zip(
+            {"[Content_Types].xml": "<Types/>",
+             "word/document.xml": self._doc("<w:p><w:r><w:t>hidden</w:t></w:r></w:p>")}
+        )
+        with pytest.raises(ValueError, match="not a valid Word document"):
+            FileService.extract_text_from_docx(blob)
+        assert FileService.is_docx(blob) is True  # namelist works on encrypted zips
+
+    def test_text_box_content_emitted_once(self):
+        # A w:p whose run wraps a text box (w:txbxContent > w:p): the
+        # boxed text must appear exactly once, not outer+nested twice.
+        from app.services.file_service import FileService
+
+        body = (
+            '<w:p><w:r><w:t>OUTER </w:t>'
+            f'<mc:AlternateContent xmlns:mc="{self._MC}">'
+            '<mc:Choice><w:drawing><w:txbxContent>'
+            '<w:p><w:r><w:t>BOXTEXT</w:t></w:r></w:p>'
+            "</w:txbxContent></w:drawing></mc:Choice>"
+            '<mc:Fallback><w:pict><w:txbxContent>'
+            '<w:p><w:r><w:t>BOXTEXT</w:t></w:r></w:p>'
+            "</w:txbxContent></w:pict></mc:Fallback>"
+            "</mc:AlternateContent></w:r></w:p>"
+        )
+        text = FileService.extract_text_from_docx(
+            self._zip({"[Content_Types].xml": "<Types/>",
+                       "word/document.xml": self._doc(body)})
+        )
+        assert text.count("BOXTEXT") == 1, f"text-box text duplicated: {text!r}"
+        assert "OUTER" in text
+
+    def test_header_parts_are_read_and_come_first(self):
+        # Word CV templates keep name/email/phone in the page header —
+        # without reading word/header*.xml the AI profile sees no
+        # contact block and the outbound paths fall back to Applicant.
+        from app.services.file_service import FileService
+
+        header = (
+            f'<?xml version="1.0"?><w:hdr xmlns:w="{self._W}">'
+            '<w:p><w:r><w:t>anna@example.com</w:t></w:r></w:p></w:hdr>'
+        )
+        text = FileService.extract_text_from_docx(
+            self._zip(
+                {
+                    "[Content_Types].xml": "<Types/>",
+                    "word/header1.xml": header,
+                    "word/document.xml": self._doc(
+                        "<w:p><w:r><w:t>Erfarenhet: bageri</w:t></w:r></w:p>"
+                    ),
+                }
+            )
+        )
+        assert "anna@example.com" in text
+        assert text.index("anna@example.com") < text.index("bageri"), (
+            "contact header should precede the body in cv_text"
+        )
+
+
+class TestCvFileStorageMime:
+    """Review round: the docx/pdf content-type ternary in
+    _store_cv_file decides what Supabase SERVES the stored CV as —
+    inverted, every Word CV downloads as a broken PDF with the whole
+    suite green. Assert the mime on a fake storage backend."""
+
+    def test_mime_matches_extension(self, monkeypatch, tmp_path):
+        from app.services import cv_service
+        from app.services import storage as storage_mod
+
+        captured: list[tuple[str, str]] = []
+
+        class FakeStorage:
+            def save(self, name, content, mime):
+                captured.append((name, mime))
+                return f"cvs/{name}"
+
+        monkeypatch.setattr(storage_mod, "get_storage", lambda: FakeStorage())
+
+        cv_service._store_cv_file(b"x", "mitt cv.docx")
+        cv_service._store_cv_file(b"x", "mitt cv.pdf")
+        docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        assert captured[0][1] == docx_mime, "docx stored with wrong content type"
+        assert captured[1][1] == "application/pdf"
+        assert captured[0][0].endswith("mitt_cv.docx")

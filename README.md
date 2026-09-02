@@ -78,7 +78,7 @@ Dashboard: http://localhost:3000
 
 ### 3. Use it
 
-1. **Profile tab** → drop your CV (PDF) — AI extracts your structured profile
+1. **Profile tab** → drop your CV (PDF or Word .docx) — AI extracts your structured profile
 2. Click **Run Pipeline** — scrapes all sources + AI-matches new jobs against your CV
 3. **Matches tab** → review recommendations → **Approve** the good ones
 4. Approved → **Auto-apply by email** (where the job published an email) or **Apply in browser**
@@ -113,7 +113,7 @@ Dashboard: http://localhost:3000
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/profile/upload` | Upload CV PDF → text extraction + AI profile |
+| `POST` | `/api/v1/profile/upload` | Upload CV (PDF or Word .docx) → text extraction + AI profile |
 | `GET/PUT` | `/api/v1/profile/me` | Get / update profile & preferences |
 | `GET` | `/api/v1/profile/status` | Readiness (profile? AI key? stats) |
 | `POST` | `/api/v1/pipeline/run` | **The main button**: scrape + match + top recommendations |
