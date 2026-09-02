@@ -40,7 +40,12 @@ def _store_cv_file(content: bytes, filename: str) -> Tuple[str, str]:
 
     safe = filename.rsplit("/", 1)[-1].replace(" ", "_") or "cv.pdf"
     stored_name = f"{uuid.uuid4().hex[:8]}_{safe}"
-    key = get_storage().save(stored_name, content, "application/pdf")
+    mime = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        if safe.lower().endswith(".docx")
+        else "application/pdf"
+    )
+    key = get_storage().save(stored_name, content, mime)
     return key, safe
 
 
@@ -98,7 +103,7 @@ def build_profile_context(profile: Profile, include_derived: bool = True) -> str
     return context
 
 
-def create_or_replace_profile_from_pdf(
+def create_or_replace_profile_from_cv(
     db: Session,
     file_content: bytes,
     filename: str,
@@ -106,12 +111,20 @@ def create_or_replace_profile_from_pdf(
     user_id,
 ) -> Profile:
     """
-    Upload flow: validate + extract PDF text, store the file,
-    run AI profile extraction, and save as THE USER'S profile (one each —
-    re-upload replaces that user's own profile, never anyone else's).
+    Upload flow: validate + extract text (PDF or Word .docx), store the
+    file, run AI profile extraction, and save as THE USER'S profile
+    (one each — re-upload replaces that user's own profile, never
+    anyone else's). Legacy binary .doc is deliberately NOT accepted:
+    no pure-Python parser exists; the error tells the user to re-save.
     """
-    FileService.validate_pdf(file_content)
-    cv_text = FileService.extract_text_from_pdf(file_content)
+    if (filename or "").lower().endswith(".docx"):
+        FileService.validate_size(file_content)
+        if not FileService.is_docx(file_content):
+            raise ValueError("File is not a valid Word document (.docx)")
+        cv_text = FileService.extract_text_from_docx(file_content)
+    else:
+        FileService.validate_pdf(file_content)
+        cv_text = FileService.extract_text_from_pdf(file_content)
     path, safe_name = _store_cv_file(file_content, filename)
 
     extracted: Optional[dict] = None

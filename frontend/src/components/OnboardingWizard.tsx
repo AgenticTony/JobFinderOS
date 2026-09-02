@@ -455,7 +455,7 @@ export default function OnboardingWizard({
                   <StepTitle icon={<FileText className="h-4 w-4" />} title="First — your CV" />
                   <p className="mt-3 text-sm leading-relaxed text-mid">
                     Every job you see is scored against your CV — it&apos;s the
-                    source of truth for your whole hunt. Have it ready as a PDF.
+                    source of truth for your whole hunt. Have it ready as a PDF or Word (.docx).
                   </p>
                   <div className="mt-4">
                     <CvUpload onUploaded={handleCvUpload} hasExistingCv={cvReady} />
