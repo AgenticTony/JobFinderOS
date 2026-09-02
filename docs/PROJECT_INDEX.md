@@ -77,7 +77,7 @@ Tests: `PYTHONPATH=. .venv/bin/python -m pytest tests/ -q` (217 test functions).
 | `jobs.py` | Shared job pool | `GET /` (filter status/source/q), `GET /{id}`, `POST /` (manual add), `PATCH /{id}/status` (refuses re-queue to "new" when a match exists), `DELETE /{id}` (per-user aware; physical delete only when unreferenced). |
 | `matches.py` | Match results + approval | `GET /` (tier/recommendation/min_score/pending filters), `GET /{id}`, `POST /{id}/decision` (approve/reject), `POST /run` (background matching, rate-limited, requires CV). |
 | `pipeline.py` | The main button | `POST /run` (validates sources vs registry, threadpool `run_pipeline`, returns scrape summaries + top matches), `GET /status` (sources, stats, recent runs, matching flag, honest next-run time). |
-| `profiles.py` | CV + onboarding | `POST /upload` (PDF → extract → store → AI extraction), `GET /me`, `PUT /me`, `POST /onboarding` (country/region/municipalities/radius/queries; SE-only occupation codes validated server-side), `POST /suggest-queries` (AI, mode field/adjacent/widen), `GET /geo`, `GET /status`. |
+| `profiles.py` | CV + onboarding | `POST /upload` (PDF or Word .docx → extract → store → AI extraction), `GET /me`, `PUT /me`, `POST /onboarding` (country/region/municipalities/radius/queries; SE-only occupation codes validated server-side), `POST /suggest-queries` (AI, mode field/adjacent/widen), `GET /geo`, `GET /status`. |
 | `settings.py` | Integrations | `GET /integrations` (Composio connections), `POST /integrations/composio/connect`. |
 
 ### 4.3 `app/core/`
@@ -223,7 +223,7 @@ Design system "The Hunting Console": ink `#0c0e12`, one amber accent `#f5a524`, 
 | `MatchCard.tsx` | Expandable match card: company tile, ScoreRing, salary/posted/language chips, skill columns, approve/pass actions. |
 | `OnboardingWizard.tsx` (837 ln) | 5-step setup: country → location (multi-municipality + SE radius) → languages → job titles (AI suggestions + SE taxonomy chips) → confirm. |
 | `ScoreRing.tsx` / `TierBadge.tsx` | Score gauge + tier pill (80/50/30 bands). |
-| `CvUpload.tsx` | Drag-drop PDF upload with escalating status copy. |
+| `CvUpload.tsx` | Drag-drop CV upload (PDF or Word .docx) with escalating status copy. |
 | `NextHunt.tsx` | Countdown + LiveDot (breathing amber). |
 | `AdzunaAttribution.tsx` | ToS-required "Jobs by Adzuna" link. |
 | `landing/{RadarScope,GuardReceipt,Reveal}.tsx` | Landing-only: radar backdrop, fact-guard receipt mock, scroll reveals. |
