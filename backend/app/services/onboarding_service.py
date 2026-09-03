@@ -157,7 +157,9 @@ def update_contact_first_name(user_email: str, first_name: str) -> bool:
 def remove_contact(user_email: str) -> bool:
     """Erase the Resend contact so the drip stops with the account.
 
-    Deletes by email (the Contacts API accepts the email query form);
+    Deletes via the email PATH form — DELETE /contacts/{email}. The
+    query-param form (DELETE /contacts?email=...) returns 405 and was
+    silently never deleting anything (verified live 2026-09-03).
     200/204 = gone, 404 = never existed (e.g. emails never enabled) —
     both count as success for erasure purposes.
     """
@@ -168,9 +170,8 @@ def remove_contact(user_email: str) -> bool:
         return False
     try:
         resp = httpx.delete(
-            f"{API}/contacts",
+            f"{API}/contacts/{email}",
             headers=_headers(),
-            params={"email": email},
             timeout=10,
         )
         if resp.status_code in (200, 204, 404):
