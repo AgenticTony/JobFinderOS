@@ -2690,3 +2690,111 @@ class TestCvUploadFormats:
         )
         assert r.status_code == 400
         assert "not a valid Word document" in r.json()["detail"]
+
+
+class TestOnboardingDripTrigger:
+    """2026-09-03 beta onboarding series: on register the app best-effort
+    creates a Resend contact + fires user.created (the automation trigger),
+    gated by ONBOARDING_EMAILS_ENABLED; erasure removes the contact so a
+    deleted account stops receiving the series. All best-effort: a Resend
+    hiccup must never fail a signup or an erasure."""
+
+    @staticmethod
+    def _register(client, email):
+        return client.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": "Onboard-Pass-2026!"},
+        )
+
+    def test_register_fires_resend_trigger_when_enabled(self, client, monkeypatch):
+        import httpx as _httpx
+
+        from app.core import config as cfg
+
+        calls = []
+
+        def fake_request(url, **kwargs):
+            calls.append(("POST", url, kwargs.get("json"), kwargs.get("params")))
+            code = 201 if url.endswith("/contacts") else 202
+            return type("R", (), {"status_code": code, "text": ""})()
+
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", True)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        monkeypatch.setattr(_httpx, "post", fake_request)
+        monkeypatch.setattr(_httpx, "delete", fake_request)
+
+        email = f"onboard1-{uuid.uuid4().hex[:8]}@test.example"
+        r = self._register(client, email)
+        assert r.status_code == 201, r.text
+        posts = [c for c in calls if c[0] == "POST"]
+        assert len(posts) == 2, calls
+        assert posts[0][1].endswith("/contacts") and posts[0][2]["email"] == email
+        assert posts[1][1].endswith("/events")
+        assert posts[1][2]["type"] == "user.created"
+        assert posts[1][2]["contact"]["email"] == email
+
+    def test_register_does_nothing_when_disabled(self, client, monkeypatch):
+        import httpx as _httpx
+
+        from app.core import config as cfg
+
+        calls = []
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", False)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        monkeypatch.setattr(
+            _httpx, "post",
+            lambda *a, **k: calls.append("post") or type("R", (), {"status_code": 201, "text": ""})(),
+        )
+        r = self._register(client, f"onboard2-{uuid.uuid4().hex[:8]}@test.example")
+        assert r.status_code == 201, r.text
+        assert calls == [], "disabled flag must mean zero Resend calls"
+
+    def test_signup_survives_resend_outage(self, client, monkeypatch):
+        import httpx as _httpx
+
+        from app.core import config as cfg
+
+        def boom(*a, **k):
+            raise ConnectionError("resend down")
+
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", True)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        monkeypatch.setattr(_httpx, "post", boom)
+        r = self._register(client, f"onboard3-{uuid.uuid4().hex[:8]}@test.example")
+        assert r.status_code == 201, r.text
+
+    def test_erasure_removes_resend_contact(self, client, monkeypatch, db):
+        import httpx as _httpx
+
+        from app.core import config as cfg
+        from app.models import User
+
+        deleted = []
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+
+        def fake_delete(url, **kwargs):
+            deleted.append((url, kwargs.get("params")))
+            return type("R", (), {"status_code": 204, "text": ""})()
+
+        monkeypatch.setattr(_httpx, "delete", fake_delete)
+
+        email = f"onboard4-{uuid.uuid4().hex[:8]}@test.example"
+        r = self._register(client, email)
+        assert r.status_code == 201, r.text
+        login = client.post(
+            "/api/v1/auth/jwt/login",
+            data={"username": email, "password": "Onboard-Pass-2026!"},
+        )
+        token = login.json()["access_token"]
+        # clear the register throttle for this address
+        from app.core.ratelimit import clear_email as _ce
+
+        _ce(email)
+        r = client.delete(
+            "/api/v1/account/delete",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+        assert deleted and deleted[0][0].endswith("/contacts")
+        assert deleted[0][1] == {"email": email}
+        assert db.query(User).filter(User.email == email).first() is None

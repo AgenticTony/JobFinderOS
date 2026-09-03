@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     # sending stays off until the first-party Google OAuth build lands
     # post-beta. Browser and manual apply remain available throughout.
     EMAIL_APPLY_ENABLED: bool = False
+
+    # Beta onboarding drip (2026-09-03): on register, best-effort create
+    # the Resend contact + fire user.created — the Resend automation
+    # listening for that event runs the daily "how to use this section"
+    # series. Off until the automation copy is reviewed and enabled in
+    # the Resend dashboard; both must flip together.
+    ONBOARDING_EMAILS_ENABLED: bool = False
     # Spare Cloudflare R2 credentials (owner-provided 2026-09-01, in
     # backend/.env). DECLARED ONLY so the strict Settings gate accepts
     # them — the live off-site backup target is the B2 rclone remote

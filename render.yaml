@@ -95,6 +95,11 @@ services:
         sync: false
       - key: APPLY_FROM_EMAIL
         sync: false
+      # Beta onboarding drip (2026-09-03): fire user.created at signup for
+      # the Resend daily-series automation. Flip to "true" in the same
+      # change that enables the automation in Resend's dashboard.
+      - key: ONBOARDING_EMAILS_ENABLED
+        value: "false"
       # Scraping + per-source keys (empty keys = source self-disables)
       - key: SCRAPE_SOURCES
         value: arbeitnow,remotive,jobicy,workingnomads,jobtech,reed
