@@ -33,7 +33,13 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 API = "https://api.resend.com"
+# One event per language series: the English automation listens for
+# user.created, the Swedish one for user.created-sv. notify_signup
+# picks by the signup browser Accept-Language header (owner decision
+# 2026-09-03: the audience is mostly Swedish job seekers; an explicit
+# UI-locale signal can refine this later).
 ONBOARDING_EVENT = "user.created"
+ONBOARDING_EVENT_SV = "user.created-sv"
 
 
 def _headers() -> dict:
@@ -43,7 +49,24 @@ def _headers() -> dict:
     }
 
 
-def notify_signup(user_email: str, first_name: str | None = None) -> bool:
+def _is_swedish(accept_language: str | None) -> bool:
+    """True when the browser Accept-Language names Swedish anywhere.
+
+    "sv-SE,sv;q=0.9,en;q=0.8" -> True; "en-GB,en;q=0.9" -> False.
+    Absent (API clients, tests) -> False -> English series.
+    """
+    for part in (accept_language or "").split(","):
+        tag = part.split(";")[0].strip().lower()
+        if tag == "sv" or tag.startswith("sv-"):
+            return True
+    return False
+
+
+def notify_signup(
+    user_email: str,
+    first_name: str | None = None,
+    accept_language: str | None = None,
+) -> bool:
     """Create-or-update the Resend contact, then fire the drip trigger.
 
     Returns True when BOTH calls succeeded. Any failure is logged and
@@ -53,6 +76,11 @@ def notify_signup(user_email: str, first_name: str | None = None) -> bool:
     the drip templates greet \"Hi {{{FIRST_NAME}}},\" and an empty
     contact field renders a dangling \"Hi ,\". The CV parse later
     replaces it with the real name (update_contact_first_name).
+
+    The event language picks the series: a Swedish Accept-Language
+    fires user.created-sv (Swedish templates), anything else
+    user.created. The contact itself is shared and
+    language-agnostic.
     """
     if not settings.ONBOARDING_EMAILS_ENABLED or not settings.RESEND_API_KEY:
         return False
@@ -80,11 +108,14 @@ def notify_signup(user_email: str, first_name: str | None = None) -> bool:
     except Exception:  # noqa: BLE001 — best-effort by contract
         logger.exception("onboarding: contact create failed for %s", email)
 
+    event = (
+        ONBOARDING_EVENT_SV if _is_swedish(accept_language) else ONBOARDING_EVENT
+    )
     try:
         resp = httpx.post(
             f"{API}/events",
             headers=_headers(),
-            json={"type": ONBOARDING_EVENT, "contact": {"email": email}},
+            json={"type": event, "contact": {"email": email}},
             timeout=10,
         )
         if resp.status_code in (200, 201, 202):
