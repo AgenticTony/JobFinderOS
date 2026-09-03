@@ -12,6 +12,10 @@ free-tier API could never keep). This service is the app's half:
     the drip never emails a deleted account. NOT gated by the enable
     flag — contacts may exist from a period when emails were on, so
     erasure attempts cleanup whenever the Resend key is present.
+  - update_contact_first_name(): when the CV parse produces the user's
+    name, push it onto the Resend contact so drip emails 2-6 greet
+    the user personally (contacts start as first_name="there" — see
+    notify_signup).
 
 Both follow feedback_service.notify_owner's contract: never raise into
 the caller (a signup must succeed, an erasure must complete), log the
@@ -44,6 +48,11 @@ def notify_signup(user_email: str, first_name: str | None = None) -> bool:
 
     Returns True when BOTH calls succeeded. Any failure is logged and
     swallowed — registration must never fail because of onboarding.
+
+    first_name defaults to "there": registration collects no name,
+    the drip templates greet \"Hi {{{FIRST_NAME}}},\" and an empty
+    contact field renders a dangling \"Hi ,\". The CV parse later
+    replaces it with the real name (update_contact_first_name).
     """
     if not settings.ONBOARDING_EMAILS_ENABLED or not settings.RESEND_API_KEY:
         return False
@@ -56,7 +65,7 @@ def notify_signup(user_email: str, first_name: str | None = None) -> bool:
         resp = httpx.post(
             f"{API}/contacts",
             headers=_headers(),
-            json={"email": email, **({"first_name": first_name} if first_name else {})},
+            json={"email": email, "first_name": first_name or "there"},
             timeout=10,
         )
         # 201 created, 200 updated — both fine; anything else is a soft
@@ -87,6 +96,61 @@ def notify_signup(user_email: str, first_name: str | None = None) -> bool:
         return False
     except Exception:  # noqa: BLE001
         logger.exception("onboarding: event fire failed for %s", email)
+        return False
+
+
+def update_contact_first_name(user_email: str, first_name: str) -> bool:
+    """Sync the CV-parsed name onto the Resend contact.
+
+    The drip templates greet with the reserved {{{FIRST_NAME}}}
+    contact field (inline pipe fallbacks are broadcasts-only — the
+    Templates API rejects them), and signup knows no name, so contacts
+    start life as first_name="there". The CV parse is the first moment
+    a real name exists — this pushes it so later drip emails greet
+    the user personally. Gated like notify_signup: with the drip off
+    there is no contact to update and every upload would log 404s.
+    """
+    if not settings.ONBOARDING_EMAILS_ENABLED or not settings.RESEND_API_KEY:
+        return False
+    email = (user_email or "").strip().lower()
+    name = (first_name or "").strip()
+    if not email or not name:
+        return False
+    try:
+        lookup = httpx.get(
+            f"{API}/contacts",
+            headers=_headers(),
+            params={"email": email},
+            timeout=10,
+        )
+        if lookup.status_code != 200:
+            logger.warning(
+                "onboarding: contact lookup for %s -> %s %s",
+                email, lookup.status_code, lookup.text[:120],
+            )
+            return False
+        found = ((lookup.json() or {}).get("data") or [None])[0]
+        contact_id = (found or {}).get("id")
+        if not contact_id:
+            logger.info(
+                "onboarding: no Resend contact for %s — name sync skipped", email,
+            )
+            return False
+        resp = httpx.patch(
+            f"{API}/contacts/{contact_id}",
+            headers=_headers(),
+            json={"first_name": name},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return True
+        logger.warning(
+            "onboarding: contact name sync for %s -> %s %s",
+            email, resp.status_code, resp.text[:120],
+        )
+        return False
+    except Exception:  # noqa: BLE001 — never fail a CV upload over this
+        logger.exception("onboarding: contact name sync failed for %s", email)
         return False
 
 

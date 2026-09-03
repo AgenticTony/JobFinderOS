@@ -2729,6 +2729,7 @@ class TestOnboardingDripTrigger:
         posts = [c for c in calls if c[0] == "POST"]
         assert len(posts) == 2, calls
         assert posts[0][1].endswith("/contacts") and posts[0][2]["email"] == email
+        assert posts[0][2]["first_name"] == "there"  # no name at signup — drip-safe default
         assert posts[1][1].endswith("/events")
         assert posts[1][2]["type"] == "user.created"
         assert posts[1][2]["contact"]["email"] == email
@@ -2798,3 +2799,80 @@ class TestOnboardingDripTrigger:
         assert deleted and deleted[0][0].endswith("/contacts")
         assert deleted[0][1] == {"email": email}
         assert db.query(User).filter(User.email == email).first() is None
+
+
+class TestOnboardingNameSync:
+    """2026-09-03 personalization: the CV parse is the first moment the
+    user's name exists — it must PATCH the Resend contact's first_name
+    (contacts are created as "there" at signup because registration
+    collects no name). Best-effort: a Resend hiccup must never fail a
+    CV upload, and the sync is skipped entirely when the drip is off."""
+
+    _MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    def test_cv_parse_syncs_first_name_to_contact(self, client, db, monkeypatch):
+        import httpx as _httpx
+
+        from app.core import config as cfg
+        from app.services import cv_service
+
+        calls = []
+
+        def fake_get(url, **kwargs):
+            calls.append(("GET", url, kwargs.get("params")))
+            return type("R", (), {
+                "status_code": 200,
+                "text": "",
+                "json": lambda self: {"data": [{"id": "ct_123", "email": email}]},
+            })()
+
+        def fake_patch(url, **kwargs):
+            calls.append(("PATCH", url, kwargs.get("json")))
+            return type("R", (), {"status_code": 200, "text": ""})()
+
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", True)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        def fake_post(url, **kwargs):
+            return type("R", (), {"status_code": 201, "text": ""})()
+
+        monkeypatch.setattr(_httpx, "post", fake_post)  # register's notify_signup
+        monkeypatch.setattr(_httpx, "get", fake_get)
+        monkeypatch.setattr(_httpx, "patch", fake_patch)
+
+        email = f"namesync-{uuid.uuid4().hex[:8]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+
+        monkeypatch.setattr(cv_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(
+            cv_service, "get_ai_service",
+            lambda: type("AI", (), {"extract_profile": lambda *a, **k: {
+                "full_name": "Anna Andersson",
+            }})(),
+        )
+        monkeypatch.setattr(
+            cv_service, "_store_cv_file",
+            lambda content, filename: ("cvs/test.docx", "test.docx"),
+        )
+        r = client.post(
+            "/api/v1/profile/upload",
+            files={"file": ("cv.docx", TestCvUploadFormats()._docx(), self._MIME)},
+        )
+        assert r.status_code == 200, r.text
+
+        gets = [c for c in calls if c[0] == "GET"]
+        patches = [c for c in calls if c[0] == "PATCH"]
+        assert len(patches) == 1, calls
+        assert gets and gets[0][2] == {"email": email}
+        assert patches[0][1].endswith("/contacts/ct_123")
+        assert patches[0][2] == {"first_name": "Anna"}  # first word of the parsed name
+
+    def test_name_sync_skipped_when_drip_disabled(self, monkeypatch):
+        from app.core import config as cfg
+        from app.services.onboarding_service import update_contact_first_name
+
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", False)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        # httpx is deliberately left unmocked — a real network call would
+        # fail loudly, proving the gate returns before any request.
+        assert update_contact_first_name("x@test.example", "Anna") is False
