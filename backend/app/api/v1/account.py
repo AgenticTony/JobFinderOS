@@ -112,6 +112,17 @@ async def delete_account(
     # (regip:/loginip:) cannot be keyed to a user and expire with their
     # window.
     clear_email(user_email)
+    # Beta onboarding drip (2026-09-03): the Resend contact (if one was
+    # created at signup) must die with the account or the daily series
+    # keeps emailing a deleted user. Best-effort — erasure completes
+    # regardless; NOT gated on ONBOARDING_EMAILS_ENABLED because contacts
+    # may predate a flag flip.
+    try:
+        from app.services import onboarding_service
+
+        onboarding_service.remove_contact(user_email)
+    except Exception:  # noqa: BLE001 — never block erasure over email
+        logger.exception("onboarding: contact cleanup failed for %s", user_email)
     logger.info(
         "GDPR erasure: user=%s (%s) — %d matches, %d drafts, %d applications, "
         "%d profiles, %d ai_usage rows, %d CV file(s)",

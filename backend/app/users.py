@@ -97,6 +97,22 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         finally:
             db.close()
 
+        # Beta onboarding drip (owner decision 2026-09-03): best-effort
+        # create the Resend contact + fire user.created — the automation
+        # listening for it runs the daily "how to use this section"
+        # series. Best-effort by contract: registration must succeed
+        # regardless (see onboarding_service).
+        try:
+            from app.services import onboarding_service
+
+            onboarding_service.notify_signup(
+                str(user.email), first_name=None
+            )
+        except Exception:  # noqa: BLE001 — never fail a signup over email
+            logger.exception(
+                "onboarding: signup notify failed for %s", user.email
+            )
+
     async def on_after_update(
         self, user: User, update_dict: dict, request: Optional[Request] = None
     ) -> None:

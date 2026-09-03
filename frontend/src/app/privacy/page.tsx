@@ -235,6 +235,29 @@ export default function PrivacyPage() {
                   offline; browser and manual apply are available throughout.
                 </p>
               </li>
+              {/* Onboarding emails (owner decision 2026-09-03): on signup,
+                  backend onboarding_service creates a Resend contact and
+                  fires user.created; a Resend automation sends ~6 daily
+                  "how to use this section" emails (ONBOARDING_EMAILS_ENABLED
+                  gate + the automation, both off until enabled). Resend
+                  domain region eu-west-1 (Ireland). Every email carries an
+                  unsubscribe link; account deletion removes the contact
+                  (erasure path calls remove_contact). */}
+              <li className="rounded-lg border border-line bg-surface/60 p-3">
+                <p className="text-sm font-medium text-hi">
+                  Resend — onboarding emails{' '}
+                  <span className="font-normal text-ok">· EU (eu-west-1, Ireland)</span>
+                </p>
+                <p className="mt-1 text-sm">
+                  When you sign up we send a short series of onboarding
+                  emails (about six, one per day) explaining each part of the
+                  platform. Your email address is stored with our email
+                  provider, Resend, for this purpose. Every email has an{' '}
+                  <span className="text-hi">unsubscribe link</span> — using it
+                  stops the series and nothing else about your account.
+                  Deleting your account removes the contact entirely.
+                </p>
+              </li>
               {/* Sentry: init_sentry() is a no-op without SENTRY_DSN
                   (backend/app/main.py:72); render.yaml notes "EU region project
                   when set". Composio: optional, user-initiated Gmail connection
