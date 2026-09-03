@@ -2774,7 +2774,7 @@ class TestOnboardingDripTrigger:
         monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
 
         def fake_delete(url, **kwargs):
-            deleted.append((url, kwargs.get("params")))
+            deleted.append(url)
             return type("R", (), {"status_code": 204, "text": ""})()
 
         monkeypatch.setattr(_httpx, "delete", fake_delete)
@@ -2796,8 +2796,8 @@ class TestOnboardingDripTrigger:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert r.status_code == 200, r.text
-        assert deleted and deleted[0][0].endswith("/contacts")
-        assert deleted[0][1] == {"email": email}
+        # path form — the query-param form 405s (live-verified)
+        assert deleted and deleted[0].endswith(f"/contacts/{email}")
         assert db.query(User).filter(User.email == email).first() is None
 
 
