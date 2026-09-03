@@ -2764,6 +2764,51 @@ class TestOnboardingDripTrigger:
         r = self._register(client, f"onboard3-{uuid.uuid4().hex[:8]}@test.example")
         assert r.status_code == 201, r.text
 
+    def test_sv_browser_fires_sv_event_en_default_unchanged(self, client, monkeypatch):
+        import httpx as _httpx
+
+        from app.core import config as cfg
+
+        calls = []
+
+        def fake_request(url, **kwargs):
+            calls.append((url, kwargs.get("json")))
+            code = 201 if url.endswith("/contacts") else 202
+            return type("R", (), {"status_code": code, "text": ""})()
+
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", True)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        monkeypatch.setattr(_httpx, "post", fake_request)
+
+        # no header -> English series
+        en = f"onboardsv1-{uuid.uuid4().hex[:8]}@test.example"
+        assert self._register(client, en).status_code == 201
+        # Swedish browser -> Swedish series event
+        sv = f"onboardsv2-{uuid.uuid4().hex[:8]}@test.example"
+        r = client.post(
+            "/api/v1/auth/register",
+            json={"email": sv, "password": "Onboard-Pass-2026!"},
+            headers={"Accept-Language": "sv-SE,sv;q=0.9,en;q=0.8"},
+        )
+        assert r.status_code == 201, r.text
+
+        events = [c[1] for c in calls if c[0].endswith("/events")]
+        assert [e["type"] for e in events] == ["user.created", "user.created-sv"]
+        # the contact is shared and language-agnostic either way
+        contacts = [c[1] for c in calls if c[0].endswith("/contacts")]
+        assert len(contacts) == 2
+        assert all(c["email"] in (en, sv) and c["first_name"] == "there" for c in contacts)
+
+    def test_accept_language_detection(self):
+        from app.services.onboarding_service import _is_swedish
+
+        assert _is_swedish("sv-SE,sv;q=0.9,en;q=0.8") is True
+        assert _is_swedish("sv") is True
+        assert _is_swedish("en-GB,en;q=0.9") is False
+        assert _is_swedish("en-US,sv;q=0.1") is True  # sv anywhere in the list
+        assert _is_swedish("") is False
+        assert _is_swedish(None) is False
+
     def test_erasure_removes_resend_contact(self, client, monkeypatch, db):
         import httpx as _httpx
 

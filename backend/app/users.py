@@ -98,15 +98,21 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             db.close()
 
         # Beta onboarding drip (owner decision 2026-09-03): best-effort
-        # create the Resend contact + fire user.created — the automation
-        # listening for it runs the daily "how to use this section"
-        # series. Best-effort by contract: registration must succeed
-        # regardless (see onboarding_service).
+        # create the Resend contact + fire user.created (English series)
+        # or user.created-sv (Swedish series, picked by the signup
+        # browser Accept-Language) — the matching automation runs the
+        # daily "how to use this section" series. Best-effort by
+        # contract: registration must succeed regardless (see
+        # onboarding_service).
         try:
             from app.services import onboarding_service
 
             onboarding_service.notify_signup(
-                str(user.email), first_name=None
+                str(user.email),
+                first_name=None,
+                accept_language=(
+                    request.headers.get("accept-language") if request else None
+                ),
             )
         except Exception:  # noqa: BLE001 — never fail a signup over email
             logger.exception(
