@@ -171,6 +171,21 @@ def create_or_replace_profile_from_cv(
     # roll back the upload itself.
     if replaced_path and replaced_path != path:
         _retire_replaced_cv(db, user_id, replaced_path)
+    # Beta onboarding (2026-09-03): the CV parse is the first moment we
+    # know the user's name — sync it onto the Resend contact so drip
+    # emails 2-6 greet personally (the contact starts as "there").
+    # Post-commit and best-effort by contract: a Resend hiccup must
+    # never fail the upload.
+    if profile.full_name:
+        from app.models import User
+        from app.services.onboarding_service import update_contact_first_name
+
+        account = db.query(User).filter(User.id == user_id).first()
+        if account and account.email:
+            update_contact_first_name(
+                str(account.email), profile.full_name.split()[0]
+            )
+
     logger.info("Saved profile id=%s (user=%s) from %s", profile.id, user_id, safe_name)
     return profile
 
