@@ -100,6 +100,10 @@ services:
       # change that enables the automation in Resend's dashboard.
       - key: ONBOARDING_EMAILS_ENABLED
         value: "false"
+      # Beta (2026-09-04): hunts uncapped — one run drains the whole
+      # in-scope backlog. Flip to "false" when trial tiers land (WO-16).
+      - key: BETA_UNCAPPED_HUNTS
+        value: "true"
       # Scraping + per-source keys (empty keys = source self-disables)
       - key: SCRAPE_SOURCES
         value: arbeitnow,remotive,jobicy,workingnomads,jobtech,reed

@@ -329,24 +329,37 @@ def _run_matching_inner(
         settings.MAX_JOBS_PER_MATCH_RUN,
     )
 
-    # WO-14 D3: the daily trial cap binds on AI EVALUATIONS, here in the
-    # service so manual AND scheduled hunts inherit it. Checked before
-    # the candidate query: a capped user costs one COUNT, nothing else,
-    # and gets a clear message instead of a silent empty queue.
-    scored_today = ai_scored_today(db, user_id=user_id)
-    allowance = daily_score_allowance(db, user_id=user_id)
-    remaining = allowance - scored_today
-    if remaining <= 0:
-        logger.info(
-            "Daily scoring cap: user %s at %d/%d — run returned without "
-            "spending", user_id, scored_today, allowance,
-        )
-        return _daily_cap_summary(scored_today, allowance)
-    spend_limit = min(limit, remaining)
-    # Whether the DAILY cap (not the per-run cap) is the binding
-    # constraint — decides the final summary status so a capped user is
-    # told, not left with a silently short run.
-    daily_binding = remaining <= limit
+    if settings.BETA_UNCAPPED_HUNTS:
+        # Beta (owner decision 2026-09-04): no daily allowance — the
+        # run's ceiling is runaway-spend safety only, far above any
+        # realistic beta scope so one run drains the whole backlog.
+        limit = max(limit, 1000)
+        spend_limit = limit
+        daily_binding = False
+        # only read when daily_binding; bind them so the loop call site
+        # below never touches unbound locals
+        scored_today = 0
+        allowance = 0
+    else:
+        # WO-14 D3: the daily trial cap binds on AI EVALUATIONS, here in
+        # the service so manual AND scheduled hunts inherit it. Checked
+        # before the candidate query: a capped user costs one COUNT,
+        # nothing else, and gets a clear message instead of a silent
+        # empty queue.
+        scored_today = ai_scored_today(db, user_id=user_id)
+        allowance = daily_score_allowance(db, user_id=user_id)
+        remaining = allowance - scored_today
+        if remaining <= 0:
+            logger.info(
+                "Daily scoring cap: user %s at %d/%d — run returned without "
+                "spending", user_id, scored_today, allowance,
+            )
+            return _daily_cap_summary(scored_today, allowance)
+        spend_limit = min(limit, remaining)
+        # Whether the DAILY cap (not the per-run cap) is the binding
+        # constraint — decides the final summary status so a capped
+        # user is told, not left with a silently short run.
+        daily_binding = remaining <= limit
 
     # Per-user: jobs THIS user has never evaluated (no match row for
     # (user, job)). NEWEST FIRST (user decision, 2026-08-30): continuous
@@ -388,7 +401,10 @@ def _run_matching_inner(
     try:
         return _run_matching_loop(
             db, unmatched, profile, user_id,
-            limit=spend_limit, max_seconds=max_seconds,
+            limit=spend_limit,
+            # Beta: no time budget — the deadline would truncate a
+            # full-backlog run halfway (300s ≈ 120 evaluations).
+            max_seconds=None if settings.BETA_UNCAPPED_HUNTS else max_seconds,
             daily_binding=daily_binding,
             scored_today=scored_today, allowance=allowance,
         )
@@ -501,7 +517,8 @@ def _run_matching_loop(
 
     unmatched = _apply_cheap_gates(db, user_id, unmatched, service, languages)
 
-    deadline = time.time() + max_seconds
+    # None (beta uncapped) = no deadline: run until the backlog drains.
+    deadline = (time.time() + max_seconds) if max_seconds else None
     matches_created = 0
     evaluated = 0
     for job in unmatched:
@@ -543,7 +560,7 @@ def _run_matching_loop(
             )
             break
 
-        if time.time() > deadline:
+        if deadline and time.time() > deadline:
             logger.info(
                 "Matching time budget (%ss) reached after %d matches — remaining jobs stay 'new'",
                 max_seconds,

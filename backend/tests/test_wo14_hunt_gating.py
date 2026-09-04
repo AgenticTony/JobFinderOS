@@ -120,6 +120,13 @@ class TestRepeatHuntCooldown:
 # ------------------------------------------------------------ D2 + D3
 
 class TestDailyScoringCap:
+
+    @pytest.fixture(autouse=True)
+    def _trial_caps_enforced(self, monkeypatch):
+        """These tests pin the WO-14 cap behaviour itself — run them
+        with the beta uncapped override OFF (it is the default)."""
+        monkeypatch.setattr(settings, "BETA_UNCAPPED_HUNTS", False)
+
     def _seed_backlog(self, db, n, *, location="Malmö, Sweden"):
         for i in range(n):
             _job_row(db, remote=0, location=location,
@@ -228,6 +235,13 @@ class TestDailyScoringCap:
 # ------------------------------------------------------------ the gap
 
 class TestRunMatchingClamp:
+
+    @pytest.fixture(autouse=True)
+    def _trial_caps_enforced(self, monkeypatch):
+        """These tests pin the WO-14 cap behaviour itself — run them
+        with the beta uncapped override OFF (it is the default)."""
+        monkeypatch.setattr(settings, "BETA_UNCAPPED_HUNTS", False)
+
     def test_absurd_limit_is_clamped_structurally(self, db, monkeypatch):
         """Call run_matching DIRECTLY with an absurd limit: the service
         clamps to MAX_JOBS_PER_MATCH_RUN so every future caller inherits
@@ -257,6 +271,13 @@ class TestRunMatchingClamp:
 # ------------------------------------------------ review round (2026-08-31)
 
 class TestCapCountsDecidedMatches:
+
+    @pytest.fixture(autouse=True)
+    def _trial_caps_enforced(self, monkeypatch):
+        """These tests pin the WO-14 cap behaviour itself — run them
+        with the beta uncapped override OFF (it is the default)."""
+        monkeypatch.setattr(settings, "BETA_UNCAPPED_HUNTS", False)
+
     """Review finding 1 (critical): set_match_decision writes
     decision='approved'/'rejected' and leaves dismissed_reason NULL —
     a kept match the user APPROVED was AI-scored and must still count.
@@ -374,3 +395,37 @@ class TestCooldownIsPerScope:
             "Stockholm→Malmö queries were never issued"
         )
         assert second["scrape"][0]["status"] == "completed"
+
+
+# ------------------------------------------- beta uncapped (2026-09-04)
+
+class TestBetaUncappedHunts:
+    """Owner decision 2026-09-04: during beta (BETA_UNCAPPED_HUNTS is the
+    default) a hunt drains the WHOLE in-scope backlog in one run — no
+    daily allowance, no batch-of-25, no second Hunt press needed."""
+
+    def _seed_backlog(self, db, n, *, location="Malmö, Sweden"):
+        for i in range(n):
+            _job_row(db, remote=0, location=location,
+                     title=f"Beta Dev {i}",
+                     description="Python role with a real description.")
+
+    def test_whole_backlog_drains_in_one_run(self, db, monkeypatch):
+        from app.models import Profile
+        from app.services import matcher_service
+
+        assert settings.BETA_UNCAPPED_HUNTS is True, "uncapped must be the beta default"
+        uid = _onboarded_user(db, country="SE", municipalities='["Malmö"]')
+        self._seed_backlog(db, 40)  # 15 above the old day-1 allowance of 25
+        ai = _fake_ai(monkeypatch)
+
+        summary = matcher_service.run_matching(
+            db, profile=db.query(Profile).filter(Profile.user_id == uid).one(),
+            user_id=uid,
+        )
+
+        assert len(ai["jobs"]) == 40, (
+            f"beta run scored {len(ai['jobs'])} of 40 — the backlog must "
+            "drain in one run (owner decision 2026-09-04)"
+        )
+        assert summary["status"] != "daily_cap_reached", summary
