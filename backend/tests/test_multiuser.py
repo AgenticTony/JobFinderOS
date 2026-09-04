@@ -2921,3 +2921,49 @@ class TestOnboardingNameSync:
         # httpx is deliberately left unmocked — a real network call would
         # fail loudly, proving the gate returns before any request.
         assert update_contact_first_name("x@test.example", "Anna") is False
+
+
+class TestBetaRoutePrecheck:
+    """matches.py: with BETA_UNCAPPED_HUNTS the synchronous daily-cap
+    pre-check must be skipped — a capped message with no cap is a lie."""
+
+    def test_flag_on_capped_user_still_starts_the_run(self, client, monkeypatch):
+        import uuid as _uuid
+
+        from app.services import cv_service, matcher_service
+
+        email = f"precap-{_uuid.uuid4().hex[:8]}@test.example"
+        r = client.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": "Onboard-Pass-2026!"},
+        )
+        assert r.status_code == 201, r.text
+        login = client.post(
+            "/api/v1/auth/jwt/login",
+            data={"username": email, "password": "Onboard-Pass-2026!"},
+        )
+        token = login.json()["access_token"]
+
+        class _Profile:
+            cv_text = "x"
+
+        monkeypatch.setattr(
+            cv_service, "get_active_profile",
+            lambda db, *, user_id: _Profile(),
+        )
+        # 999 scored against a 25 allowance: the OLD pre-check would
+        # refuse here — with the beta flag it must start the run instead
+        monkeypatch.setattr(
+            matcher_service, "ai_scored_today",
+            lambda db, *, user_id: 999,
+        )
+
+        from app.core.config import settings
+
+        assert settings.BETA_UNCAPPED_HUNTS is True
+        r = client.post(
+            "/api/v1/matches/run",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json().get("status") != "daily_cap_reached", r.json()

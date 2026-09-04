@@ -41,6 +41,12 @@ _user_locks_guard = threading.Lock()
 # INSERT failing the user_id FK on Postgres. Cheap query, generous
 # interval: an erase is rare, an evaluation is ~5-10s.
 USER_LIVENESS_CHECK_EVERY = 25
+# PIPE-18b (2026-09-04): renew the caller's hunt-lock claim every N
+# evaluations. An uncapped beta pass can outlive the claim TTL
+# (broad-scope backfills run 40-80+ min against a 45-min floor),
+# so a LIVE run must heartbeat from inside this loop — the TTL
+# stays the self-heal for a crashed holder only.
+HEARTBEAT_EVERY = 10
 
 
 def _mark_matching_started(user_id) -> None:
@@ -163,6 +169,7 @@ def run_matching(
     limit: int = None,
     profile: Profile = None,
     max_seconds: int = 300,
+    heartbeat=None,
     *,
     user_id,
 ) -> Dict:
@@ -185,6 +192,10 @@ def run_matching(
         max_seconds: hard time budget — matching stops and returns partial
             results when exceeded, so pipeline HTTP calls always respond
             within a bounded wait (the frontend times out at 10 minutes).
+        heartbeat: optional zero-arg callable fired every HEARTBEAT_EVERY
+            evaluations. Lock-holding callers (worker cycle, manual
+            pipeline) pass their claim renewal so a long uncapped run
+            never outlives its own TTL; best-effort, never fatal.
 
     Returns:
         Summary dict {status, jobs_considered, matches_created, error}
@@ -199,7 +210,8 @@ def run_matching(
         }
     try:
         return _run_matching_inner(
-            db, limit=limit, profile=profile, max_seconds=max_seconds, user_id=user_id
+            db, limit=limit, profile=profile, max_seconds=max_seconds,
+            user_id=user_id, heartbeat=heartbeat,
         )
     finally:
         lock.release()
@@ -292,6 +304,7 @@ def _run_matching_inner(
     limit: int = None,
     profile: Profile = None,
     max_seconds: int = 300,
+    heartbeat=None,
     *,
     user_id,
 ) -> Dict:
@@ -324,16 +337,25 @@ def _run_matching_inner(
     # bound. Route schemas stay as defence-in-depth, not the only
     # defence (the Layer-0 principle this codebase applies to tenancy,
     # applied to spend).
+    # The clamp bounds EXPLICIT caller limits (?limit=…, pipeline
+    # max_matches, scripts) in every configuration — every caller
+    # inherits this bound. The beta DEFAULT below is deliberately
+    # larger: an uncapped no-limit run drains the whole candidate
+    # window, and MATCH_CANDIDATE_WINDOW is the real ceiling (the
+    # candidate query caps there — a larger number is unreachable).
+    explicit_limit = limit
     limit = min(
         limit or settings.MAX_JOBS_PER_MATCH_RUN,
         settings.MAX_JOBS_PER_MATCH_RUN,
     )
 
     if settings.BETA_UNCAPPED_HUNTS:
-        # Beta (owner decision 2026-09-04): no daily allowance — the
-        # run's ceiling is runaway-spend safety only, far above any
-        # realistic beta scope so one run drains the whole backlog.
-        limit = max(limit, 1000)
+        # Beta (owner decision 2026-09-04): a run with NO explicit
+        # limit drains the whole in-scope backlog in one pass; an
+        # explicitly passed limit is honoured as asked (still
+        # clamped above).
+        if explicit_limit is None:
+            limit = settings.MATCH_CANDIDATE_WINDOW
         spend_limit = limit
         daily_binding = False
         # only read when daily_binding; bind them so the loop call site
@@ -406,8 +428,9 @@ def _run_matching_inner(
             # full-backlog run halfway (300s ≈ 120 evaluations).
             max_seconds=None if settings.BETA_UNCAPPED_HUNTS else max_seconds,
             daily_binding=daily_binding,
-            scored_today=scored_today, allowance=allowance,
-        )
+                scored_today=scored_today, allowance=allowance,
+                heartbeat=heartbeat,
+            )
     finally:
         _mark_matching_done(user_id)
 
@@ -505,7 +528,7 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages):
 
 def _run_matching_loop(
     db, unmatched, profile, user_id, *, limit, max_seconds,
-    daily_binding=False, scored_today=0, allowance=0,
+    daily_binding=False, scored_today=0, allowance=0, heartbeat=None,
 ) -> Dict:
     """The evaluation loop proper. Called with the per-user running mark
     already set (AI-14) — returns the summary dict, aborts early when
@@ -533,6 +556,16 @@ def _run_matching_loop(
             and not _user_exists(db, user_id)
         ):
             return _user_gone_summary(user_id, len(unmatched), matches_created)
+
+        # PIPE-18b: renew the hunt claim mid-run so an uncapped
+        # pass never outlives its TTL. Best-effort — a failed
+        # renewal surfaces through the holder's own renew/release
+        # logging, and the stealer story stays the documented one.
+        if heartbeat is not None and evaluated and evaluated % HEARTBEAT_EVERY == 0:
+            try:
+                heartbeat()
+            except Exception:  # noqa: BLE001
+                logger.warning("hunt heartbeat raised", exc_info=True)
 
         # Cheap pre-filter: hard excludes skip the AI call entirely
         haystack = f"{job.title} {job.company or ''}".lower()

@@ -429,3 +429,91 @@ class TestBetaUncappedHunts:
             "drain in one run (owner decision 2026-09-04)"
         )
         assert summary["status"] != "daily_cap_reached", summary
+
+
+# --------------------------------------- review round (2026-09-04)
+
+class TestBetaPlumbing:
+    """The uncapped plumbing asserted DIRECTLY (repo rule 2: red on
+    revert). A fast fake AI never approaches the 420s deadline, so
+    behaviour tests alone stay green with the time budget still in
+    place — these capture what _run_matching_loop actually receives."""
+
+    def _capture_loop(self, monkeypatch):
+        from app.services import matcher_service
+
+        captured = {}
+        real = matcher_service._run_matching_loop
+
+        def spy(db, unmatched, profile, user_id, **kwargs):
+            captured.update(kwargs)
+            return real(db, unmatched, profile, user_id, **kwargs)
+
+        monkeypatch.setattr(matcher_service, "_run_matching_loop", spy)
+        return captured
+
+    def _run(self, db, monkeypatch, **kw):
+
+        from app.models import Profile
+        from app.services import matcher_service
+
+        uid = _onboarded_user(
+            db, country="SE", municipalities='["Malmö"]',
+        )
+        for i in range(3):
+            _job_row(db, location="Malmö, Sweden", title=f"Plumb Dev {i}")
+        _fake_ai(monkeypatch)
+        summary = matcher_service.run_matching(
+            db, profile=db.query(Profile).filter(Profile.user_id == uid).one(),
+            user_id=uid, **kw,
+        )
+        return summary, uid
+
+    def test_beta_default_forwards_no_deadline_and_window_limit(self, db, monkeypatch):
+        captured = self._capture_loop(monkeypatch)
+        assert settings.BETA_UNCAPPED_HUNTS is True  # the beta default
+        self._run(db, monkeypatch)
+        # the time budget must be REMOVED in beta (None -> no deadline)
+        assert captured["max_seconds"] is None, captured
+        # no explicit limit -> the candidate window is the drain ceiling
+        assert captured["limit"] == settings.MATCH_CANDIDATE_WINDOW, captured
+
+    def test_explicit_limit_is_honoured_in_beta(self, db, monkeypatch):
+        captured = self._capture_loop(monkeypatch)
+        summary, _ = self._run(db, monkeypatch, limit=2)
+        assert captured["limit"] == 2, captured
+
+    def test_caps_on_forwards_the_budget_and_clamp(self, db, monkeypatch):
+        monkeypatch.setattr(settings, "BETA_UNCAPPED_HUNTS", False)
+        captured = self._capture_loop(monkeypatch)
+        self._run(db, monkeypatch)  # no explicit limit, no max_seconds
+        assert captured["max_seconds"] == 300, captured  # forwarded, not None
+        # caps on: the day-1 allowance binds below the 200 clamp (scored 0)
+        assert captured["limit"] == settings.TRIAL_DAY1_SCORE_CAP, captured
+
+    def test_heartbeat_fires_inside_the_loop(self, db, monkeypatch):
+        """PIPE-18b: a live uncapped run renews the hunt claim from
+        inside the evaluation loop — without this, a 40-80 min backfill
+        outlives the 45-min claim TTL and gets stolen mid-flight."""
+        beats = []
+        uid = None
+
+
+        from app.models import Profile
+        from app.services import matcher_service
+
+        uid = _onboarded_user(
+            db, country="SE", municipalities='["Malmö"]',
+        )
+        for i in range(matcher_service.HEARTBEAT_EVERY + 2):
+            _job_row(db, location="Malmö, Sweden", title=f"Beat Dev {i}")
+        _fake_ai(monkeypatch)
+
+        matcher_service.run_matching(
+            db, profile=db.query(Profile).filter(Profile.user_id == uid).one(),
+            user_id=uid, heartbeat=lambda: beats.append(1),
+        )
+        assert len(beats) >= 1, (
+            f"{matcher_service.HEARTBEAT_EVERY + 2} evaluations must fire at "
+            "least one heartbeat — the claim TTL cannot cover an uncapped run"
+        )
