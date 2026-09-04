@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     # session proves the product; the backlog then drips freshest-first
     # over following days ("new matches every morning").
     TRIAL_DAY1_SCORE_CAP: int = 25
+    # Beta (owner decision 2026-09-04): hunts run UNCAPPED. The
+    # WO-14 trial caps and the matching time budget exist for the
+    # paid-tier economics that don't exist yet — during beta a
+    # hunt drains the user's whole in-scope backlog in one run
+    # ("137 jobs come in, all 137 get assessed"). Flip to False
+    # when WO-16 lands tiers.
+    BETA_UNCAPPED_HUNTS: bool = True
     # Never-evaluated candidates loaded per run (newest first) for cheap
     # pre-filtering before AI evaluation.
     MATCH_CANDIDATE_WINDOW: int = 500
