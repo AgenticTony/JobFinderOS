@@ -631,6 +631,7 @@ def run_pipeline(
     match: bool = True,
     max_matches: Optional[int] = None,
     backfill: bool = False,
+    heartbeat=None,
     *,
     user_id,
 ) -> Dict:
@@ -709,6 +710,7 @@ def run_pipeline(
                         limit=max_matches,
                         profile=run_profile,
                         max_seconds=settings.MATCH_TIME_BUDGET_SECONDS,
+                        heartbeat=heartbeat,  # PIPE-18b claim renewal
                         user_id=user_id,
                     )
             except Exception as e:  # noqa: BLE001 — report in summary, never 500 the endpoint
@@ -946,7 +948,7 @@ def scrape_for_context(db: Session, ctx: Dict) -> List[Dict]:
     return summaries
 
 
-def match_for_user(db: Session, user_id) -> Dict:
+def match_for_user(db: Session, user_id, heartbeat=None) -> Dict:
     """One user's matching pass (tenancy layer 1: profile resolved by the
     caller-side helper and injected — same rule as run_pipeline)."""
     from app.services.cv_service import get_active_profile
@@ -959,6 +961,7 @@ def match_for_user(db: Session, user_id) -> Dict:
             db,
             profile=profile,
             max_seconds=settings.MATCH_TIME_BUDGET_SECONDS,
+            heartbeat=heartbeat,  # PIPE-18b claim renewal
             user_id=user_id,
         )
     except Exception as e:  # noqa: BLE001 — report, never kill the hunt cycle

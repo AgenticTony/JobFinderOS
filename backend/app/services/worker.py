@@ -55,11 +55,16 @@ def compute_claim_ttl_minutes(user_count: int) -> int:
     budget per onboarded user, with headroom, floored at the historical
     45 minutes.
 
-    MATCH_TIME_BUDGET_SECONDS is the binding per-user cost — it is the
-    hard wall-clock stop of a matching run. MAX_JOBS_PER_MATCH_RUN (the
-    200-evaluation spend cap) cannot exceed it in wall time (200 evals
-    x up to 3 samples at ~5-10s each is stopped by the 420s budget long
-    before the cap), so sizing on the time budget covers both.
+    BETA_UNCAPPED_HUNTS (2026-09-04) invalidated the old premise —
+    that MATCH_TIME_BUDGET_SECONDS is the hard per-user wall-clock
+    stop. An uncapped pass is bounded only by the candidate window
+    (500 evals at ~5-10s = 40-80+ min per user), which the initial
+    claim can no longer cover. PIPE-18b closes that: lock-holding
+    callers pass a heartbeat into run_matching that renews the claim
+    every HEARTBEAT_EVERY evaluations, so this TTL only needs to
+    cover claim-to-first-heartbeat (the scrape phase plus one user's
+    first evaluations) — and it remains the self-heal window for a
+    crashed holder. The formula keeps its historical headroom.
     """
     import math
 
@@ -232,16 +237,21 @@ def run_scheduled_hunt() -> dict:
             try:
                 db = SessionLocal()
                 try:
-                    # PIPE-18 heartbeat: keep OUR claim alive across the
-                    # per-user matching passes (each may spend a full
-                    # MATCH_TIME_BUDGET_SECONDS), re-sized for users
-                    # onboarded since the claim.
+                    # PIPE-18 heartbeat: renew before each user's pass,
+                    # re-sized for users onboarded since the claim.
+                    # PIPE-18b: the pass itself ALSO heartbeats every
+                    # HEARTBEAT_EVERY evaluations — uncapped beta
+                    # passes outlive any fixed TTL, so a live run
+                    # must keep renewing from inside the loop.
                     if not renew_hunt(db, claim_token):
                         logger.warning(
                             "Hunt claim no longer ours (TTL stolen?) — "
                             "finishing this cycle; the stealer is running"
                         )
-                    result = match_for_user(db, uid)
+                    result = match_for_user(
+                        db, uid,
+                        heartbeat=lambda: renew_hunt(db, claim_token),
+                    )
                 finally:
                     db.close()
                 if result.get("status") == "failed":

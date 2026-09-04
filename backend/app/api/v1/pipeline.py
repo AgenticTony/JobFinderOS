@@ -16,7 +16,7 @@ from app.schemas.match import MatchWithJobResponse
 from app.schemas.pipeline import PipelineRunRequest, PipelineRunResponse, ScrapeSummary
 from app.services.pipeline import run_pipeline
 from app.services.scrapers import SCRAPER_REGISTRY
-from app.services.worker import claim_hunt, release_hunt
+from app.services.worker import claim_hunt, release_hunt, renew_hunt
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -70,6 +70,16 @@ async def run(
                    "It finishes within a few minutes — try again after that.",
         )
 
+    def _renew_claim():
+        # PIPE-18b: uncapped matching can outlive the claim TTL —
+        # renew from inside the evaluation loop (own session: the
+        # loop may run in the threadpool on a different session).
+        renew_db = SessionLocal()
+        try:
+            return renew_hunt(renew_db, claim_token)
+        finally:
+            renew_db.close()
+
     try:
         summary = await run_in_threadpool(
             run_pipeline,
@@ -77,6 +87,7 @@ async def run(
             match=payload.match,
             max_matches=payload.max_matches,
             backfill=payload.backfill,
+            heartbeat=_renew_claim,
             user_id=user.id,
         )
     finally:

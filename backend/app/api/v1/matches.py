@@ -121,7 +121,10 @@ async def run_matching(
                 return
             summary = svc.run_matching(
                 task_db,
-                limit=limit or settings.MAX_JOBS_PER_MATCH_RUN,
+                # None (no ?limit=) reaches the service so the beta
+                # uncapped default (drain the candidate window)
+                # applies; an explicit ?limit= is honoured as asked.
+                limit=limit,
                 profile=task_profile,
                 max_seconds=settings.MATCH_TIME_BUDGET_SECONDS,
                 user_id=user.id,
