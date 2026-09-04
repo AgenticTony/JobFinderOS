@@ -453,13 +453,12 @@ class TestBetaPlumbing:
         return captured
 
     def _run(self, db, monkeypatch, **kw):
-        import uuid as _uuid
 
         from app.models import Profile
         from app.services import matcher_service
 
         uid = _onboarded_user(
-            db, country="SE", municipalities=f'["Malmö"]',
+            db, country="SE", municipalities='["Malmö"]',
         )
         for i in range(3):
             _job_row(db, location="Malmö, Sweden", title=f"Plumb Dev {i}")
@@ -499,9 +498,9 @@ class TestBetaPlumbing:
         beats = []
         uid = None
 
+
         from app.models import Profile
         from app.services import matcher_service
-        import uuid as _uuid
 
         uid = _onboarded_user(
             db, country="SE", municipalities='["Malmö"]',
