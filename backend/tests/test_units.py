@@ -3567,6 +3567,14 @@ class TestStarvationFix:
         monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
         return calls
 
+    @pytest.fixture(autouse=True)
+    def _trial_caps_enforced(self, monkeypatch):
+        """Pins cap-bound selection — run with the beta uncapped override
+        OFF (it is the deployment default)."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "BETA_UNCAPPED_HUNTS", False)
+
     def test_freshest_job_gets_the_slot_under_a_tight_cap(self, db, monkeypatch):
         """Newest-first (user decision, 2026-08-30): continuous recruiting
         rewards the first strong applicant, so the fresh ad outranks the
