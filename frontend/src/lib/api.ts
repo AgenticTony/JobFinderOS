@@ -159,9 +159,15 @@ for (const instance of [api, slowApi]) {
       }
       if (
         error?.response?.status === 401 &&
-        (await getSessionToken()) &&
-        window.location.pathname !== '/login'
+        window.location.pathname !== '/login' &&
+        window.location.pathname !== '/reset-password' &&
+        window.location.pathname !== '/sv/reset-password'
       ) {
+        // NOT conditioned on a live session (review round 2): the most
+        // common 401 shape is an already-dead session (expired/revoked
+        // refresh token) — getSessionToken() returning null must still
+        // leave the login page, or the console mounts forever with
+        // every poller firing 401s and no way back in.
         logout();
       }
       return Promise.reject(error);

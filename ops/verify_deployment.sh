@@ -18,8 +18,14 @@ set -uo pipefail
 API="${1:-https://jobfinderos-api.onrender.com}"
 FRONTEND="${2:-https://jobfinderos.pages.dev}"
 SUPABASE="${3:-${SUPABASE_URL:-https://jsibogzklhswpmozcyhn.supabase.co}}"
-PROBE_EMAIL="deploy-check@jobfinderos.dev"
-PROBE_PASS="DeployCheck-Probe-2026!"
+# Probe account credentials come from the ENVIRONMENT, never this file:
+# since MIG-WO2 these unlock a REAL Supabase identity — a committed
+# password plus the public-by-design anon key would hand any repo
+# reader a standing production JWT (review round 2, 2026-09-08).
+#   export PROBE_EMAIL=deploy-check@jobfinderos.dev   # (this default is fine)
+#   export PROBE_PASS="$(pwgen 24 1)"   # create the Supabase user with THIS
+PROBE_EMAIL="${PROBE_EMAIL:-deploy-check@jobfinderos.dev}"
+PROBE_PASS="${PROBE_PASS:?export PROBE_PASS first (a generated secret stored in your password manager — never committed)}"
 PASS=0; FAIL=0
 
 ok()   { PASS=$((PASS+1)); echo "  PASS  $1"; }

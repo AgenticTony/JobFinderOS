@@ -31,26 +31,30 @@ export default function ResetPasswordView({ locale }: { locale: Locale }) {
   useEffect(() => {
     document.documentElement.lang = locale;
     let alive = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     // The SDK exchanges ?code= on client boot; by the time getSession
     // answers, the recovery session is either there or the link was
-    // bad/expired. onAuthStateChange covers the case where the exchange
-    // completes slightly after the first getSession read.
+    // bad/expired. One delayed re-check covers the case where the
+    // exchange completes slightly after the first getSession read.
     supabase.auth.getSession().then(({ data }) => {
       if (!alive) return;
       if (data.session) setPhase('ready');
       else {
-        const timer = setTimeout(() => {
+        // The timer id lives in the EFFECT's scope so the effect's own
+        // cleanup clears it — returning a cleanup from inside .then()
+        // hands it to the promise, not to React (review round 2).
+        retryTimer = setTimeout(() => {
           supabase.auth.getSession().then(({ data: second }) => {
             if (!alive) return;
             if (second.session) setPhase('ready');
             else setError(t.errLink);
           });
         }, 1500);
-        return () => clearTimeout(timer);
       }
     });
     return () => {
       alive = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale]);

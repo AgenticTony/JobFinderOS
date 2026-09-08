@@ -413,6 +413,54 @@ class TestGDPRErasurePurgesSpendBuckets:
             "ordering is inverted"
         )
 
+    def test_erasure_retry_converges_after_local_failure(
+        self, client, monkeypatch, db
+    ):
+        """Review round 2: a failure in the local half (after the
+        Supabase identity died) must leave a RETRYABLE state — the
+        users row is not tombstoned until everything else is done, so
+        the user can re-authenticate and the idempotent deletes
+        converge on a second call."""
+        from app.api.v1 import account as account_api
+        from tests.auth_helpers import stub_supabase_delete
+
+        stub_supabase_delete(monkeypatch)
+        email = f"epretry-{uuid.uuid4().hex[:6]}@test.example"
+        uid_uuid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+
+        calls = {"n": 0}
+        real_erase = account_api._erase_local_rows
+
+        def flaky_erase(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("connection blip mid-cascade")
+            return real_erase(*args, **kwargs)
+
+        monkeypatch.setattr(account_api, "_erase_local_rows", flaky_erase)
+        # TestClient re-raises server exceptions — the mid-cascade blowup
+        # arrives as the raise, which IS the 500 the browser sees.
+        with pytest.raises(RuntimeError, match="connection blip"):
+            client.delete("/api/v1/account/delete")
+
+        # The retry path survives: not tombstoned, token still works.
+        row = db.query(User).filter(User.id == uid_uuid).one()
+        assert row.is_active is True, (
+            "tombstone applied before the cascade completed — the user "
+            "can never retry the erasure"
+        )
+        me = client.get("/api/v1/profile/me")
+        assert me.status_code in (200, 404), me.status_code
+
+        monkeypatch.setattr(account_api, "_erase_local_rows", real_erase)
+        second = client.delete("/api/v1/account/delete")
+        assert second.status_code == 200, second.text
+        db.expire_all()  # the tombstone committed in the request's session
+        row = db.query(User).filter(User.id == uid_uuid).one()
+        assert row.is_active is False
+        assert db.query(Profile).filter(Profile.user_id == uid_uuid).count() == 0
+
 
 class TestGDPRErasureFKChain:
     """P0-2 (beta review, LIVE-confirmed): erasure deleted matches BEFORE
@@ -1168,6 +1216,129 @@ class TestAuthEndpointsRemoved:
         assert resp.json()["onboarded"] is False
 
 
+class TestMirrorRace:
+    """Review round 2 (2026-09-08): the savepoint/adopt path for two
+    concurrent first requests. Deterministically simulated — the
+    dependency's FIRST lookup misses (as it would inside the real race
+    window) while the winner's row already sits in the database; the
+    insert must then lose gracefully: adopt the winner's row, no 500,
+    and NO second onboarding drip."""
+
+    def test_race_loser_adopts_the_winners_row_without_500_or_drip(
+        self, client, db, monkeypatch
+    ):
+        import httpx as _httpx
+        from sqlalchemy.orm import Session as SaSession
+
+        from app.core import config as cfg
+        from app.models import User as UserModel
+        from tests.auth_helpers import mint_token
+
+        drip_calls = []
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", True)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        monkeypatch.setattr(
+            _httpx, "post",
+            lambda *a, **k: drip_calls.append("post")
+            or type("R", (), {"status_code": 201, "text": ""})(),
+        )
+
+        email = f"race-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.uuid4()
+        # The winner got there first: row exists, committed.
+        winner = UserModel(id=uid, email=email, hashed_password="supabase-auth")
+        db.add(winner)
+        db.commit()
+
+        # Rig the dependency's FIRST User lookup to miss — the race
+        # window — then behave normally (the re-select after the
+        # IntegrityError must see the winner's row).
+        real_get = SaSession.get
+        seen = {"user_gets": 0}
+
+        def rigged_get(self, entity, key, *args, **kwargs):
+            if entity is UserModel:
+                seen["user_gets"] += 1
+                if seen["user_gets"] == 1:
+                    return None  # the race window: first lookup misses
+            return real_get(self, entity, key, *args, **kwargs)
+
+        monkeypatch.setattr(SaSession, "get", rigged_get)
+
+        token = mint_token(uid, email)
+        r = client.get(
+            "/api/v1/profile/me", headers={"Authorization": f"Bearer {token}"}
+        )
+        # 404 = auth PASSED (adopted row, no profile in this simulation);
+        # the bug this pins is the 500 (CORS-less opaque error) the raw
+        # IntegrityError used to produce.
+        assert r.status_code == 404, (
+            f"race loser got {r.status_code} — the savepoint/adopt path "
+            "is not absorbing the duplicate insert"
+        )
+        assert "CV" in r.json().get("detail", "")
+        assert seen["user_gets"] >= 2, "the re-select after the loss never ran"
+        assert drip_calls == [], (
+            "the race loser re-fired the onboarding drip — only the row's "
+            "creator may send it"
+        )
+
+    def test_concurrent_first_requests_one_drip(self, client, monkeypatch):
+        """The live shape: a fresh account's first burst of parallel
+        requests (Promise.allSettled on the console). Every request must
+        answer 2xx/404 — never 500 — and exactly ONE onboarding drip
+        fires across the whole burst."""
+        import httpx as _httpx
+
+        from app.core import config as cfg
+
+        drip_calls = []
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", True)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        monkeypatch.setattr(
+            _httpx, "post",
+            lambda *a, **k: drip_calls.append("post")
+            or type("R", (), {"status_code": 201, "text": ""})(),
+        )
+
+        import threading
+
+        email = f"burst-{uuid.uuid4().hex[:6]}@test.example"
+        # All threads share ONE identity (a fresh account); three
+        # parallel requests hit three threadpool sessions, the shape of
+        # the console's Promise.allSettled first load.
+        from tests.auth_helpers import mint_token
+
+        statuses = []
+        uid_holder = {}
+
+        def shared_hit():
+            if "uid" not in uid_holder:
+                uid_holder["uid"] = uuid.uuid4()
+            token = mint_token(uid_holder["uid"], email)
+            resp = client.get(
+                "/api/v1/profile/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            statuses.append(resp.status_code)
+
+        threads = [threading.Thread(target=shared_hit) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert all(s in (200, 404) for s in statuses), (
+            f"concurrent first requests produced {statuses} — a 500 means "
+            "the mirror race is live again (CORS-less opaque errors on a "
+            "brand-new account's very first load)"
+        )
+        assert len(drip_calls) == 2, (
+            f"{len(drip_calls)} Resend calls for one signup burst — the "
+            "drip must fire exactly once (contact + event)"
+        )
+
+
 class TestSupabaseTokenVerification:
     """MIG-WO2: the backend's whole identity check is verify_supabase_
     token — every failure mode must 401 (fail closed), and the JWKS
@@ -1271,6 +1442,34 @@ class TestSupabaseTokenVerification:
         assert r.status_code == 503, (
             f"JWKS outage surfaced as {r.status_code} — must be 503 so "
             "clients retry instead of dropping their session"
+        )
+
+    def test_stale_jwks_served_when_refetch_fails(self, client, monkeypatch):
+        """Review round 2: a TTL-expired cache whose refetch fails must
+        STILL VERIFY tokens — signing keys rotate rarely, and dropping
+        the API because the JWKS endpoint blinked (with good keys in
+        memory) is an outage the cache exists to prevent."""
+        import httpx as _httpx
+
+        from app import users as app_users
+        from tests import auth_helpers
+        from tests.auth_helpers import mint_token
+
+        fx = auth_helpers._ensure_fixture()
+        # Prime a real cache, then age it past the TTL
+        with app_users._jwks_lock:
+            app_users._jwks_cache = {"keys": [fx["jwk"]]}
+            app_users._jwks_fetched_at = 0.0  # infinitely stale
+
+        def wire_down(url, **kwargs):
+            raise _httpx.ConnectError("jwks endpoint down")
+
+        monkeypatch.setattr(app_users.httpx, "get", wire_down)
+        token = mint_token(uuid.uuid4(), "stale-ok@test.example")
+        r = self._hit(client, token)
+        assert r.status_code in (200, 404), (
+            f"stale-cache fallback failed ({r.status_code}) — the API is "
+            "down for a JWKS blip while valid keys sit in memory"
         )
 
     def test_unknown_kid_refresh_is_cooldown_bounded(self, client, monkeypatch):

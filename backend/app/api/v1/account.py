@@ -35,14 +35,20 @@ async def delete_account(
     teardown lands with the Composio send-path work (noted, not silently
     claimed).
 
-    ORDER: the Supabase identity dies FIRST (MIG-WO2) — email and
-    password hash live there, so erasure without it is incomplete. If
-    that call fails we 503 having deleted nothing, and the user retries;
-    the alternative (local cascade first) leaves the strongest PII
-    surviving a half-completed request. The local users row becomes a
-    tombstone (see the comment at the update) — access tokens stay
-    signature-valid up to Supabase's ~1h expiry, and the tombstone turns
-    that window into 401s.
+    ORDER (review round 2, 2026-09-08 — the retry path is the design
+    constraint): the Supabase identity dies FIRST (email + password hash
+    live there; erasure without it is incomplete; its failure 503s with
+    nothing deleted). The local cascade then runs in IDEMPOTENT steps —
+    children, telemetry, CV files — with the users row still ACTIVE, so
+    ANY failure in this window leaves the caller able to authenticate
+    and RETRY the endpoint to convergence (deletes no-op, the identity
+    delete treats 404 as success). The TOMBSTONE is the last durable
+    step: it is what revokes the token window (~1h access-token expiry
+    after the identity dies), and applying it earlier would cut the
+    retry path the whole ordering exists to keep. A failure after the
+    identity delete raises 500 AND fires a critical operator alarm —
+    that gap is exactly the state an operator must reconcile, never a
+    silent one.
     """
     uid = user.id
     user_email = user.email  # capture before detaching
@@ -56,6 +62,37 @@ async def delete_account(
             "has been deleted yet; please retry shortly",
         )
 
+    try:
+        _erase_local_rows(db, user, uid, user_email)
+    except Exception:
+        # The identity is gone; the local half did not complete. The
+        # user CAN still retry (row not yet tombstoned) — but if they
+        # never do, personal rows outlive their identity with no signal.
+        # Loud, always: logger.critical + Sentry (when configured).
+        logger.critical(
+            "GDPR erasure INCOMPLETE for %s (%s): Supabase identity deleted, "
+            "local cascade failed — user can retry; operator must verify "
+            "convergence if they do not",
+            uid, user_email, exc_info=True,
+        )
+        try:
+            import sentry_sdk
+
+            sentry_sdk.capture_message(
+                f"GDPR erasure incomplete: local cascade failed for {uid}"
+            )
+        except Exception:  # noqa: BLE001 — telemetry must never mask the 500
+            pass
+        raise
+    return {
+        "status": "erased",
+        "detail": "Your account and all personal data have been deleted.",
+    }
+
+
+def _erase_local_rows(db: Session, user: User, uid, user_email: str) -> None:
+    """The idempotent local half of erasure, in retry-safe order:
+    children → telemetry → commit → CV files → tombstone."""
     # Same request-scoped session the dependency used — no re-fetch
     # needed since MIG-WO2 (auth no longer runs on a second session).
     profile = get_active_profile(db, user_id=uid)
@@ -100,17 +137,8 @@ async def delete_account(
     # appears — until then, account death takes its telemetry.
     ai_usage = db.query(AIUsage).filter(AIUsage.user_id == uid).delete()
 
-    # The users row becomes a TOMBSTONE, not a DELETE: Supabase access
-    # tokens stay signature-valid up to ~1h after the identity dies, and
-    # a hard-deleted row meant one post-erasure request resurrected a
-    # ghost mirror — re-creating the Profile AND re-firing the onboarding
-    # drip at the erased address. The tombstone (redacted email,
-    # is_active=False) turns that window into 401s (get_authenticated_
-    # user) and carries no personal data: email is a non-deliverable
-    # sentinel, display_name nulled, every FK child already deleted.
-    user.email = f"erased-{uid}@deleted.invalid"
-    user.display_name = None
-    user.is_active = False
+    # Children + telemetry first, users row still intact (ACTIVE) — see
+    # the route docstring: this commit must leave a retryable state.
     db.commit()
 
     # CV file removal AFTER the commit: doing it before meant a failed
@@ -120,7 +148,8 @@ async def delete_account(
     # remote object keys (the os.path.exists version silently skipped
     # Supabase keys, leaving the CV in the bucket after "erasure").
     # Every collected path is attempted — one failure must not skip the
-    # rest of the user's PII files.
+    # rest of the user's PII files. A failure here only delays file
+    # removal — the rows are already gone and the retry re-attempts.
     from app.services.storage import get_storage
 
     deleted_files = 0
@@ -130,6 +159,21 @@ async def delete_account(
                 deleted_files += 1
         except Exception:
             logger.warning("GDPR delete: CV removal failed for %s", cv_path)
+
+    # The users row becomes a TOMBSTONE — the LAST durable step (route
+    # docstring: it revokes the token window, so it must not precede
+    # anything a retry needs to re-reach). Supabase access tokens stay
+    # signature-valid up to ~1h after the identity dies, and a
+    # hard-deleted row meant one post-erasure request resurrected a
+    # ghost mirror — re-creating the Profile AND re-firing the onboarding
+    # drip at the erased address. The tombstone (redacted email,
+    # is_active=False) turns that window into 401s (get_authenticated_
+    # user) and carries no personal data: email is a non-deliverable
+    # sentinel, display_name nulled, every FK child already deleted.
+    user.email = f"erased-{uid}@deleted.invalid"
+    user.display_name = None
+    user.is_active = False
+    db.commit()
 
     from app.core.ratelimit import clear_user
     clear_user(uid)
@@ -159,10 +203,6 @@ async def delete_account(
         ai_usage,
         deleted_files,
     )
-    return {
-        "status": "erased",
-        "detail": "Your account and all personal data have been deleted.",
-    }
 
 
 @router.get("/account/export")

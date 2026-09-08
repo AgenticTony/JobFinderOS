@@ -55,14 +55,23 @@ ISSUER = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
 CLOCK_SKEW_SECONDS = 30
 
 # JWKS cache. Keys rotate rarely; refresh when a token names a kid we
-# don't have (rotation moment) or the cache goes stale. The rotation
-# refresh is BOUNDED (_JWKS_REFRESH_COOLDOWN): an unauthenticated
-# caller can put a random kid in a token, and without the cooldown each
-# such request would drop the shared cache and issue a blocking wire
-# fetch under the global lock — a cheap availability attack on the
-# single-instance deploy (review finding 2026-09-08).
+# don't have (rotation moment) or the cache goes stale.
+#   - The rotation refresh is THROTTLED (_JWKS_REFRESH_COOLDOWN): an
+#     unauthenticated caller can put a random kid in a token, and
+#     without a throttle each such request would drop the shared cache
+#     and issue a wire fetch — hammering Supabase and the process. The
+#     throttle is deliberately SHORT (10s): it must also let a REAL
+#     Supabase key rotation through quickly, or every validly-signed
+#     token 401s until it expires — the mass-sign-out this module
+#     elsewhere works to avoid (review round 2, 2026-09-08). 10s bounds
+#     garbage hammering to ~6 fetches/min while costing a rotation at
+#     most 10s of rejections.
+#   - A failed refetch SERVES THE STALE CACHE: signing keys rotate
+#     rarely, so keys that verified every token a minute ago still
+#     verify them now — a JWKS outage must not take the API down with
+#     valid keys sitting in memory.
 _JWKS_TTL_SECONDS = 3600
-_JWKS_REFRESH_COOLDOWN_SECONDS = 300
+_JWKS_REFRESH_COOLDOWN_SECONDS = 10
 _jwks_lock = threading.Lock()
 _jwks_cache: dict = {}
 _jwks_fetched_at: float = 0.0
@@ -74,19 +83,33 @@ def fetch_jwks() -> dict:
 
     Module-level and single-point so tests can monkeypatch it with a
     fixture keypair (see conftest.py) — nothing else in the app performs
-    this fetch. Transport failures propagate to the caller (mapped to
-    503 there) — a Supabase blip must not look like bad credentials.
+    this fetch. The HTTP call runs OUTSIDE the lock (a slow endpoint
+    must not serialize every authenticated request behind one blocking
+    call), and a failed refetch falls back to the stale cache — with NO
+    cache at all the failure propagates to the caller, which maps it to
+    503: a Supabase blip must not masquerade as bad credentials.
     """
     global _jwks_cache, _jwks_fetched_at
     with _jwks_lock:
         now = time.monotonic()
         if _jwks_cache and now - _jwks_fetched_at < _JWKS_TTL_SECONDS:
             return _jwks_cache
-        url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        stale = _jwks_cache
+    url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+    try:
         resp = httpx.get(url, timeout=10)
         resp.raise_for_status()
-        _jwks_cache = resp.json()
-        _jwks_fetched_at = now
+        fresh = resp.json()
+    except Exception:
+        if stale:
+            logger.warning(
+                "JWKS refetch failed — serving the stale cached keys"
+            )
+            return stale
+        raise
+    with _jwks_lock:
+        _jwks_cache = fresh
+        _jwks_fetched_at = time.monotonic()
         return _jwks_cache
 
 

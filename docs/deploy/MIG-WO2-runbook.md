@@ -34,11 +34,20 @@
    - Site URL: `https://jobfinderos.pages.dev` (or the custom domain)
    - Redirect URLs: the Site URL, `https://jobfinderos.pages.dev/**`,
      `/reset-password` + `/sv/reset-password` (both locales!), and
-     `http://localhost:3000/**` for local dev.
-3. **Copy the publishable (anon) key.** Project Settings → API Keys →
+     `http://localhost:3000/**` for local dev. The `/**` wildcard is
+     what lets signup confirmations redirect to `/app` (the only page
+     whose tree instantiates the Supabase client and can exchange the
+     PKCE code — never narrow it to just the root).
+3. **Probe account for ops/verify_deployment.sh** (needed post-cutover,
+   step 9): in Supabase create `deploy-check@jobfinderos.dev` with a
+   freshly GENERATED password (password manager; e.g. `pwgen 24 1`).
+   NEVER the password that sat in the script's git history pre-2026-09-08
+   — it is burned as public. Export `PROBE_PASS` when running the
+   verifier; the script now refuses to run without it.
+4. **Copy the publishable (anon) key.** Project Settings → API Keys →
    the `anon public` / publishable key. NEVER the service-role key —
    it must not reach the browser bundle.
-4. **Backups.** `bash ops/backup.sh` (pg_dump) + verify the dump
+5. **Backups.** `bash ops/backup.sh` (pg_dump) + verify the dump
    (`ops/restore.sh` has the verify steps). The cutover script also
    writes its own rollback snapshot, but the pg_dump is the belt to
    that braces. This also closes the standing "restore rehearsal"
@@ -50,35 +59,36 @@ The hunts run 06:00/18:00 UTC — run this mid-window so no worker is
 mid-hunt against the user ids being remapped (the remap itself is one
 transaction, sub-second).
 
-5. **Dry-run first** (read-only, safe anytime):
+6. **Dry-run first** (read-only, safe anytime):
    ```bash
    cd backend && .venv/bin/python ../ops/mig_wo2_cutover.py --plan
    ```
    Expect 3 accounts (tonyforan007, foranmarketing, lorna_co_za) with
    their per-table counts.
-6. **The cutover** (creates Supabase identities + remaps FKs in one
+7. **The cutover** (creates Supabase identities + remaps FKs in one
    transaction, verifies counts, prints one-time temp passwords):
    ```bash
    cd backend && .venv/bin/python ../ops/mig_wo2_cutover.py --yes
    ```
    Copy the printed passwords out of the terminal WHEN YOU SEE THEM —
-   they are printed once and stored NOWHERE (the snapshot file is
-   gitignored and deliberately contains no passwords). Post-check:
-   `--verify`.
-7. **Deploy backend** — merge the branch, Render deploys it. Remove
+   they are printed once and stored NOWHERE. The gitignored snapshot
+   file carries no plaintext passwords but DOES hold the pre-migration
+   password hashes (rollback material) — treat it as a secret and
+   destroy it after the cutover window. Post-check: `--verify`.
+8. **Deploy backend** — merge the branch, Render deploys it. Remove
    stale env vars in the Render dashboard if the blueprint sync leaves
    them (AUTH_SECRET, TRUST_PROXY_HEADERS — the blueprint no longer
    declares them; if Settings still shows them from before, delete —
    extra inputs are boot-fatal).
    NOTE: render.yaml now declares `SUPABASE_URL` for the worker too —
    confirm the prompt for it on sync.
-8. **Deploy frontend**:
+9. **Deploy frontend**:
    ```bash
    export NEXT_PUBLIC_SUPABASE_URL=https://jsibogzklhswpmozcyhn.supabase.co
    export NEXT_PUBLIC_SUPABASE_ANON_KEY=<the publishable key>
    bash ops/deploy_frontend.sh
    ```
-9. **Hand over passwords**: send each user their temp password; they
+10. **Hand over passwords**: send each user their temp password; they
    sign in and (advisedly) change it via Forgot password — which also
    exercises the new flow end-to-end.
 

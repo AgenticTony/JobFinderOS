@@ -11,10 +11,11 @@ What this does (one run, two phases, both gated on --yes):
   PHASE 2 (Postgres, ONE transaction): insert each users row under its
   new Supabase UUID (copying columns; hashed_password becomes the
   sentinel — Supabase owns the real secret), repoint the six user_id
-  tables (profiles, match_results, application_drafts, applications,
-  feedback, ai_usage — the last two carry no FK, they are remapped for
-  accounting continuity), delete the old users rows. Commit; then
-  re-verify per-table row counts against the pre-write snapshot.
+  tables, delete the old users rows. Commit; then re-verify per-table
+  row counts against the pre-write snapshot. FIVE of the six carry real
+  FKs to users.id (profiles, match_results, application_drafts,
+  applications, feedback — all NOT NULL); only ai_usage is FK-free,
+  remapped purely for cost-accounting continuity.
 
 Why insert-new/repoint/delete-old and not UPDATE users.id: the FKs are
 plain and NOT DEFERRABLE (account.py's erasure ordering depends on it),
@@ -206,6 +207,9 @@ def cutover(conn, users, args) -> None:
     # must never persist anywhere; review finding 2026-09-08) ----
     old_ids = [u["old_id"] for u in users]
     snap = {
+        "_handling": ("SECRET (rollback material): contains pre-migration "
+                      "password hashes. Never commit; destroy after the "
+                      "cutover window. No plaintext passwords."),
         "created_at": None,
         "mapping": {},           # old_id -> new_id
         "before": snapshot_counts(conn, old_ids),
@@ -224,7 +228,9 @@ def cutover(conn, users, args) -> None:
             temp_passwords[u["email"]] = pw
             created.append(new_id)
             print(f"  {u['email']} -> supabase id {new_id}")
-    except SystemExit:
+    except BaseException:  # SystemExit (die) AND httpx/KeyError shape
+        # failures — review round 2: catching only SystemExit orphaned
+        # identities on transport errors before the snapshot was written
         if not args.keep_supabase:
             for nid in created:
                 supabase_delete_user(nid)
@@ -232,8 +238,10 @@ def cutover(conn, users, args) -> None:
 
     snap["created_at"] = utc_now().isoformat() + "Z"
     SNAPSHOT_PATH.write_text(json.dumps(snap, indent=2))
-    print(f"snapshot written: {SNAPSHOT_PATH} (KEEP IT — it is the rollback map; "
-          "contains NO passwords)")
+    print(f"snapshot written: {SNAPSHOT_PATH}")
+    print("  HANDLE AS A SECRET: no PLAINTEXT passwords, but it carries the "
+          "pre-migration password HASHES (fastapi-users rollback material) — "
+          "destroy it once the cutover window closes.")
 
     # ---- phase 2: the one-transaction remap ----
     # engine.begin() opens a FRESH connection whose transaction starts at

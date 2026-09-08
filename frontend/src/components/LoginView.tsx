@@ -76,6 +76,14 @@ export default function LoginView({ locale }: { locale: Locale }) {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            // The confirmation link must land on /app — the only page
+            // whose tree instantiates the Supabase client, so the only
+            // place the PKCE code can be exchanged. Without this the
+            // link falls back to the Site URL (the marketing root) and
+            // the code dies unexchanged (review round 2, 2026-09-08).
+            emailRedirectTo: `${window.location.origin}/app`,
+          },
         });
         if (signUpError) throw signUpError;
         track('signup_completed', { locale });
