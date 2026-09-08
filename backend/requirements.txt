@@ -18,7 +18,7 @@ fpdf2>=2.7.9
 PyJWT>=2.13.0
 cryptography>=50.0.1
 alembic>=1.19.1
-psycopg[binary]>=3.3.4
+psycopg[binary]>=3.3.5
 sentry-sdk>=2.0
 
 # Composio integrations layer (Settings page; official SDK per docs.composio.dev)
