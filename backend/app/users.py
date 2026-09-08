@@ -183,6 +183,12 @@ def get_authenticated_user(
             hashed_password="supabase-auth",  # sentinel: column is NOT NULL
         )
         db.add(user)
+        # FLUSH BEFORE first-sight adds the Profile: the two models share
+        # no declared relationship, so SQLAlchemy's unit of work is free
+        # to flush them in any order — and Profile-before-User violates
+        # the FK on Postgres (SQLite never enforces it, which is exactly
+        # how the suite ran green while CI's Postgres leg caught this).
+        db.flush()
         _on_first_sight(user, db, request)
         # get_db never commits (routes own their commits); a dependency
         # that writes must commit its own work or the mirror row dies

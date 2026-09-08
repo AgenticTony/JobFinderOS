@@ -339,7 +339,7 @@ jobs:
           # which it refuses to run without). Proves the wiring, ships
           # nothing.
           NEXT_PUBLIC_SUPABASE_URL: https://jobfinderos-ci.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-build-only-not-a-secret
         run: npm run build
 
       - name: Export artifact check
