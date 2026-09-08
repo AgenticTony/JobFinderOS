@@ -1235,6 +1235,100 @@ class TestSupabaseTokenVerification:
                            lifetime_seconds=-120)
         assert self._hit(client, token).status_code == 401
 
+    def test_anonymous_signin_token_is_401(self, client):
+        """Supabase anonymous sign-in is off today, but it is one
+        dashboard toggle away — an is_anonymous token must never mint a
+        budgeted mirror account (review finding 2026-09-08)."""
+        from tests.auth_helpers import mint_token
+
+        token = mint_token(uuid.uuid4(), "anon@test.example", is_anonymous=True)
+        assert self._hit(client, token).status_code == 401
+
+    def test_wrong_role_claim_is_401(self, client):
+        from tests.auth_helpers import mint_token
+
+        token = mint_token(uuid.uuid4(), "role@test.example", role="anon")
+        assert self._hit(client, token).status_code == 401
+
+    def test_jwks_outage_is_503_not_401(self, client, monkeypatch):
+        """A Supabase blip must not 401 — the frontend's interceptor
+        turns 401 into a global sign-out, so an auth-side outage would
+        sign out every active user (review finding 2026-09-08)."""
+        from app import users as app_users
+        from tests import auth_helpers
+
+        auth_helpers._ensure_fixture()
+
+        def down():
+            raise __import__("httpx").ConnectError("supabase unreachable")
+
+        monkeypatch.setattr(app_users, "fetch_jwks", down)
+        app_users._invalidate_jwks_cache()
+        app_users._reset_jwks_refresh_cooldown_for_tests()
+        from tests.auth_helpers import mint_token
+
+        r = self._hit(client, mint_token(uuid.uuid4(), "blip@test.example"))
+        assert r.status_code == 503, (
+            f"JWKS outage surfaced as {r.status_code} — must be 503 so "
+            "clients retry instead of dropping their session"
+        )
+
+    def test_unknown_kid_refresh_is_cooldown_bounded(self, client, monkeypatch):
+        """Garbage-kid tokens are free to send; the rotation refresh
+        must not give them a wire fetch each time (availability attack
+        on the single-instance deploy — review finding 2026-09-08).
+        Counts WIRE fetches (what an attacker costs), not invocations:
+        5 garbage tokens may trigger exactly the first request's two
+        fetches (prime + rotation attempt) — never ten."""
+        import time as _time
+
+        import jwt as pyjwt
+
+        from app import users as app_users
+        from tests import auth_helpers
+
+        fx = auth_helpers._ensure_fixture()
+        wire = {"n": 0}
+
+        def stateful_fetch():
+            """Mimics the real fetch faithfully: serves the cache when
+            fresh, counts a wire call only when it actually fetches."""
+            now = _time.monotonic()
+            with app_users._jwks_lock:
+                if (
+                    app_users._jwks_cache
+                    and now - app_users._jwks_fetched_at
+                    < app_users._JWKS_TTL_SECONDS
+                ):
+                    return app_users._jwks_cache
+            wire["n"] += 1
+            with app_users._jwks_lock:
+                app_users._jwks_cache = {"keys": [fx["jwk"]]}
+                app_users._jwks_fetched_at = now
+            return app_users._jwks_cache
+
+        monkeypatch.setattr(app_users, "fetch_jwks", stateful_fetch)
+        app_users._invalidate_jwks_cache()
+        app_users._reset_jwks_refresh_cooldown_for_tests()
+
+        now = int(_time.time())
+
+        def garbage_kid_token():
+            return pyjwt.encode(
+                {"sub": str(uuid.uuid4()), "aud": "authenticated",
+                 "iss": app_users.ISSUER, "role": "authenticated",
+                 "iat": now, "exp": now + 3600},
+                fx["private"], algorithm="ES256",
+                headers={"kid": "garbage-kid"},
+            )
+
+        for _ in range(5):
+            assert self._hit(client, garbage_kid_token()).status_code == 401
+        assert wire["n"] == 2, (
+            f"{wire['n']} wire fetches for 5 garbage-kid tokens — the "
+            "cooldown is not bounding the rotation refresh (naive: 10)"
+        )
+
     def test_unknown_kid_refreshes_jwks_then_authenticates(self, client, monkeypatch):
         """Rotation: a token whose kid is not in the (stale) cache forces
         ONE refresh; after the refresh serves the new key, the token
@@ -1264,8 +1358,11 @@ class TestSupabaseTokenVerification:
             return {"keys": [fx["jwk"], rotated_jwk]}  # post-rotation
 
         monkeypatch.setattr(app_users, "fetch_jwks", rotating_fetch)
-        # Bust the module-level cache so the first call hits rotating_fetch
+        # Bust the module-level cache so the first call hits rotating_fetch;
+        # reset the refresh cooldown so the unknown-kid path may itself
+        # trigger the second fetch (what this test pins)
         app_users._invalidate_jwks_cache()
+        app_users._reset_jwks_refresh_cooldown_for_tests()
 
         now = int(__import__("time").time())
         token = pyjwt.encode(

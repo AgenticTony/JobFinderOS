@@ -1,11 +1,14 @@
 """Supabase Auth admin API — the service-key side channel.
 
 The browser talks to Supabase directly; this module is the backend's
-admin path for the two operations that need the service role key:
+admin path for the one operation that needs the service role key:
 
   - delete_user: GDPR erasure of the identity (email + password hash
     live in Supabase, so local cascade alone is incomplete erasure).
-  - sign_out_all: revoke every session before deletion.
+    Session revocation comes WITH the hard delete (deleting a user
+    removes their auth.sessions rows) — there is no separate admin
+    sign-out-by-user-id route; the earlier call to one was a silent
+    404 no-op (review finding 2026-09-08).
 
 Direct REST via httpx (same contract as onboarding_service): the admin
 surface is stable, and it keeps one HTTP style for these side channels.
@@ -35,9 +38,8 @@ def _headers() -> dict:
 def delete_user(user_id: str) -> bool:
     """Hard-delete the Supabase auth user (the admin API default —
     shouldSoftDelete=false — is exactly what GDPR erasure wants; verified
-    in MIGRATION.md's doc check). Signs out first so refresh tokens die
-    with the sessions; the sign-out endpoint is attempted best-effort
-    (its absence on a project must not block the delete).
+    in MIGRATION.md's doc check). Deleting the user removes their
+    sessions with it.
     """
     if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
         logger.warning(
@@ -45,14 +47,6 @@ def delete_user(user_id: str) -> bool:
             "delete skipped for %s", user_id,
         )
         return False
-    try:
-        httpx.post(
-            f"{AUTH_API}/admin/users/{user_id}/sign_out",
-            headers=_headers(),
-            timeout=10,
-        )
-    except Exception:  # noqa: BLE001 — best-effort; delete still revokes
-        logger.warning("supabase_admin: sign_out failed for %s", user_id)
     try:
         resp = httpx.delete(
             f"{AUTH_API}/admin/users/{user_id}",

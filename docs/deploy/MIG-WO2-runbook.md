@@ -61,8 +61,10 @@ transaction, sub-second).
    ```bash
    cd backend && .venv/bin/python ../ops/mig_wo2_cutover.py --yes
    ```
-   Copy the printed passwords somewhere safe — they are NOT stored.
-   Post-check: `--verify`.
+   Copy the printed passwords out of the terminal WHEN YOU SEE THEM —
+   they are printed once and stored NOWHERE (the snapshot file is
+   gitignored and deliberately contains no passwords). Post-check:
+   `--verify`.
 7. **Deploy backend** — merge the branch, Render deploys it. Remove
    stale env vars in the Render dashboard if the blueprint sync leaves
    them (AUTH_SECRET, TRUST_PROXY_HEADERS — the blueprint no longer

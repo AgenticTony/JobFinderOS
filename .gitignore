@@ -38,3 +38,4 @@ agents/
 .claude/
 skills-lock.json
 .gbrain-source
+ops/mig_wo2_snapshot.json

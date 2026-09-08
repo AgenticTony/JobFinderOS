@@ -127,7 +127,12 @@ def backup_users_rows(conn, old_ids) -> dict:
             "is_verified": bool(r["is_verified"]),
             "display_name": r["display_name"],
             "token_version": int(r["token_version"] or 0),
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            # datetime on Postgres, str on SQLite — accept both
+            "created_at": (
+                r["created_at"].isoformat()
+                if r["created_at"] and hasattr(r["created_at"], "isoformat")
+                else r["created_at"]
+            ),
         }
     return out
 
@@ -161,16 +166,52 @@ def supabase_delete_user(user_id: str) -> None:
         print(f"  WARN: supabase delete of {user_id} -> {resp.status_code}", file=sys.stderr)
 
 
+def _relocate_user(wconn, *, from_id: str, to_id: str, insert: dict) -> int:
+    """Move ONE account from from_id to to_id inside the caller's open
+    write transaction. Returns the number of child rows moved.
+
+    EMAIL PARKING (review 2026-09-08, reproduced): users.email is
+    UNIQUE (ix_users_email) and the old row still owns the address when
+    the new row is inserted — insert-first deletes nothing, delete-first
+    orphans FK children. The old row's email is parked on a per-id
+    sentinel first, which frees the UNIQUE slot for the new row without
+    touching the children.
+    """
+    wconn.execute(
+        text("UPDATE users SET email = :parked WHERE id = :o"),
+        {"parked": f"migrating-{from_id}@migrating.invalid", "o": from_id},
+    )
+    wconn.execute(
+        text("INSERT INTO users (id, email, hashed_password, is_active, "
+             "is_superuser, is_verified, display_name, token_version, "
+             "created_at) VALUES (:id, :email, :hashed_password, "
+             ":is_active, :is_superuser, :is_verified, :display_name, "
+             ":token_version, :created_at)"),
+        insert,
+    )
+    moved = 0
+    for table in USER_TABLES:
+        n = wconn.execute(
+            text(f"UPDATE {table} SET user_id = :n WHERE user_id = :o"),
+            {"n": to_id, "o": from_id},
+        ).rowcount
+        moved += int(n)
+        print(f"  {table}: {n} row(s) {from_id[:8]}… -> {to_id[:8]}…")
+    wconn.execute(text("DELETE FROM users WHERE id = :o"), {"o": from_id})
+    return moved
+
+
 def cutover(conn, users, args) -> None:
-    # ---- pre-write snapshot ----
+    # ---- pre-write snapshot (NO passwords — they are printed once and
+    # must never persist anywhere; review finding 2026-09-08) ----
     old_ids = [u["old_id"] for u in users]
     snap = {
         "created_at": None,
         "mapping": {},           # old_id -> new_id
-        "passwords": {},         # email -> generated password (OWNER copies these out)
         "before": snapshot_counts(conn, old_ids),
         "users_backup": backup_users_rows(conn, old_ids),  # for --reverse
     }
+    temp_passwords: dict[str, str] = {}  # email -> pw, printed at the end ONLY
 
     # ---- phase 1: create Supabase identities ----
     created: list[str] = []
@@ -180,7 +221,7 @@ def cutover(conn, users, args) -> None:
             pw = secrets.token_urlsafe(18)
             new_id = supabase_create_user(u["email"], pw)
             snap["mapping"][u["old_id"]] = new_id
-            snap["passwords"][u["email"]] = pw
+            temp_passwords[u["email"]] = pw
             created.append(new_id)
             print(f"  {u['email']} -> supabase id {new_id}")
     except SystemExit:
@@ -191,36 +232,38 @@ def cutover(conn, users, args) -> None:
 
     snap["created_at"] = utc_now().isoformat() + "Z"
     SNAPSHOT_PATH.write_text(json.dumps(snap, indent=2))
-    print(f"snapshot written: {SNAPSHOT_PATH} (KEEP IT — it is the rollback map)")
+    print(f"snapshot written: {SNAPSHOT_PATH} (KEEP IT — it is the rollback map; "
+          "contains NO passwords)")
 
     # ---- phase 2: the one-transaction remap ----
+    # engine.begin() opens a FRESH connection whose transaction starts at
+    # its first statement — the read-phase SELECTs on `conn` autobegun a
+    # transaction there long ago, and conn.begin() on an autobegun
+    # connection raises InvalidRequestError (review finding, reproduced
+    # on SQLAlchemy 2.0.52).
     print("\nphase 2: remapping local rows (single transaction)…")
-    trans = conn.begin()
     try:
-        for old_id, new_id in snap["mapping"].items():
-            cols = conn.execute(
-                text("SELECT email, is_active, is_superuser, display_name, "
-                     "created_at FROM users WHERE id = :o"), {"o": old_id}).mappings().one()
-            conn.execute(
-                text("INSERT INTO users (id, email, hashed_password, is_active, "
-                     "is_superuser, is_verified, display_name, token_version, "
-                     "created_at) VALUES (:id, :email, 'supabase-auth', "
-                     ":is_active, :is_superuser, true, :display_name, 0, "
-                     ":created_at)"),
-                {"id": new_id, "email": cols["email"],
-                 "is_active": cols["is_active"], "is_superuser": cols["is_superuser"],
-                 "display_name": cols["display_name"], "created_at": cols["created_at"]})
-            for table in USER_TABLES:
-                n = conn.execute(
-                    text(f"UPDATE {table} SET user_id = :n WHERE user_id = :o"),
-                    {"n": new_id, "o": old_id}).rowcount
-                print(f"  {table}: {n} row(s) {old_id[:8]}… -> {new_id[:8]}…")
-            conn.execute(text("DELETE FROM users WHERE id = :o"), {"o": old_id})
-        trans.commit()
+        with engine.begin() as wconn:
+            for old_id, new_id in snap["mapping"].items():
+                cols = wconn.execute(
+                    text("SELECT email, is_active, is_superuser, display_name, "
+                         "created_at FROM users WHERE id = :o"),
+                    {"o": old_id},
+                ).mappings().one()
+                _relocate_user(
+                    wconn, from_id=old_id, to_id=new_id,
+                    insert={"id": new_id, "email": cols["email"],
+                            "hashed_password": "supabase-auth",
+                            "is_active": cols["is_active"],
+                            "is_superuser": cols["is_superuser"],
+                            "is_verified": True,
+                            "display_name": cols["display_name"],
+                            "token_version": 0,
+                            "created_at": cols["created_at"]},
+                )
     except Exception:
-        trans.rollback()
-        print("transaction FAILED — rolled back; cleaning up Supabase users…",
-              file=sys.stderr)
+        print("transaction FAILED — rolled back (engine.begin context); "
+              "cleaning up Supabase users…", file=sys.stderr)
         if not args.keep_supabase:
             for nid in created:
                 supabase_delete_user(nid)
@@ -238,9 +281,9 @@ def cutover(conn, users, args) -> None:
                 print(f"  MISMATCH {table} {old_id[:8]}…: before={b} after={a}")
                 ok = False
     print("row counts verified OK" if ok else "MISMATCHES FOUND — inspect manually")
-    print("\npasswords (copy to the users now; they change them via "
+    print("\ntemp passwords — PRINTED ONCE, stored NOWHERE (change them via "
           "forgot-password on first login):")
-    for email, pw in snap["passwords"].items():
+    for email, pw in temp_passwords.items():
         print(f"  {email}: {pw}")
     print("\nDONE. Next: deploy backend+frontend, set the Pages env vars, "
           "and send the users their temporary passwords.")
@@ -266,7 +309,9 @@ def verify(conn) -> None:
 
 def reverse(conn) -> None:
     """Restore the OLD ids (and the original users rows) from the
-    snapshot — a faithful undo of the whole remap."""
+    snapshot — a faithful undo of the whole remap. Uses the same
+    email-parking relocate + fresh-connection transaction as the
+    forward cutover."""
     if not SNAPSHOT_PATH.exists():
         die(f"no snapshot at {SNAPSHOT_PATH} — cannot reverse")
     snap = json.loads(SNAPSHOT_PATH.read_text())
@@ -274,25 +319,26 @@ def reverse(conn) -> None:
     if not backup:
         die("snapshot predates users_backup — cannot restore original rows; "
             "manual rollback from the pre-cutover pg_dump is required")
-    trans = conn.begin()
+    # Fresh connection (the read-phase SELECTs autobegun `conn`'s
+    # transaction — conn.begin() would raise InvalidRequestError), same
+    # email-parking relocate as the forward cutover (the post-cutover
+    # row holds the UNIQUE email until it is deleted).
     try:
-        for old_id, new_id in snap["mapping"].items():
-            row = backup[old_id]  # the ORIGINAL columns, hash included
-            conn.execute(
-                text("INSERT INTO users (id, email, hashed_password, is_active, "
-                     "is_superuser, is_verified, display_name, token_version, "
-                     "created_at) VALUES (:id, :email, :hashed_password, "
-                     ":is_active, :is_superuser, :is_verified, :display_name, "
-                     ":token_version, :created_at)"),
-                {**row, "id": old_id})
-            for table in USER_TABLES:
-                conn.execute(
-                    text(f"UPDATE {table} SET user_id = :o WHERE user_id = :n"),
-                    {"o": old_id, "n": new_id})
-            conn.execute(text("DELETE FROM users WHERE id = :n"), {"n": new_id})
-        trans.commit()
+        with engine.begin() as wconn:
+            for old_id, new_id in snap["mapping"].items():
+                row = backup[old_id]  # the ORIGINAL columns, hash included
+                _relocate_user(
+                    wconn, from_id=new_id, to_id=old_id,
+                    insert={"id": old_id, "email": row["email"],
+                            "hashed_password": row["hashed_password"],
+                            "is_active": row["is_active"],
+                            "is_superuser": row["is_superuser"],
+                            "is_verified": row["is_verified"],
+                            "display_name": row["display_name"],
+                            "token_version": row["token_version"],
+                            "created_at": row["created_at"]},
+                )
     except Exception:
-        trans.rollback()
         raise
     print("reversed to pre-cutover ids (original rows restored). NOTE: the "
           "Supabase identities still exist — delete them in the dashboard "

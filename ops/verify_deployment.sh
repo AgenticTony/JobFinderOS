@@ -86,11 +86,14 @@ else
     fi
 fi
 if [ -n "$token" ]; then
-    # retry wrapper — Render's free edge intermittently 404s while waking
+    # retry wrapper — Render's free edge intermittently 404s while waking.
+    # Body and status split with sed '$d' (portable): BSD head rejects
+    # `head -n -1`, which would empty $me on macOS and fail the check on
+    # a healthy deploy (review finding 2026-09-08).
     me=""; code="000"
     for attempt in 1 2 3; do
         me=$(curl -s -m 60 -w "\n%{http_code}" -H "Authorization: Bearer $token" "$API/api/v1/account/export" || true)
-        code=$(echo "$me" | tail -1); me=$(echo "$me" | head -n -1)
+        code=$(echo "$me" | tail -1); me=$(echo "$me" | sed '$d')
         [ "$code" = "200" ] && break
         echo "  (api wake attempt $attempt — code=$code, retrying)"
         sleep 8

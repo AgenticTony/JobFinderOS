@@ -38,6 +38,7 @@ from typing import Optional
 import httpx
 import jwt as pyjwt
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -54,11 +55,18 @@ ISSUER = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
 CLOCK_SKEW_SECONDS = 30
 
 # JWKS cache. Keys rotate rarely; refresh when a token names a kid we
-# don't have (rotation moment) or the cache goes stale.
+# don't have (rotation moment) or the cache goes stale. The rotation
+# refresh is BOUNDED (_JWKS_REFRESH_COOLDOWN): an unauthenticated
+# caller can put a random kid in a token, and without the cooldown each
+# such request would drop the shared cache and issue a blocking wire
+# fetch under the global lock — a cheap availability attack on the
+# single-instance deploy (review finding 2026-09-08).
 _JWKS_TTL_SECONDS = 3600
+_JWKS_REFRESH_COOLDOWN_SECONDS = 300
 _jwks_lock = threading.Lock()
 _jwks_cache: dict = {}
 _jwks_fetched_at: float = 0.0
+_jwks_refresh_attempt_at: float = 0.0
 
 
 def fetch_jwks() -> dict:
@@ -66,7 +74,8 @@ def fetch_jwks() -> dict:
 
     Module-level and single-point so tests can monkeypatch it with a
     fixture keypair (see conftest.py) — nothing else in the app performs
-    this fetch.
+    this fetch. Transport failures propagate to the caller (mapped to
+    503 there) — a Supabase blip must not look like bad credentials.
     """
     global _jwks_cache, _jwks_fetched_at
     with _jwks_lock:
@@ -82,19 +91,30 @@ def fetch_jwks() -> dict:
 
 
 def _invalidate_jwks_cache() -> None:
-    """Test hook: drop the cache so the next fetch_jwks() hits the wire
-    (or the monkeypatch)."""
-    global _jwks_cache, _jwks_fetched_at
+    """Drop the cache for a rotation refresh — with a cooldown, so
+    garbage-kid tokens cannot make the process hammer the wire."""
+    global _jwks_cache, _jwks_refresh_attempt_at
     with _jwks_lock:
+        now = time.monotonic()
+        if now - _jwks_refresh_attempt_at < _JWKS_REFRESH_COOLDOWN_SECONDS:
+            return  # still cooled: keep serving the cached keys
+        _jwks_refresh_attempt_at = now
         _jwks_cache = {}
-        _jwks_fetched_at = 0.0
+
+
+def _reset_jwks_refresh_cooldown_for_tests() -> None:
+    """Tests only: the cooldown would make consecutive rotation tests
+    sleep 5 minutes otherwise."""
+    global _jwks_refresh_attempt_at
+    with _jwks_lock:
+        _jwks_refresh_attempt_at = 0.0
 
 
 def _key_for_kid(token: str) -> tuple:
     """Return (verification_key, algorithm) for the token's kid.
 
-    Refreshes the JWKS once when a token carries an unknown kid — the
-    key-rotation moment — before giving up.
+    Refreshes the JWKS (cooldown-bounded) when a token carries an
+    unknown kid — the key-rotation moment — before giving up.
     """
     header = pyjwt.get_unverified_header(token)
     kid = header.get("kid")
@@ -119,8 +139,15 @@ def verify_supabase_token(token: str) -> dict:
     """Verify a Supabase access token; return its claims.
 
     Fail-closed: signature (JWKS), issuer, audience and expiry must all
-    check out. Any failure is a 401 — the frontend treats 401 as "clear
-    the session, go to login" (unchanged contract from the JWT era).
+    check out, and the token must be a REAL user session — anonymous
+    sign-in tokens (is_anonymous) are rejected even though anonymous
+    sign-in is off today: it is one dashboard toggle away from minting
+    budgeted accounts otherwise (review finding 2026-09-08).
+
+    Failure split: bad token → 401 (frontend signs the session out);
+    the JWKS fetch itself failing → 503 (auth temporarily unavailable —
+    a Supabase blip must not mass-sign-out every active user through
+    the frontend's 401 interceptor).
     """
     try:
         key, alg = _key_for_kid(token)
@@ -136,6 +163,12 @@ def verify_supabase_token(token: str) -> dict:
         )
     except HTTPException:
         raise
+    except httpx.HTTPError as exc:  # transport/HTTP failure reaching the JWKS
+        logger.warning("JWKS fetch failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is temporarily unavailable — try again shortly",
+        ) from exc
     except Exception as exc:  # PyJWTError, KeyError, ValueError — all 401
         logger.info("Rejected auth token: %s", type(exc).__name__)
         raise HTTPException(
@@ -143,6 +176,21 @@ def verify_supabase_token(token: str) -> dict:
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+    if claims.get("is_anonymous"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    role = claims.get("role")
+    if role is not None and role != AUDIENCE:
+        # role is absent on some token shapes; when present it must be
+        # the authenticated audience, not anon/service roles.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return claims
 
 
@@ -182,20 +230,44 @@ def get_authenticated_user(
             email=str(claims.get("email") or f"{user_id}@unknown.invalid"),
             hashed_password="supabase-auth",  # sentinel: column is NOT NULL
         )
-        db.add(user)
-        # FLUSH BEFORE first-sight adds the Profile: the two models share
-        # no declared relationship, so SQLAlchemy's unit of work is free
-        # to flush them in any order — and Profile-before-User violates
-        # the FK on Postgres (SQLite never enforces it, which is exactly
-        # how the suite ran green while CI's Postgres leg caught this).
-        db.flush()
-        _on_first_sight(user, db, request)
-        # get_db never commits (routes own their commits); a dependency
-        # that writes must commit its own work or the mirror row dies
-        # with the session — and the NEXT request re-inserts into a
-        # unique-constraint collision.
-        db.commit()
-        logger.info("Mirror row created for Supabase user %s", user_id)
+        # RACE GUARD (review finding 2026-09-08): a new account's first
+        # /app load fires three concurrent authenticated requests, each
+        # in its own session, all seeing "no mirror row" and all
+        # INSERTing the same id. Savepoint + IntegrityError re-select:
+        # exactly one request wins and runs first-sight; the losers
+        # roll back to the savepoint and adopt the winner's row — no
+        # 500s (which arrive CORS-less and read as opaque network
+        # errors), no duplicate onboarding emails.
+        try:
+            db.begin_nested()
+            db.add(user)
+            # FLUSH inside the savepoint: also pins INSERT order before
+            # the Profile is added (Profile-before-User violates the FK
+            # on Postgres; SQLite never enforces it).
+            db.flush()
+            _ensure_profile(user, db)
+            db.commit()
+        except IntegrityError:
+            db.rollback()  # rolls back to (and releases) the savepoint
+            user = db.get(User, user_id)
+            if user is None:
+                # the collision was NOT our primary key — treat as 401
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication token",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            logger.info(
+                "Mirror race lost for %s — adopting the winner's row", user_id
+            )
+        else:
+            # AFTER commit, best-effort: firing the drip pre-commit meant
+            # a race loser still sent the email (the duplicate-email half
+            # of the finding). Post-commit, only the request that actually
+            # created the row gets here; a crash here costs one email,
+            # never a duplicate or a failed request.
+            logger.info("Mirror row created for Supabase user %s", user_id)
+            _fire_onboarding_drip(user, request)
     if not user.is_active:
         # Tombstone (GDPR erasure): the account is dead. Supabase's
         # access tokens stay signature-valid up to ~1h after the
@@ -209,20 +281,21 @@ def get_authenticated_user(
     return user
 
 
-def _on_first_sight(user: User, db: Session, request: Request) -> None:
-    """Registration side-effects, moved from on_after_register.
-
-    Every account gets its Profile row (the per-user world hangs off
-    this link), and the beta onboarding drip fires best-effort
-    (Resend contact + user.created event; language picked by the
-    browser Accept-Language — same contract as the fastapi-users hook).
-    Runs uncommitted inside the caller's transaction; get_authenticated_
-    user commits the mirror + profile together.
-    """
+def _ensure_profile(user: User, db: Session) -> None:
+    """The transactional half of first sight: the Profile row every
+    per-user table hangs off. Runs inside the caller's savepoint — a
+    race loser rolls it back with the mirror insert."""
     from app.models import Profile as ProfileModel
 
     if not db.query(ProfileModel).filter(ProfileModel.user_id == user.id).first():
         db.add(ProfileModel(user_id=user.id, is_active=1))
+
+
+def _fire_onboarding_drip(user: User, request: Request) -> None:
+    """The post-commit half: Resend contact + user.created event
+    (language picked by the browser Accept-Language — the same contract
+    the fastapi-users on_after_register hook had). Best-effort by
+    design: never fails the request it rides on."""
     try:
         from app.services import onboarding_service
 

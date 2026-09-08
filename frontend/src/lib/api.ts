@@ -44,7 +44,12 @@ import { getSessionToken, supabase } from '@/lib/supabase';
 export { getSessionToken };
 
 export async function logout(): Promise<void> {
-  await supabase.auth.signOut();
+  // scope: 'local' — only THIS browser's session. The SDK's default is
+  // 'global', which kills the user's session on every device: sidebar
+  // Sign out must not log their phone out, and a single transient 401
+  // (e.g. a backend-side JWKS blip) must not sign them out everywhere
+  // (review finding 2026-09-08).
+  await supabase.auth.signOut({ scope: 'local' });
   if (typeof window !== 'undefined') window.location.href = '/login';
 }
 

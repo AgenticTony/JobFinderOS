@@ -184,7 +184,8 @@ const en = {
     busy: 'Saving…',
     done: 'Password updated. Everything else stays signed out.',
     toConsole: 'Go to the console',
-    errLink: 'This reset link is invalid or has expired.',
+    errLink:
+      'This link is invalid, expired — or was opened on a different device than the one you requested it from. Open it on that device, or request a new link here.',
     requestNew: 'Request a new reset link',
     errMismatch: 'The two passwords do not match',
     errShort: 'Password must be at least 8 characters',
@@ -373,7 +374,8 @@ const sv: Dict = {
     busy: 'Sparar…',
     done: 'Lösenordet är uppdaterat. Allt annat är fortfarande utloggat.',
     toConsole: 'Till konsolen',
-    errLink: 'Den här länken är ogiltig eller har gått ut.',
+    errLink:
+      'Länken är ogiltig, har gått ut — eller öppnades på en annan enhet än den du begärde den från. Öppna den på den enheten, eller begär en ny länk här.',
     requestNew: 'Be om en ny återställningslänk',
     errMismatch: 'Lösenorden stämmer inte överens',
     errShort: 'Lösenordet måste vara minst 8 tecken',
