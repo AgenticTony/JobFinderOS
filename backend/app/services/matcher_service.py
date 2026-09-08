@@ -437,8 +437,30 @@ def _run_matching_inner(
 
 def _apply_cheap_gates(db, user_id, unmatched, service, languages):
     """The pre-AI filters: language, PIPE-16 scope, cross-board dedupe,
-    fuzzy agency/direct dedupe. Pure trimming + per-user dismissals —
-    no evaluation slots spent here."""
+    fuzzy agency/direct dedupe, WO-18 all-history twin collapse. Pure
+    trimming + per-user dismissals — no evaluation slots spent here."""
+
+    # (WO-18) Snapshot the user's matched postings BEFORE any gate in
+    # this chain writes dismissal rows: a fresh dismissal row must never
+    # block the better copy it just lost to (the twin pass below reads
+    # this snapshot, not the live table). was_undecided is captured at
+    # snapshot time for the same reason — later gates may retire a row
+    # mid-run, and the twin pass must judge the row as the run found it.
+    from app.core.dedupe import title_bucket
+
+    twin_rows = (
+        db.query(JobPosting, MatchResult)
+        .join(MatchResult, MatchResult.job_id == JobPosting.id)
+        .filter(MatchResult.user_id == user_id)
+        .all()
+    )
+    by_title: dict = {}
+    for stored_job, stored_match in twin_rows:
+        bucket = title_bucket(stored_job.title)
+        if bucket:
+            was_undecided = (stored_match.decision is None
+                             and stored_match.dismissed_reason is None)
+            by_title.setdefault(bucket, []).append((stored_job, stored_match, was_undecided))
 
     # Language gate on the backlog: previously-stored jobs written in a
     # language the user doesn't speak never consume matching budget
@@ -513,17 +535,83 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages):
     # Fuzzy second gate (the Pågen incident): the same job as an agency
     # ad ('... till Pågen' via Cabeza) AND a direct ad (PÅGEN AKTIEBOLAG)
     # differs in every exact component. High-precision pair rule from
-    # app.core.dedupe.likely_same_job — same municipality + titles
-    # differing only by noise tokens (near-identical cores; a one-word
-    # role difference like Engineer/Scientist never collapses —
-    # DEDUPE-FP) + an employer link + no seniority split. The AGENCY
-    # copy is the one dismissed.
+    # app.core.dedupe.likely_same_job — titles differing only by noise
+    # tokens (near-identical cores; a one-word role difference like
+    # Engineer/Scientist never collapses — DEDUPE-FP) + an employer
+    # link + no seniority split. WO-18 also routes location-field
+    # failures here (a copy with no location, or one that disagrees
+    # with the original's — see likely_same_job rule 1). The survivor
+    # of a collapse is chosen by _collapse_key (WO-18 rule 3).
     fuzzy_duped = _dismiss_fuzzy_duplicates(db, user_id, unmatched, service.model)
     if fuzzy_duped:
         db.commit()
-        logger.info("Fuzzy dedupe gate: dismissed %d agency/direct re-posts",
+        logger.info("Fuzzy dedupe gate: dismissed %d duplicate re-posts",
                     len(fuzzy_duped))
-    return [j for j in unmatched if j not in fuzzy_duped]
+    unmatched = [j for j in unmatched if j not in fuzzy_duped]
+
+    # WO-18 twin pass — the all-history net the two gates above don't
+    # cast: the fuzzy window only sees UNDECIDED matches from the last
+    # 14 days, but a copy whose company string or location field
+    # disagrees with its matched original (the live 2026-08-31 Lund
+    # incident: Experis AB/Malmö vs Manpower/Lund vs Experis/Lund —
+    # three keys, one job, three AI bills) must collapse against EVERY
+    # match state: decided rows (never re-opened — the twin is a
+    # duplicate, full stop), auto-dismissed rows, and matches older
+    # than the fuzzy window. Pairwise likely_same_job over all matched
+    # rows is too wide, so bucket by normalized title and confirm only
+    # same-title candidates (the fuzzy title discipline can accept
+    # nothing else). Reads the PRE-RUN by_title snapshot taken at the
+    # top of this function — dismissal rows written by the gates above
+    # are deliberately invisible to it.
+    from app.core.dedupe import likely_same_job
+
+    if by_title:
+        twins_dropped = []
+        twins_flipped = 0
+        kept_after_twins = []
+        for j in unmatched:
+            drop = False
+            for stored_job, stored_match, was_undecided in by_title.get(
+                title_bucket(j.title), ()
+            ):
+                if stored_job.id == j.id:
+                    continue
+                if not likely_same_job(
+                    title_a=j.title, company_a=j.company, location_a=j.location,
+                    title_b=stored_job.title, company_b=stored_job.company,
+                    location_b=stored_job.location,
+                    desc_a=j.description, desc_b=stored_job.description,
+                ):
+                    continue
+                if was_undecided and _collapse_key(j) < _collapse_key(stored_job):
+                    # The incoming copy is the better one (live apply
+                    # path, higher-ranked source, fuller text): retire
+                    # the stored match — WO-18 generalizes the fuzzy
+                    # gate's agency flip to any preferred copy.
+                    stored_match.dismissed_reason = "duplicate"
+                    stored_match.decision = "rejected"
+                    stored_match.reasoning = (
+                        "Not shown: duplicate (a better copy of the same ad "
+                        "was kept — live apply link or richer source)."
+                    )
+                    twins_flipped += 1
+                    continue  # other stored twins may also need retiring
+                drop = True
+                break
+            if drop:
+                _dismiss_for_user(db, user_id, j, "duplicate", service.model)
+                twins_dropped.append(j)
+            else:
+                kept_after_twins.append(j)
+        if twins_dropped or twins_flipped:
+            db.commit()
+            logger.info(
+                "Twin gate: dismissed %d location/company-variant duplicates, "
+                "flipped %d stored copies for better ones",
+                len(twins_dropped), twins_flipped,
+            )
+        unmatched = kept_after_twins
+    return unmatched
 
 
 def _run_matching_loop(
@@ -793,19 +881,29 @@ def _dismiss_for_user(db, user_id, job: JobPosting, reason: str, model: str) -> 
     )
 
 
-_AGENCY_MARKERS = ("rekryter", "konsult", "staffing", "recruit", "bemanning")
+def _collapse_key(job: JobPosting) -> tuple:
+    """WO-18 survivor preference (lower = the copy to keep): not
+    link-degraded, direct apply route, higher-ranked source, direct
+    employer over agency, fuller description. See
+    app.core.dedupe.collapse_preference."""
+    from app.core.dedupe import collapse_preference
 
-
-def _is_agency_posting(job) -> bool:
-    return any(m in (job.company or "").lower() for m in _AGENCY_MARKERS)
+    return collapse_preference(
+        source=job.source, company=job.company, url=job.url,
+        application_url=job.application_url,
+        application_email=job.application_email,
+        description=job.description,
+    )
 
 
 def _dismiss_fuzzy_duplicates(db, user_id, unmatched, model: str):
     """Pågen-pattern gate: collapse the same job posted directly AND via an
     agency. Compares each candidate against (a) the user's undecided
     matches from the last 14 days and (b) earlier candidates in this
-    batch; the AGENCY copy is dismissed; if both sides look direct (or
-    both agency), the LATER one (the candidate) is dismissed.
+    batch. WO-18: the SURVIVOR is chosen by _collapse_key — the copy
+    with the live apply path / higher-ranked source / fuller text wins
+    (generalized from the old agency-vs-direct heuristic); on a
+    preference tie the stored/earlier copy stays (no churn).
     """
     from datetime import timedelta
 
@@ -843,9 +941,10 @@ def _dismiss_fuzzy_duplicates(db, user_id, unmatched, model: str):
             if other.id == job.id:
                 continue
             if same(job, other):
-                if _is_agency_posting(other) and not _is_agency_posting(job):
-                    # the stored copy is the agency re-post: dismiss IT,
-                    # keep this direct copy
+                if _collapse_key(job) < _collapse_key(other):
+                    # the stored copy is the weaker one (dead link, lower
+                    # source rank, agency re-post): dismiss IT, keep this
+                    # copy
                     flip = match_row
                 else:
                     drop = True
@@ -853,7 +952,7 @@ def _dismiss_fuzzy_duplicates(db, user_id, unmatched, model: str):
         if flip is not None:
             flip.dismissed_reason = "duplicate"
             flip.decision = "rejected"
-            flip.reasoning = "Not shown: duplicate (agency re-post of a newer direct ad)."
+            flip.reasoning = "Not shown: duplicate (a better copy of the same ad was kept)."
             flipped += 1
             kept_batch.append(job)
             continue
@@ -864,14 +963,14 @@ def _dismiss_fuzzy_duplicates(db, user_id, unmatched, model: str):
         # against earlier candidates in this batch
         dupe_of = next((k for k in kept_batch if same(job, k)), None)
         if dupe_of is not None:
-            if _is_agency_posting(job) and not _is_agency_posting(dupe_of):
-                _dismiss_for_user(db, user_id, job, "duplicate", model)
-                dismissed.append(job)
-            else:
+            if _collapse_key(job) < _collapse_key(dupe_of):
                 _dismiss_for_user(db, user_id, dupe_of, "duplicate", model)
                 dismissed.append(dupe_of)
                 kept_batch = [k for k in kept_batch if k.id != dupe_of.id]
                 kept_batch.append(job)
+            else:
+                _dismiss_for_user(db, user_id, job, "duplicate", model)
+                dismissed.append(job)
             continue
         kept_batch.append(job)
 

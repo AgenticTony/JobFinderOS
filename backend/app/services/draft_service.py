@@ -357,14 +357,27 @@ def _probe_apply_portal(apply_url: Optional[str]) -> Optional[str]:
     Warn, never block: a transient hiccup must not stop a manual apply
     the user can still complete. Only a DEFINITE HTTP >= 400 warns — 405
     aside (HEAD unsupported, but the server answered, so it is alive).
-    Timeouts and connection errors stay silent: 'unknown' is not 'dead',
-    and probe noise must never cry wolf."""
+    401/403 get their own message: they refused the CHECK's client, not
+    the user — bank, insurer and recruiter domains routinely 403
+    non-browser clients while serving browsers the same page (verified
+    externally, ai-job-search's 09-web-research: Barclays et al.), so
+    reporting them as expiry is exactly the false alarm this probe
+    promises never to raise. Timeouts and connection errors stay
+    silent: 'unknown' is not 'dead', and probe noise must never cry
+    wolf."""
     if not apply_url:
         return None
     try:
         import httpx
 
         response = httpx.head(apply_url, follow_redirects=True, timeout=6.0)
+        if response.status_code in (401, 403):
+            return (
+                f"Apply portal blocked our automated check (HTTP "
+                f"{response.status_code}) — many employer and recruiter "
+                "sites block bots while serving browsers normally. The link "
+                "will likely open fine; check the page if it does not."
+            )
         if response.status_code != 405 and response.status_code >= 400:
             return (
                 f"Apply portal returned HTTP {response.status_code} at hand-off — "

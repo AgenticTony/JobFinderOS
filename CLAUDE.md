@@ -104,7 +104,7 @@ frontend / ops / docs, verified stats, and a findings ledger; indexed 2026-08-30
   - Run: `cd frontend && npm run dev` → http://localhost:3000
   - Type-check: `npx tsc --noEmit --noUnusedLocals --noUnusedParameters`
 - **Tests:** `cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`
-  - All 356 tests must be green before any commit
+  - All 436 tests must be green before any commit
   - Flow test: `PYTHONPATH=. .venv/bin/python tests/test_flow.py`
   - Calibration (opt-in, costs API calls): `RUN_CALIBRATION=1 pytest tests/test_calibration.py`
 
@@ -117,6 +117,13 @@ scrape (8 sources) → dedupe → per-user gates (location/language/freshness) �
   → AI tailors CV + cover letter for THAT job (ApplicationDraft, user edits)
   → user approves draft → send: email w/ 3 PDFs (Resend) or browser/manual
 ```
+
+Match-time dedupe (WO-18): beyond the exact key, `likely_same_job` collapses
+copies whose location field is missing (employer link carries the pair) or
+conflicting (ad-text shingle identity only — the two-offices rule), and every
+collapse's survivor is picked by `collapse_preference` (live apply link >
+source rank official-over-aggregator > direct employer > fuller text). Decided
+matches are never re-opened; undecided ones flip for a strictly better copy.
 
 ## KEY INVARIANTS — never break these
 

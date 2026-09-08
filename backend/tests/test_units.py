@@ -3715,6 +3715,405 @@ class TestSisterBrandDuplicateGate:
         ) is False
 
 
+class TestLocationFieldFailuresDedupe:
+    """WO-18 (live incident 2026-08-31, the Lund ad): the exact key and
+    the fuzzy gate both assumed the location field exists and is right.
+    On aggregator copies it is neither — the careerjet re-posts carried
+    a location that DISAGREED with the original (jobtech said Malmö,
+    careerjet said Lund; same title, sister-brand companies Experis
+    AB / Manpower / Experis), and careerjet can return no location at
+    all. Both failure modes must collapse through the employer-link
+    routes. An ACTIVE conflict is overridden only by ad-text identity —
+    the two-offices rule: same title + same company in two cities can
+    be two real openings, so company equality alone must not win there.
+    """
+
+    TITLE = "Junior Developer på stort bolag i Lund"
+
+    # Full ad (jobtech shape) — the careerjet fragments below are
+    # verbatim slices of this text with <b> tags sprinkled in, exactly
+    # like the live rows (shingles survive the HTML strip).
+    FULL_AD = (
+        "Är du en junior utvecklare som vill växa i en modern "
+        "utvecklingsmiljö? Har du byggt en stabil grund inom Javautveckling "
+        "och vill ta nästa steg i karriären? Vi söker nu en Junior Developer "
+        "till ett långsiktigt uppdrag. Här får du möjlighet att arbeta med "
+        "modern systemutveckling, agila arbetssätt och senaste tekniken. "
+        "Du kommer att ingå i ett agilt utvecklingsteam där du arbetar med "
+        "både nyutveckling och underhåll tillsammans med utvecklare, "
+        "arkitekter och andra intressenter. Delta i tekniskt underhåll och "
+        "förbättringsarbete. Skapa lösningar som gör verklig skillnad."
+    )
+    FRAGMENT = (
+        "Du kommer att ingå i ett <b>agilt</b> utvecklingsteam där du "
+        "arbetar med både nyutveckling och underhåll tillsammans med "
+        "<b>utvecklare</b>, arkitekter och andra intressenter  Delta i "
+        "tekniskt underhåll och förbättringsarbete"
+    )
+    OTHER_AD = (
+        "Vårt klientbolag i Stockholm söker två juniora utvecklare till "
+        "sin växande avdelning. Här arbetar du med frontendutveckling i "
+        "React och typescript i ett litet team med korta beslutsvägar. "
+        "Vi lägger stor vikt vid samarbetsförmåga och nyfikenhet."
+    )
+
+    def same(self, *, loc_a, loc_b, co_a="Experis AB", co_b="Experis",
+             desc_a=FULL_AD, desc_b=FRAGMENT,
+             title_a=TITLE, title_b=TITLE):
+        from app.core.dedupe import likely_same_job
+        return likely_same_job(
+            title_a=title_a, company_a=co_a, location_a=loc_a,
+            title_b=title_b, company_b=co_b, location_b=loc_b,
+            desc_a=desc_a, desc_b=desc_b,
+        )
+
+    # --- missing location (WO-18 rule 1: company carries the weight) ---
+
+    def test_locationless_copy_same_employer_collapses(self):
+        # jobtech original carries the location; the careerjet copy has
+        # none. Same title, same employer (legal suffix aside) -> twin.
+        assert self.same(loc_a="Malmö, Skåne län", loc_b=None) is True
+
+    def test_both_locationless_same_employer_collapses(self):
+        assert self.same(loc_a=None, loc_b=None) is True
+
+    def test_same_title_different_company_both_locationless_never(self):
+        # WO-18 acceptance: title-only matching is not acceptable —
+        # different employers, no ad-text link -> never collapse.
+        assert self.same(loc_a=None, loc_b=None,
+                         co_b="Knowit Aktiebolag", desc_b=self.OTHER_AD) is False
+
+    def test_locationless_one_word_role_difference_never(self):
+        # DEDUPE-FP parity: Engineer vs Scientist is role identity.
+        assert self.same(
+            loc_a="Lund, Skåne län", loc_b=None,
+            title_a="Senior Data Engineer (Python)",
+            title_b="Senior Data Scientist (Python)",
+        ) is False
+
+    def test_locationless_pagen_agency_pattern_collapses(self):
+        # Route c (client named in the agency title) still links when a
+        # side lacks location — the Pågen shape, location-less.
+        from app.core.dedupe import likely_same_job
+        assert likely_same_job(
+            title_a="Integration Developer till Pågen",
+            company_a="Cabeza rekrytering och konsulting AB",
+            location_a=None,
+            title_b="Integration Developer",
+            company_b="PÅGEN AKTIEBOLAG",
+            location_b="Malmö, Skåne län",
+        ) is True
+
+    # --- conflicting locations (the live incident shape) ---
+
+    def test_conflicting_locations_ad_text_identity_collapses(self):
+        # THE incident pair: jobtech #47 (Experis AB, Malmö, full ad) vs
+        # careerjet #424 (Manpower, Lund, fragment of the same ad).
+        assert self.same(loc_a="Malmö, Skåne län", loc_b="Lund, Skåne",
+                         co_b="Manpower") is True
+
+    def test_conflicting_locations_company_equality_alone_never(self):
+        # Two-offices rule: same title, same employer, different cities,
+        # DIFFERENT ad text — two real openings, never collapse.
+        assert self.same(loc_a="Malmö, Skåne län", loc_b="Göteborg, Sverige",
+                         desc_b=self.OTHER_AD) is False
+
+    def test_conflicting_locations_role_difference_never(self):
+        assert self.same(
+            loc_a="Malmö, Skåne län", loc_b="Lund, Skåne",
+            title_a="Senior Data Engineer (Python)",
+            title_b="Senior Data Scientist (Python)",
+        ) is False
+
+
+class TestCollapsePreference:
+    """WO-18 rule 3 + the 2026-09-08 source-ranking amendment: when a
+    collapse picks a survivor, keep the copy the employer can actually
+    be reached through, then the higher-ranked source (official/board
+    APIs and employer-direct over aggregators — the aggregator's text
+    is a subset of the original's facts), then the direct employer over
+    a staffing agency, then the fuller description."""
+
+    def _pref(self, **over):
+        from app.core.dedupe import collapse_preference
+        kw = dict(
+            source="jobtech", company="Experis AB",
+            url="https://arbetsformedlingen.se/platsbanken/annonser/1",
+            application_url=None, application_email=None,
+            description="x" * 100,
+        )
+        kw.update(over)
+        return collapse_preference(**kw)
+
+    def test_link_degraded_detection(self):
+        from app.core.dedupe import is_link_degraded
+        # careerjet's redirect host + no direct route = degraded
+        assert is_link_degraded(
+            url="https://jobviewtrack.com/v2/tRLr9Pn8pEe-oFwIydsGhnb6Z",
+            application_url=None, application_email=None,
+        ) is True
+        # a direct apply route redeems it
+        assert is_link_degraded(
+            url="https://jobviewtrack.com/v2/tRLr9Pn8pEe",
+            application_url="https://ats.example/apply", application_email=None,
+        ) is False
+        # a board's own page is NOT degraded even without a direct apply
+        assert is_link_degraded(
+            url="https://arbetsformedlingen.se/platsbanken/annonser/31322561",
+            application_url=None, application_email=None,
+        ) is False
+
+    def test_direct_apply_path_beats_degraded_aggregator(self):
+        # The incident outcome to prevent: dead jobviewtrack copies won
+        # over the live aplitrak portal. Now the portal wins.
+        live = self._pref(application_url="https://www.aplitrak.com/?adid=x",
+                          description="x" * 3604)
+        dead = self._pref(source="careerjet", company="Manpower",
+                          url="https://jobviewtrack.com/v2/abc",
+                          description="x" * 251)
+        assert live < dead
+
+    def test_source_rank_breaks_ties_between_applyable_copies(self):
+        # 2026-09-08 amendment: even when both copies carry a live apply
+        # path, the official board's row outranks the aggregator's.
+        official = self._pref(application_url="https://ats.example/a")
+        aggregator = self._pref(source="careerjet",
+                                url="https://jobviewtrack.com/v2/abc",
+                                application_url="https://ats.example/b")
+        assert official < aggregator
+
+    def test_fuller_description_breaks_remaining_ties(self):
+        thin = self._pref(description="x" * 251)
+        full = self._pref(description="x" * 3604)
+        assert full < thin
+
+
+class TestWO18DuplicateCollapse:
+    """WO-18 wired into the matcher: a copy whose location field is
+    missing or wrong collapses against its already-matched original
+    (any match state — decided rows are never re-opened), the survivor
+    is chosen by collapse_preference, and per-user dismissal rows are
+    the only writes (shared job_postings untouched)."""
+
+    JT_URL = "https://arbetsformedlingen.se/platsbanken/annonser/31322561"
+    APPLY = "https://www.aplitrak.com/?adid=REpvcmRh"
+
+    def _job(self, db, title, company, location=None, source="jobtech",
+             url=JT_URL, application_url=None, description=None):
+        import uuid as _uuid
+
+        from app.models import JobPosting
+        j = JobPosting(
+            source=source, source_id=_uuid.uuid4().hex[:10], title=title,
+            company=company, location=location, url=url,
+            application_url=application_url, status="new",
+        )
+        if description:
+            j.description = description
+        db.add(j)
+        db.commit()
+        return j
+
+    def _gates(self, db, owner, jobs):
+        from app.services.ai_service import AIService
+        from app.services.matcher_service import _apply_cheap_gates
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        return _apply_cheap_gates(db, owner, jobs, svc, [])
+
+    def _undecided_match(self, db, owner, job, score=68):
+        from app.core.timeutil import utc_now
+        from app.models import MatchResult
+        m = MatchResult(user_id=owner, job_id=job.id, score=score,
+                        tier="good_match", recommendation="apply",
+                        reasoning="r", decision=None)
+        m.created_at = utc_now()
+        db.add(m)
+        db.commit()
+        return m
+
+    def test_locationless_twin_of_matched_job_dismissed(self, db):
+        from app.models import MatchResult
+        owner = _profile(db).user_id
+        original = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Experis AB",
+            location="Malmö, Skåne län", application_url=self.APPLY,
+            description="Full ad text " * 40,
+        )
+        self._undecided_match(db, owner, original, score=55)
+        twin = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Experis",
+            location=None, source="careerjet",
+            url="https://jobviewtrack.com/v2/abc",
+            description="Full ad text " * 6,
+        )
+
+        kept = self._gates(db, owner, [twin])
+
+        assert kept == [], "the location-less twin must not reach the AI"
+        row = db.query(MatchResult).filter(
+            MatchResult.user_id == owner, MatchResult.job_id == twin.id).one()
+        assert row.dismissed_reason == "duplicate"
+        # shared pool untouched (invariant 7)
+        db.refresh(original)
+        db.refresh(twin)
+        assert original.status == "new" and twin.status == "new"
+
+    def test_better_copy_flips_undecided_fragment(self, db):
+        # Arrival-order inversion of the incident: the careerjet fragment
+        # was scored first; the jobtech original with the live portal
+        # arrives later -> the fragment's match is dismissed, the
+        # original stays in the window.
+        owner = _profile(db).user_id
+        fragment = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Manpower",
+            location="Lund, Skåne", source="careerjet",
+            url="https://jobviewtrack.com/v2/abc",
+            description="Full ad text " * 6,
+        )
+        stored = self._undecided_match(db, owner, fragment, score=68)
+        original = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Experis AB",
+            location="Malmö, Skåne län", application_url=self.APPLY,
+            description="Full ad text " * 40,
+        )
+
+        kept = self._gates(db, owner, [original])
+
+        assert kept == [original], "the live-portal original must be scored"
+        db.refresh(stored)
+        assert stored.dismissed_reason == "duplicate"
+
+    def test_decided_match_blocks_twin_no_flip(self, db):
+        # The user already judged this job. A better-link twin arriving
+        # later is a duplicate — the decision is never re-opened.
+        from app.models import MatchResult
+        owner = _profile(db).user_id
+        decided = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Experis",
+            location="Lund, Skåne", source="careerjet",
+            url="https://jobviewtrack.com/v2/abc",
+            description="Full ad text " * 6,
+        )
+        m = self._undecided_match(db, owner, decided, score=65)
+        m.decision = "approved"  # the user acted on the fragment's copy
+        db.commit()
+        twin = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Experis AB",
+            location="Malmö, Skåne län", application_url=self.APPLY,
+            description="Full ad text " * 40,
+        )
+
+        kept = self._gates(db, owner, [twin])
+
+        assert kept == []
+        db.refresh(m)
+        assert m.dismissed_reason is None and m.decision == "approved", (
+            "a decided match is never re-opened, even for a better copy"
+        )
+        row = db.query(MatchResult).filter(
+            MatchResult.user_id == owner, MatchResult.job_id == twin.id).one()
+        assert row.dismissed_reason == "duplicate"
+
+    def test_batch_two_locationless_copies_direct_apply_survives(self, db):
+        # WO-18 acceptance: both copies location-less in one batch ->
+        # exactly one survives, the one carrying a direct apply route.
+        from app.models import MatchResult
+        owner = _profile(db).user_id
+        dead = self._job(
+            db, "Backend Developer", "Acme", location=None,
+            source="careerjet", url="https://jobviewtrack.com/v2/xyz",
+            description="A real description long enough to assess. " * 3,
+        )
+        direct = self._job(
+            db, "Backend Developer", "Acme AB", location=None,
+            source="careerjet", url="https://jobviewtrack.com/v2/other",
+            application_url="https://ats.acme/apply",
+            description="A real description long enough to assess. " * 3,
+        )
+
+        kept = self._gates(db, owner, [dead, direct])
+
+        assert [j.id for j in kept] == [direct.id]
+        row = db.query(MatchResult).filter(
+            MatchResult.user_id == owner, MatchResult.job_id == dead.id).one()
+        assert row.dismissed_reason == "duplicate"
+
+    def test_incident_rows_collapse_to_live_original(self, db):
+        # WO-18 live-check acceptance: the three real incident shapes
+        # (jobtech #47 + careerjet #424/#425) in one fresh-user batch ->
+        # exactly one copy is evaluated, and it is the live-portal
+        # jobtech original.
+        from app.models import MatchResult
+        owner = _profile(db).user_id
+        full_ad = TestLocationFieldFailuresDedupe.FULL_AD
+        fragment = TestLocationFieldFailuresDedupe.FRAGMENT
+        jt = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Experis AB",
+            location="Malmö, Skåne län", application_url=self.APPLY,
+            description=full_ad,
+        )
+        cj_manpower = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Manpower",
+            location="Lund, Skåne", source="careerjet",
+            url="https://jobviewtrack.com/v2/tRLr9", description=fragment,
+        )
+        cj_experis = self._job(
+            db, "Junior Developer på stort bolag i Lund", "Experis",
+            location="Lund, Skåne", source="careerjet",
+            url="https://jobviewtrack.com/v2/3sSFzA", description=fragment,
+        )
+
+        kept = self._gates(db, owner, [cj_experis, cj_manpower, jt])
+
+        assert [j.id for j in kept] == [jt.id], (
+            "a fresh user's run must evaluate exactly one incident row — "
+            "the live jobtech original"
+        )
+        dismissed = db.query(MatchResult).filter(
+            MatchResult.user_id == owner,
+            MatchResult.dismissed_reason == "duplicate").all()
+        assert sorted(r.job_id for r in dismissed) == sorted(
+            [cj_manpower.id, cj_experis.id])
+
+    def test_in_batch_source_rank_tiebreak(self, db):
+        # 2026-09-08 amendment: both copies carry a live apply path and
+        # equally full text — the official board's row survives.
+        from app.models import MatchResult
+        owner = _profile(db).user_id
+        jt = self._job(
+            db, "Backend Developer", "Acme", location="Lund, Skåne",
+            application_url="https://ats.acme/jt",
+            description="A real description long enough to assess. " * 3,
+        )
+        cj = self._job(
+            db, "Backend Developer", "Acme AB", location=None,
+            source="careerjet", url="https://jobviewtrack.com/v2/rank",
+            application_url="https://ats.acme/cj",
+            description="A real description long enough to assess. " * 3,
+        )
+
+        kept = self._gates(db, owner, [jt, cj])
+
+        assert [j.id for j in kept] == [jt.id]
+        row = db.query(MatchResult).filter(
+            MatchResult.user_id == owner, MatchResult.job_id == cj.id).one()
+        assert row.dismissed_reason == "duplicate"
+
+    def test_same_title_different_company_in_batch_never_collapsed(self, db):
+        owner = _profile(db).user_id
+        a = self._job(db, "Backend Developer", "Knowit Aktiebolag",
+                      location=None, description="Knowit's own ad text. " * 5)
+        b = self._job(db, "Backend Developer", "Edument AB",
+                      location=None, description="Edument's own ad text. " * 5)
+
+        kept = self._gates(db, owner, [a, b])
+
+        assert sorted(j.id for j in kept) == sorted([a.id, b.id]), (
+            "different employers with the same generic title are two jobs"
+        )
+
+
 class TestDocxExtraction:
     """Word .docx CV support (owner decision 2026-09-02): the extractor
     is stdlib-only (zipfile + ElementTree over word/document.xml) so no
