@@ -461,6 +461,52 @@ class TestGDPRErasurePurgesSpendBuckets:
         assert row.is_active is False
         assert db.query(Profile).filter(Profile.user_id == uid_uuid).count() == 0
 
+    def test_cv_storage_failure_fails_loudly_not_silently(
+        self, client, monkeypatch, db
+    ):
+        """Review round 3: a storage failure in the post-commit CV
+        removal must NOT continue into the tombstone — that converged
+        to a silent wrong 'erased' with the file surviving and the
+        paths unreconstructible. The failure raises (route alarm fires
+        with the surviving keys) and the tombstone does NOT apply."""
+        from tests.auth_helpers import stub_supabase_delete
+
+        stub_supabase_delete(monkeypatch)
+        email = f"epcv-{uuid.uuid4().hex[:6]}@test.example"
+        uid_uuid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+
+        from app.services import storage as storage_mod
+
+        # A real stored object, referenced by the profile — the erasure
+        # must reach (and fail) its deletion.
+        key = storage_mod.get_storage().save(
+            f"gdpr-cv-{uuid.uuid4().hex[:8]}.pdf", b"%PDF-1.4 cv",
+            "application/pdf",
+        )
+        profile = db.query(Profile).filter(Profile.user_id == uid_uuid).first()
+        profile.cv_file_path = key
+        db.commit()
+
+        class FailingStorage:
+            def delete(self, path):
+                raise RuntimeError("bucket unavailable")
+
+        monkeypatch.setattr(storage_mod, "get_storage", lambda: FailingStorage())
+
+        with pytest.raises(RuntimeError, match="surviving storage keys"):
+            client.delete("/api/v1/account/delete")
+
+        db.expire_all()
+        row = db.query(User).filter(User.id == uid_uuid).one()
+        assert row.is_active is True, (
+            "tombstone applied despite the CV file surviving — the "
+            "'erased' report would be a silent lie"
+        )
+        # rows are gone (committed before the file step) — that is the
+        # documented residual; the alarm message carries the keys.
+        assert db.query(Profile).filter(Profile.user_id == uid_uuid).count() == 0
+
 
 class TestGDPRErasureFKChain:
     """P0-2 (beta review, LIVE-confirmed): erasure deleted matches BEFORE
@@ -1306,16 +1352,16 @@ class TestMirrorRace:
         email = f"burst-{uuid.uuid4().hex[:6]}@test.example"
         # All threads share ONE identity (a fresh account); three
         # parallel requests hit three threadpool sessions, the shape of
-        # the console's Promise.allSettled first load.
+        # the console's Promise.allSettled first load. The uid is minted
+        # BEFORE the threads — a lazy check-then-set inside them was
+        # itself a race (round 3) and could mint two identities.
         from tests.auth_helpers import mint_token
 
         statuses = []
-        uid_holder = {}
+        uid = uuid.uuid4()
 
         def shared_hit():
-            if "uid" not in uid_holder:
-                uid_holder["uid"] = uuid.uuid4()
-            token = mint_token(uid_holder["uid"], email)
+            token = mint_token(uid, email)
             resp = client.get(
                 "/api/v1/profile/me",
                 headers={"Authorization": f"Bearer {token}"},

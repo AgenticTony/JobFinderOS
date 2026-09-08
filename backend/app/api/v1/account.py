@@ -141,24 +141,37 @@ def _erase_local_rows(db: Session, user: User, uid, user_email: str) -> None:
     # the route docstring: this commit must leave a retryable state.
     db.commit()
 
-    # CV file removal AFTER the commit: doing it before meant a failed
-    # transaction (the IntegrityError above, in production) destroyed the
-    # user's only CV while every PII row survived — the exact live repro.
-    # Goes through the storage backend, so it works for local paths AND
-    # remote object keys (the os.path.exists version silently skipped
-    # Supabase keys, leaving the CV in the bucket after "erasure").
-    # Every collected path is attempted — one failure must not skip the
-    # rest of the user's PII files. A failure here only delays file
-    # removal — the rows are already gone and the retry re-attempts.
+    # CV file removal AFTER the commit (the live P1-5a law: a failed row
+    # transaction must never leave a LIVE user with a deleted CV — the
+    # regression test test_failed_erasure_never_destroys_the_cv_file
+    # pins this). Review round 3 hardened the other side: a storage
+    # failure here would previously warn-and-continue into the
+    # tombstone, converging to a silent wrong "erased" with the CV
+    # surviving in the bucket and the rows gone (paths no longer
+    # reconstructible). Instead it now FAILS LOUDLY before the
+    # tombstone: the route's alarm wrapper fires (critical + Sentry)
+    # with the exact surviving object keys in the message, so the
+    # operator purges them from storage. Residual, accepted and
+    # documented: a RETRY after this failure cannot re-learn the paths
+    # (rows already gone) and will tombstone — the alarm is the
+    # reconciliation path, not the retry.
     from app.services.storage import get_storage
 
     deleted_files = 0
+    failed_paths = []
     for cv_path in sorted(p for p in cv_paths if p):
         try:
             if get_storage().delete(cv_path):
                 deleted_files += 1
         except Exception:
+            failed_paths.append(cv_path)
             logger.warning("GDPR delete: CV removal failed for %s", cv_path)
+    if failed_paths:
+        raise RuntimeError(
+            f"CV object deletion failed — surviving storage keys: "
+            f"{sorted(failed_paths)} (operator must purge these; the "
+            "retry cannot reconstruct them)"
+        )
 
     # The users row becomes a TOMBSTONE — the LAST durable step (route
     # docstring: it revokes the token window, so it must not precede

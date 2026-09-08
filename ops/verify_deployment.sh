@@ -24,8 +24,10 @@ SUPABASE="${3:-${SUPABASE_URL:-https://jsibogzklhswpmozcyhn.supabase.co}}"
 # reader a standing production JWT (review round 2, 2026-09-08).
 #   export PROBE_EMAIL=deploy-check@jobfinderos.dev   # (this default is fine)
 #   export PROBE_PASS="$(pwgen 24 1)"   # create the Supabase user with THIS
+# Both unset-var cases degrade to a SKIP of the auth roundtrip (below),
+# never an abort — the rest of the checks must always run (round 3).
 PROBE_EMAIL="${PROBE_EMAIL:-deploy-check@jobfinderos.dev}"
-PROBE_PASS="${PROBE_PASS:?export PROBE_PASS first (a generated secret stored in your password manager — never committed)}"
+PROBE_PASS="${PROBE_PASS:-}"
 PASS=0; FAIL=0
 
 ok()   { PASS=$((PASS+1)); echo "  PASS  $1"; }
@@ -75,8 +77,8 @@ fi
 #    from /profile/status = AUTH PASSED (anonymous is 401; a broken JWKS
 #    verify is 401). /account/export 200 = live DB reads through the
 #    mirror row.
-if [ -z "${SUPABASE_ANON_KEY:-}" ]; then
-    echo "  (auth roundtrip SKIPPED — export SUPABASE_ANON_KEY (publishable) to run it)"
+if [ -z "${SUPABASE_ANON_KEY:-}" ] || [ -z "$PROBE_PASS" ]; then
+    echo "  (auth roundtrip SKIPPED — export SUPABASE_ANON_KEY (publishable) and PROBE_PASS to run it)"
     token=""
 else
     login=$(curl -s -m 30 -X POST "$SUPABASE/auth/v1/token?grant_type=password" \
