@@ -23,6 +23,21 @@ if (process.env.NODE_ENV === 'production') {
         'NEXT_PUBLIC_API_URL=https://jobfinderos-api.onrender.com.',
     );
   }
+  // MIG-WO2: same discipline for the Supabase client (src/lib/supabase.ts
+  // tolerates unset at import so dev/CI builds work, which is exactly why
+  // a prod build must fail HERE instead — a bundle without them renders a
+  // login form that cannot authenticate anyone).
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    throw new Error(
+      'Production builds need NEXT_PUBLIC_SUPABASE_URL and ' +
+        'NEXT_PUBLIC_SUPABASE_ANON_KEY (the PUBLISHABLE anon key, never the ' +
+        'service key). Set them in the CF Pages build env / ' +
+        'ops/deploy_frontend.sh — auth is Supabase-hosted since MIG-WO2.',
+    );
+  }
 }
 
 const nextConfig: NextConfig = {

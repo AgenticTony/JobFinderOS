@@ -68,9 +68,9 @@ import {
   downloadDraftCoverLetterPdf,
   downloadDraftCvPdf,
   exportAccountData,
-  getAuthToken,
   getIntegrations,
-  setAuthToken,
+  getSessionToken,
+  logout,
 } from '@/lib/api';
 import { installGlobalErrorReporter, UNHANDLED_ERROR_EVENT } from '@/lib/globalErrorReporter';
 import type { IntegrationsStatus } from '@/types';
@@ -132,17 +132,26 @@ export default function Home() {
   // Gate the shell: render nothing but the console ground until the
   // token check has run, so anonymous visitors never see the app flash.
   const [sessionKnown, setSessionKnown] = useState(false);
-  // No token -> no session and never signed in here: straight to the
-  // create-account form — via replace() so Back from login returns to
-  // the page BEFORE /app (the home page), not back here in a redirect
-  // loop. Expired tokens still land on plain /login via the 401
-  // interceptor in api.ts.
+  // No session -> never signed in here: straight to the create-account
+  // form — via replace() so Back from login returns to the page BEFORE
+  // /app (the home page), not back here in a redirect loop. Expired
+  // sessions still land on plain /login via the 401 interceptor in
+  // api.ts. (MIG-WO2: the check is async — the Supabase SDK may be
+  // refreshing the token at boot.)
   useEffect(() => {
-    if (!getAuthToken()) {
-      window.location.replace('/login?mode=register');
-      return;
-    }
-    setSessionKnown(true);
+    let alive = true;
+    getSessionToken().then((token) => {
+      if (!alive) return;
+      if (!token) {
+        window.location.replace('/login?mode=register');
+        return;
+      }
+      setSessionKnown(true);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const toggleRail = () =>
     setRailCollapsed((c) => {
@@ -1883,10 +1892,11 @@ function YourDataCard() {
     setError(null);
     try {
       await deleteAccount();
-      // The token is dead the instant the account is gone. Clear it and
-      // leave to the landing page (not /login — there is nothing left to
-      // sign in to, and the background pollers would 401-redirect anyway).
-      setAuthToken(null);
+      // The session is dead the instant the account is gone (Supabase
+      // identity deleted server-side). Sign out and leave to the landing
+      // page (not /login — there is nothing left to sign in to, and the
+      // background pollers would 401-redirect anyway).
+      await logout();
       window.location.replace('/');
     } catch (err) {
       setError(`Couldn't delete your account: ${apiErrorMessage(err)} — nothing was deleted.`);
