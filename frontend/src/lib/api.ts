@@ -33,21 +33,23 @@ function apiErrorMessage(error: unknown): string {
 
 export { apiErrorMessage };
 
-// --- Auth token layer (Phase 1b) ---
-// JWT lives in localStorage; every request carries it; any 401 clears it
-// and sends the user to the login page.
-export function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('jfos-token');
-}
+// --- Auth session layer (MIG-WO2) ---
+// Supabase Auth owns the session (short-lived access token + refresh,
+// auto-refreshed by the SDK); every request carries the CURRENT access
+// token; any 401 signs the session out and sends the user to login.
+// The old jfos-token localStorage JWT is dead — getSessionToken is the
+// only token source.
+import { getSessionToken, supabase } from '@/lib/supabase';
 
-export function setAuthToken(token: string | null): void {
-  if (token === null) localStorage.removeItem('jfos-token');
-  else localStorage.setItem('jfos-token', token);
-}
+export { getSessionToken };
 
-export function logout(): void {
-  setAuthToken(null);
+export async function logout(): Promise<void> {
+  // scope: 'local' — only THIS browser's session. The SDK's default is
+  // 'global', which kills the user's session on every device: sidebar
+  // Sign out must not log their phone out, and a single transient 401
+  // (e.g. a backend-side JWKS blip) must not sign them out everywhere
+  // (review finding 2026-09-08).
+  await supabase.auth.signOut({ scope: 'local' });
   if (typeof window !== 'undefined') window.location.href = '/login';
 }
 
@@ -129,15 +131,16 @@ function retryDecision(error: AxiosError, config: RetryableConfig | undefined) {
   });
 }
 
-// Attach the JWT to every request from BOTH instances, and handle expiry:
-// a 401 while a token is in storage means the session expired (or was
-// revoked) — clear it and go to /login. The pathname guard keeps a failed
-// login POST (its own 400/401) from reloading /login and swallowing the
-// inline error message. Without these interceptors the token layer was
-// dead code: login stored a JWT that no request ever attached.
+// Attach the session token to every request from BOTH instances, and
+// handle expiry: a 401 while a session exists means the token was
+// rejected (expired beyond refresh, or the account died) — sign out and
+// go to /login. The pathname guard keeps a failed login POST (its own
+// 400/401) from reloading /login and swallowing the inline error
+// message. The request interceptor is async: the access token comes
+// from the Supabase session (SDK may refresh it first).
 for (const instance of [api, slowApi]) {
-  instance.interceptors.request.use((config) => {
-    const token = getAuthToken();
+  instance.interceptors.request.use(async (config) => {
+    const token = await getSessionToken();
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   });
@@ -156,9 +159,15 @@ for (const instance of [api, slowApi]) {
       }
       if (
         error?.response?.status === 401 &&
-        getAuthToken() &&
-        window.location.pathname !== '/login'
+        window.location.pathname !== '/login' &&
+        window.location.pathname !== '/reset-password' &&
+        window.location.pathname !== '/sv/reset-password'
       ) {
+        // NOT conditioned on a live session (review round 2): the most
+        // common 401 shape is an already-dead session (expired/revoked
+        // refresh token) — getSessionToken() returning null must still
+        // leave the login page, or the console mounts forever with
+        // every poller firing 401s and no way back in.
         logout();
       }
       return Promise.reject(error);

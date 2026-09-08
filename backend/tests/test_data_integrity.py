@@ -35,13 +35,10 @@ from app.models import (
     User as UserModel,
 )
 
+
 # Built by concatenation so no single credential-shaped literal sits in
 # the source (secret scanners flag fixed test passwords; the values are
 # throwaway fixtures that never authenticate anything real).
-PASSWORD = "TestPass-" + "2026!"
-NEW_PASSWORD = "NewPass-" + "2027!"
-
-
 @pytest.fixture(scope="module")
 def client():
     if os.path.exists("test_di.db"):
@@ -62,23 +59,16 @@ def db():
 
 
 def _register(client, email):
-    r = client.post(
-        "/api/v1/auth/register",
-        json={"email": email, "password": PASSWORD},
-    )
-    assert r.status_code == 201, r.text
-    return r.json()["id"]
+    """MIG-WO2: the mirror row is created directly (tests/auth_helpers.py)."""
+    from tests.auth_helpers import register
+
+    return register(client, email)
 
 
-def _auth_client(client, email, password=PASSWORD):
-    r = client.post(
-        "/api/v1/auth/jwt/login",
-        data={"username": email, "password": password},
-    )
-    assert r.status_code == 200, r.text
-    token = r.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
-    return token
+def _auth_client(client, email, password=None):  # password arg kept for call-shape compat
+    from tests.auth_helpers import auth_client
+
+    return auth_client(client, email)
 
 
 def _clear_auth(client):
@@ -596,66 +586,12 @@ class TestDoubleSubmitWindow:
 # =====================================================================
 
 
-class TestTokenRevocation:
-    def test_password_change_revokes_outstanding_tokens(self, client, db):
-        email = f"tv-{uuid.uuid4().hex[:6]}@test.example"
-        uid = uuid.UUID(_register(client, email))
-        old_token = _auth_client(client, email)
-
-        r = client.get("/api/v1/users/me")
-        assert r.status_code == 200, "fresh token must work"
-
-        r = client.patch(
-            "/api/v1/users/me", json={"password": NEW_PASSWORD}
-        )
-        assert r.status_code == 200, r.text
-
-        # The OLD token must now be dead (was: valid for the remaining ~7 days)
-        client.headers.update({"Authorization": f"Bearer {old_token}"})
-        r = client.get("/api/v1/users/me")
-        assert r.status_code == 401, (
-            "The pre-change JWT still authenticates after a password change — "
-            "a stolen/leaked token outlives the rotation (P1-7)."
-        )
-
-        # New login works and carries the bumped version
-        new_token = _auth_client(client, email, NEW_PASSWORD)
-        assert new_token
-        user = db.query(UserModel).filter(UserModel.id == uid).first()
-        assert user.token_version == 1, (
-            f"token_version={user.token_version!r} — the password change must "
-            "bump it so version-pinned tokens mismatch"
-        )
-        r = client.get("/api/v1/users/me")
-        assert r.status_code == 200
-
-    def test_second_password_change_bumps_again(self, client, db):
-        email = f"tv2-{uuid.uuid4().hex[:6]}@test.example"
-        uid = uuid.UUID(_register(client, email))
-        _auth_client(client, email)
-        client.patch("/api/v1/users/me", json={"password": NEW_PASSWORD})
-        t1 = _auth_client(client, email, NEW_PASSWORD)
-        client.patch("/api/v1/users/me", json={"password": "Third-Pass-" + "2028!"})
-        client.headers.update({"Authorization": f"Bearer {t1}"})
-        r = client.get("/api/v1/users/me")
-        assert r.status_code == 401, "token from version 1 must die at version 2"
-        user = db.query(UserModel).filter(UserModel.id == uid).first()
-        assert user.token_version == 2
-
-    def test_non_password_update_does_not_revoke(self, client, db):
-        email = f"tv3-{uuid.uuid4().hex[:6]}@test.example"
-        uid = uuid.UUID(_register(client, email))
-        token = _auth_client(client, email)
-        r = client.patch("/api/v1/users/me", json={"display_name": "Di User"})
-        assert r.status_code == 200, r.text
-        client.headers.update({"Authorization": f"Bearer {token}"})
-        r = client.get("/api/v1/users/me")
-        assert r.status_code == 200, (
-            "a profile-field update must NOT log the user out — only "
-            "password changes revoke"
-        )
-        user = db.query(UserModel).filter(UserModel.id == uid).first()
-        assert user.token_version == 0
+# MIG-WO2: TestTokenRevocation (P1-7 token_version bumps on password
+# change) is deleted — session revocation on password change is now a
+# Supabase Auth property (doc-verified 2026-09-08: "a session terminates
+# when the user changes their password"), not this codebase's machinery.
+# The users.token_version column stays on the table for rollback safety;
+# nothing writes it.
 
 
 # =====================================================================

@@ -11,13 +11,11 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text as sa_text
 
-from app import users
-from app.api import deps
 from app.api.deps import set_user_context_middleware
 from app.api.v1 import (
     account,
@@ -112,27 +110,10 @@ app.include_router(settings_api.router, prefix="/api/v1/settings", tags=["Settin
 app.include_router(account.router, prefix="/api/v1", tags=["Account"])
 app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["Feedback"])
 
-# Auth (fastapi-users v15 — see app/users.py). Register + JWT login + /users/me.
-# The two pre-authentication endpoints carry rate-limit dependencies — the
-# only routes an attacker can reach without an account.
-app.include_router(
-    users.fastapi_users.get_auth_router(users.auth_backend),
-    prefix="/api/v1/auth/jwt",
-    tags=["Auth"],
-    dependencies=[Depends(deps.login_rate_limit)],
-)
-app.include_router(
-    users.fastapi_users.get_register_router(users.UserRead, users.UserCreate),
-    prefix="/api/v1/auth",
-    tags=["Auth"],
-    dependencies=[Depends(deps.register_rate_limit)],
-)
-app.include_router(
-    users.fastapi_users.get_users_router(users.UserRead, users.UserUpdate),
-    prefix="/api/v1/users",
-    tags=["Auth"],
-)
-
+# Auth (MIG-WO2): no auth routers. Sign-up, sign-in, password reset and
+# email verification are Supabase Auth's hosted flows (the browser talks
+# to Supabase directly); this API verifies Supabase JWTs per request —
+# see app/users.py.
 
 app.middleware("http")(set_user_context_middleware)
 

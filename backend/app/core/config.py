@@ -136,34 +136,13 @@ class Settings(BaseSettings):
     R2_SECRET_ACCESS_KEY: str = ""
     R2_ENDPOINT: str = ""
 
-    # Auth (fastapi-users) — generate with: python -c "import secrets; print(secrets.token_urlsafe(48))"
-    AUTH_SECRET: str = "dev-insecure-secret-change-me"
-    # P1-7: was 7 days with NO revocation — a leaked token outlived a
-    # password change. Tokens are now version-pinned (users.token_version,
-    # bumped on password change -> 401 on every outstanding token), which
-    # is the actual revocation fix. Lifetime is 72h as defense in depth:
-    # it halves the stale-token exposure window for the "token stolen,
-    # owner unaware" case without forcing daily logins — the frontend
-    # keeps the JWT in localStorage with no refresh flow, so 24h would
-    # log every user out once a day, and any 401 already redirects to
-    # /login cleanly (frontend/src/lib/api.ts interceptors).
-    AUTH_TOKEN_LIFETIME_SECONDS: int = 3600 * 24 * 3  # 3 days
-
-    # Per-IP auth throttles (P0-3/P1-8, live-confirmed): the email/account
-    # auth buckets are keyed by ATTACKER-CHOSEN strings, so distinct-email
-    # signup bursts and distinct-account password sprays needed a per-IP
-    # layer. Limits are settings (not constants) purely so the test suite
-    # — every request from one TestClient source IP — can raise them
-    # (tests/conftest.py); windows are fixed in core/ratelimit.py BUCKETS.
-    AUTH_REGISTER_IP_PER_DAY: int = 10   # signups per source IP per day
-    AUTH_LOGIN_IP_PER_15MIN: int = 30    # logins per source IP per 15 min
-    # Honor proxy-supplied client-IP headers (True-Client-IP, then the
-    # X-Forwarded-For first hop) for those per-IP buckets. Render's edge
-    # proxies EVERY request, so render.yaml sets this true there; the
-    # default stays FALSE because honoring these headers when the peer IS
-    # the client lets attackers rotate fake IPs and bypass the throttle
-    # (see app/api/deps.py _client_ip for the full decision).
-    TRUST_PROXY_HEADERS: bool = False
+    # Auth (MIG-WO2): Supabase Auth owns identities — this API verifies
+    # its asymmetrically-signed JWTs against the project's JWKS
+    # (app/users.py). No shared secret lives here anymore; the deleted
+    # fastapi-users settings (AUTH_SECRET, AUTH_TOKEN_LIFETIME_SECONDS,
+    # the per-IP auth throttles, TRUST_PROXY_HEADERS) retired with it.
+    # Token lifetime/revocation are Supabase session properties (password
+    # change terminates sessions — doc-verified 2026-09-08).
 
     # CV storage backend: "local" (disk) or "supabase" (official REST, docs:
     # supabase.com/docs/guides/storage/uploads). Vercel Blob was rejected:
@@ -240,18 +219,22 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _production_guards(self) -> "Settings":
-        """Fail fast on insecure production config (never serve on the
-        committed AUTH_SECRET; never reflect-echo CORS by accident). Both
-        the API and the worker run this at import — BEFORE anything binds
-        a port or claims a lock — so every guard here is process-wide."""
+        """Fail fast on insecure production config (never auth against a
+        missing identity provider; never reflect-echo CORS by accident).
+        Both the API and the worker run this at import — BEFORE anything
+        binds a port or claims a lock — so every guard here is
+        process-wide. (MIG-WO2: the old AUTH_SECRET strength guard died
+        with fastapi-users; SUPABASE_URL replaces it — without it no
+        request could ever authenticate.)"""
         import logging
 
         if not self.DEBUG:
-            if self.AUTH_SECRET.startswith("dev-insecure") or len(self.AUTH_SECRET) < 32:
+            if not self.SUPABASE_URL:
                 raise ValueError(
-                    "AUTH_SECRET must be set to a strong random value "
-                    '(>=32 chars) when DEBUG=false — generate with '
-                    'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+                    "SUPABASE_URL must be set when DEBUG=false — auth "
+                    "verifies Supabase JWTs against "
+                    "{SUPABASE_URL}/auth/v1/.well-known/jwks.json; an "
+                    "unset URL means no request can ever authenticate"
                 )
             # r5: the cron's empty-DATABASE_URL incident, API variant —
             # WORSE. An unset/SQLite URL boots fine, /health answers

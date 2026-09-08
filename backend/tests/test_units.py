@@ -1795,29 +1795,10 @@ class TestEEAFreeMovementBloc:
 
 class TestOneDriverEverywhere:
     """WO-11 / ARCHITECTURE F2: asyncpg is documented to fail on BOTH
-    Supabase poolers (prepared statements). SQLAlchemy 2.0's psycopg
-    dialect serves create_engine AND create_async_engine, so the async
-    auth layer runs on psycopg too — one driver, no asyncpg."""
-
-    def test_async_url_never_uses_asyncpg(self):
-        from app.core.database import async_database_url
-
-        cases = {
-            "postgresql+psycopg://u:p@h:5432/db": "postgresql+psycopg://u:p@h:5432/db",
-            "postgresql://u:p@h:5432/db": "postgresql+psycopg://u:p@h:5432/db",
-        }
-        for url, want in cases.items():
-            got = async_database_url(url)
-            assert got == want, f"{url} -> {got}, want {want}"
-            assert "asyncpg" not in got, (
-                "asyncpg in the async engine URL — it fails on both "
-                "Supabase poolers (F2); both engines run on psycopg"
-            )
-
-    def test_sqlite_async_translation_unchanged(self):
-        from app.core.database import async_database_url
-
-        assert async_database_url("sqlite:///./x.db") == "sqlite+aiosqlite:///./x.db"
+    Supabase poolers (prepared statements). MIG-WO2 deleted the async
+    auth engine entirely (fastapi-users gone; the app is one sync
+    engine on psycopg), and with it async_database_url — the one-driver
+    invariant now has exactly one engine to cover."""
 
     def test_asyncpg_absent_from_the_lockfile(self):
         from pathlib import Path
@@ -1833,11 +1814,10 @@ class TestOneDriverEverywhere:
 
 class TestSyncEngineDriverSafety:
     """WO-11 review: bare postgresql:// resolves to the psycopg2 dialect
-    in SQLAlchemy 2.0 — psycopg2 is NOT installed. The async engine was
-    protected by async_database_url; the sync engine took DATABASE_URL
-    verbatim, so a Render/Heroku-style URL crashed at first connection
-    with ModuleNotFoundError: psycopg2. Normalization now lives in one
-    pure function used at config time."""
+    in SQLAlchemy 2.0 — psycopg2 is NOT installed. A Render/Heroku-style
+    URL crashed at first connection with ModuleNotFoundError: psycopg2.
+    Normalization now lives in one pure function used at config time
+    (MIG-WO2: it is the ONLY engine URL path left)."""
 
     def test_every_postgres_shape_normalizes_to_psycopg(self):
         from app.core.database import normalize_postgres_url
@@ -3042,7 +3022,7 @@ class TestCORSProductionGuard:
 
     def _settings_kwargs(self):
         return {"DEBUG": False,
-                "AUTH_SECRET": "x" * 48,
+                "SUPABASE_URL": "https://guard-test.supabase.co",
                 "DATABASE_URL": "postgresql+psycopg://u:p@h/db",
                 "CORS_ORIGINS": ""}
 
@@ -3082,7 +3062,7 @@ class TestProductionPostgresGuard:
 
         from app.core.config import Settings
         with pytest.raises(ValueError):
-            Settings(DEBUG=False, AUTH_SECRET="x" * 48,
+            Settings(DEBUG=False, SUPABASE_URL="https://guard-test.supabase.co",
                      CORS_ORIGINS="https://jobfinderos.pages.dev",
                      DATABASE_URL="sqlite:///./jobfinderos.db")
 
@@ -3097,12 +3077,12 @@ class TestProductionPostgresGuard:
         from app.core.config import Settings
         monkeypatch.delenv("DATABASE_URL", raising=False)
         with pytest.raises(ValueError):
-            Settings(_env_file=None, DEBUG=False, AUTH_SECRET="x" * 48,
+            Settings(_env_file=None, DEBUG=False, SUPABASE_URL="https://guard-test.supabase.co",
                      CORS_ORIGINS="https://jobfinderos.pages.dev")
 
     def test_postgres_passes_when_debug_false(self):
         from app.core.config import Settings
-        s = Settings(DEBUG=False, AUTH_SECRET="x" * 48,
+        s = Settings(DEBUG=False, SUPABASE_URL="https://guard-test.supabase.co",
                      CORS_ORIGINS="https://jobfinderos.pages.dev",
                      DATABASE_URL="postgresql+psycopg://u:p@h/db")
         assert s.DATABASE_URL.startswith("postgresql")
@@ -3126,7 +3106,7 @@ class TestProductionStorageGuard:
 
     def _kwargs(self):
         return {"DEBUG": False,
-                "AUTH_SECRET": "x" * 48,
+                "SUPABASE_URL": "https://guard-test.supabase.co",
                 "DATABASE_URL": "postgresql+psycopg://u:p@h/db",
                 "CORS_ORIGINS": "https://jobfinderos.pages.dev"}
 
@@ -3149,13 +3129,13 @@ class TestProductionStorageGuard:
         from app.core.config import Settings
         monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
         with pytest.raises(ValueError):
-            Settings(_env_file=None, **self._kwargs(), STORAGE_BACKEND="supabase",
-                     SUPABASE_URL="https://example.supabase.co")
+            # _kwargs carries SUPABASE_URL (the MIG-WO2 auth guard needs
+            # it); the missing SERVICE_KEY is what must fire here
+            Settings(_env_file=None, **self._kwargs(), STORAGE_BACKEND="supabase")
 
     def test_supabase_fully_configured_passes(self):
         from app.core.config import Settings
         s = Settings(_env_file=None, **self._kwargs(), STORAGE_BACKEND="supabase",
-                     SUPABASE_URL="https://example.supabase.co",
                      SUPABASE_SERVICE_KEY="service-key")
         assert s.STORAGE_BACKEND == "supabase"
 

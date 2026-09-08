@@ -94,26 +94,32 @@ jobs:
           print("schema OK:", sorted(tables))
           EOF
 
-      - name: App boots against Postgres (schema idempotent, auth mounts)
+      - name: App boots against Postgres (schema idempotent, supabase-token auth)
         if: matrix.database == 'postgres'
         env:
           DATABASE_URL: postgresql+psycopg://postgres:ci@localhost:5432/jobfinderos_ci
           GLM_API_KEY: ""
           DEBUG: "true"
+          # MIG-WO2: auth verifies Supabase-shaped JWTs — the ISSUER bakes
+          # from this; tests/auth_helpers mints tokens against the same
+          # value and patches the JWKS fetch (no network).
+          SUPABASE_URL: https://ci-project.supabase.co
         run: |
           python -c "
           from fastapi.testclient import TestClient
           from app.main import app
+          from tests.auth_helpers import get_or_create_user, mint_token
           with TestClient(app) as c:
               r = c.get('/health'); assert r.json()['database'] == 'up', r.text
-              r = c.post('/api/v1/auth/register', json={'email':'ci@test.com','password':'C1Pass!xxxx'})
-              assert r.status_code == 201, r.text
-              r = c.post('/api/v1/auth/jwt/login', data={'username':'ci@test.com','password':'C1Pass!xxxx'})
+              uid = get_or_create_user('ci@test.com')
+              token = mint_token(uid, 'ci@test.com')
+              r = c.get('/api/v1/profile/me', headers={'Authorization': f'Bearer {token}'})
               assert r.status_code == 200, r.text
-              token = r.json()['access_token']
-              r = c.get('/api/v1/users/me', headers={'Authorization': f'Bearer {token}'})
-              assert r.json()['email'] == 'ci@test.com', r.text
-              print('auth roundtrip on Postgres: OK')
+              # the fastapi-users routes must stay GONE (a resurrected
+              # route would be an unverified identity path)
+              r = c.post('/api/v1/auth/register', json={'email':'x@test.com','password':'C1Pass!xxxx'})
+              assert r.status_code == 404, r.text
+              print('supabase-token auth roundtrip on Postgres: OK')
           "
 
       - name: Alembic runs with ONLY DATABASE_URL (production migration shape)
@@ -310,12 +316,23 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Node 24 = the project's runtime (CLAUDE.md). Also: npm 11
+          # (bundled with Node 24) writes lock entries that npm 10's
+          # `npm ci` validation rejects (@emnpi/* peer chains) — the
+          # version must match the lockfile's generator.
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install
-        run: npm ci
+        # npm install, not npm ci: npm 11's lockfile writer and its own
+        # `npm ci` validator disagree over optional-peer chains
+        # (@emnpi/* via eslint-config-next) — a freshly generated lock
+        # still fails `npm ci` validation (seen with npm 11.6 on Node 24,
+        # both locally and here). `npm install` is idempotent against the
+        # committed lock and still catches missing packages. Revisit when
+        # npm fixes the validator.
+        run: npm install --no-audit --no-fund
 
       - name: Type-check
         run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
@@ -323,6 +340,13 @@ jobs:
       - name: Build (static export — WO-07 Cloudflare Pages shape)
         env:
           NEXT_PUBLIC_API_URL: https://jobfinderos-api.onrender.com
+          # MIG-WO2: the build guard requires the Supabase client vars.
+          # Placeholder VALUES here — this artifact is NEVER deployed
+          # (Pages deploys via ops/deploy_frontend.sh with the real keys,
+          # which it refuses to run without). Proves the wiring, ships
+          # nothing.
+          NEXT_PUBLIC_SUPABASE_URL: https://jobfinderos-ci.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-build-only-not-a-secret
         run: npm run build
 
       - name: Export artifact check

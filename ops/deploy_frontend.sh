@@ -13,9 +13,16 @@ set -euo pipefail
 API_URL="${API_URL:-https://jobfinderos-api.onrender.com}"
 PROJECT="${PAGES_PROJECT:-jobfinderos}"
 
+# MIG-WO2: Supabase Auth client config (PUBLISHABLE values only — never
+# the service-role key). Export them once: `export NEXT_PUBLIC_SUPABASE_URL=...`
+# The build FAILS without them (next.config.ts guard) — deliberate: a
+# bundle missing these ships a login that cannot authenticate.
+: "${NEXT_PUBLIC_SUPABASE_URL:?export NEXT_PUBLIC_SUPABASE_URL (https://<ref>.supabase.co) first}"
+: "${NEXT_PUBLIC_SUPABASE_ANON_KEY:?export NEXT_PUBLIC_SUPABASE_ANON_KEY (publishable anon key — NOT the service key) first}"
+
 cd "$(dirname "$0")/../frontend"
 
-echo "building static export (NEXT_PUBLIC_API_URL=$API_URL)..."
+echo "building static export (NEXT_PUBLIC_API_URL=$API_URL, SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL)..."
 NEXT_PUBLIC_API_URL="$API_URL" npm run build
 
 test -f out/index.html || { echo "build did not produce out/index.html" >&2; exit 1; }

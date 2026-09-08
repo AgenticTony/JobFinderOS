@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # from real env vars AND backend/.env (model_config env_file). Never read
 # os.getenv here: it bypasses .env loading and silently ignores the file.
 from app.core.config import settings as _settings
-from app.core.dburl import async_database_url, normalize_postgres_url
+from app.core.dburl import normalize_postgres_url
 from app.core.orm import Base as Base  # re-export: models/tests import Base from here
 
 DATABASE_URL = _settings.DATABASE_URL
@@ -43,8 +43,9 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Async engine for the auth layer (fastapi-users) — same database, async driver
-ASYNC_DATABASE_URL = async_database_url(DATABASE_URL)
+# MIG-WO2: the async engine/ASYNC_DATABASE_URL machinery is deleted —
+# it existed only for fastapi-users' async adapter. Auth now verifies
+# Supabase JWTs on the sync engine (app/users.py).
 
 
 

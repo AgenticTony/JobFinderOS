@@ -25,12 +25,10 @@ from sqlalchemy import false, text
 
 from app.core.database import SessionLocal
 
+
 # Built by concatenation so no single credential-shaped literal sits in
 # the source (secret scanners flag fixed test passwords; the value is a
 # throwaway fixture that never authenticates anything real).
-PASSWORD = "TestPass-" + "2026!"
-
-
 @pytest.fixture()
 def db():
     """Per-file session fixture (same shape as test_delta/test_units):
@@ -80,12 +78,12 @@ def client():
 
 
 def _register_and_auth(client):
+    # MIG-WO2: minted ES256 Supabase-shaped token (tests/auth_helpers.py)
+    from tests.auth_helpers import auth_client, get_or_create_user
+
     email = f"pc-{uuid.uuid4().hex[:6]}@test.example"
-    r = client.post("/api/v1/auth/register", json={"email": email, "password": PASSWORD})
-    assert r.status_code == 201, r.text
-    r = client.post("/api/v1/auth/jwt/login", data={"username": email, "password": PASSWORD})
-    assert r.status_code == 200, r.text
-    client.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+    get_or_create_user(email)
+    auth_client(client, email)
     return email
 
 

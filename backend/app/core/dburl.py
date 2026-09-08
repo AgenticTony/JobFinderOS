@@ -15,6 +15,9 @@ def normalize_postgres_url(url: str) -> str:
     two resolve to the psycopg2 dialect in SQLAlchemy — not installed
     (psycopg 3 is the one driver) — and the last needs the removed
     asyncpg. Everything normalizes to +psycopg.
+
+    (MIG-WO2 deleted async_database_url — the async auth engine that
+    needed it is gone with fastapi-users.)
     """
     if url.startswith("postgres://"):
         return url.replace("postgres://", "postgresql+psycopg://", 1)
@@ -22,17 +25,4 @@ def normalize_postgres_url(url: str) -> str:
         return url.replace("postgresql://", "postgresql+psycopg://", 1)
     if url.startswith("postgresql+asyncpg://"):
         return url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
-    return url
-
-
-def async_database_url(url: str) -> str:
-    """Resolve the DATABASE_URL for the async auth engine (fastapi-users'
-    adapter is async-only). ONE driver covers both engines (WO-11):
-    postgresql+psycopg:// serves create_engine AND create_async_engine.
-    sqlite -> aiosqlite stays for local/tests.
-    """
-    if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+psycopg://", 1)
-    if url.startswith("sqlite:///"):
-        return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
     return url
