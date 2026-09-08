@@ -104,7 +104,7 @@ frontend / ops / docs, verified stats, and a findings ledger; indexed 2026-08-30
   - Run: `cd frontend && npm run dev` → http://localhost:3000
   - Type-check: `npx tsc --noEmit --noUnusedLocals --noUnusedParameters`
 - **Tests:** `cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`
-  - All 436 tests must be green before any commit
+  - All 437 tests must be green before any commit
   - Flow test: `PYTHONPATH=. .venv/bin/python tests/test_flow.py`
   - Calibration (opt-in, costs API calls): `RUN_CALIBRATION=1 pytest tests/test_calibration.py`
 
@@ -161,18 +161,32 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 | adzuna | (none — module retained) | app_id + key | Demoted from the GB pack (WO-08: Reed carries the UK). Retained for the US/AU expansion backbone |
 | arbeitnow, remotive, jobicy, workingnomads | shared | none | Public feeds |
 
-## Multi-user architecture (Phase 1b, COMPLETE)
+## Multi-user architecture (Phase 1b, COMPLETE; auth = Supabase since MIG-WO2)
 
-- **Auth on every route**: `Depends(current_active_user)` — 401 for anonymous callers.
-  Frontend: /login page, axios Bearer interceptors, 401 → redirect, sidebar Sign out.
+- **Auth on every route**: MIG-WO2 (2026-09-08) — Supabase Auth owns
+  identities; the API verifies ES256 access tokens against the project JWKS
+  (`app/users.py`; algorithm read from the key — the live project is ES256,
+  NOT RS256) and mirror-upserts the users row on first sight (that first
+  request also creates the Profile row + fires the onboarding drip).
+  Signup/login/forgot/reset are hosted Supabase flows (frontend:
+  `@supabase/supabase-js`, PKCE, `/login` + `/reset-password`).
+  fastapi-users, the async auth engine, AUTH_SECRET and the auth rate-limit
+  buckets are DELETED; password policy + auth throttling are Supabase's.
+  Session revocation on password change is Supabase-native (the P1-7
+  token_version scheme died with it; the column stays for rollback safety).
 - **Per-user data model**: user_id FKs on profiles (UNIQUE), match_results
-  (composite unique user_id+job_id), application_drafts, applications. All NOT NULL.
+  (composite unique user_id+job_id), application_drafts, applications,
+  feedback + plain user_id on ai_usage. All NOT NULL.
 - **user_id is required and keyword-only** across 12+ functions — the unsafe
   unscoped call is a TypeError at import time.
 - **IDOR**: `owns_or_404` fails CLOSED on NULL (a NULL-owner row is nobody's).
-- **Rate limits**: sliding-window per user on AI-spending endpoints.
-- **GDPR**: DELETE /api/v1/account/delete (cascade + CV file + token death +
-  rate-limit memory purge); GET /api/v1/account/export (portability).
+- **Rate limits**: sliding-window per user on AI-spending endpoints
+  (cv_upload, hunt, match_run, draft_prepare, ai_suggest, send_daily…).
+- **GDPR**: DELETE /api/v1/account/delete — Supabase identity dies FIRST
+  (503 before any local deletion if that call fails), then the local
+  cascade + CV files + rate-limit purge; the users row becomes a TOMBSTONE
+  (redacted email, is_active=False) so the ~1h outstanding-token window
+  401s instead of resurrecting rows. GET /api/v1/account/export (portability).
 - **Cross-tenant dismissal fixed**: dismissals live on match_results.dismissed_reason
   (per-user, per-job), never on shared job_postings.status.
 
@@ -181,8 +195,8 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 - **CI** (.github/workflows/ci.yml): 5 jobs — Backend (ruff + Alembic on Postgres 16 +
   full test suite on both DBs + flow test), Frontend (tsc + next build), Docker
   (build + smoke test), pip-audit (supply-chain), Blueprint (render.yaml invariants).
-  CI installs from `requirements.dev.lock` (71 pins = prod lock + pytest/ruff);
-  the production Docker images install `requirements.lock` (67 pins) only.
+  CI installs from `requirements.dev.lock` (74 pins = prod lock + pytest/ruff);
+  the production Docker images install `requirements.lock` (70 pins) only.
   Dependabot (.github/dependabot.yml) covers pip/npm/github-actions drift.
 - **Dockerfile**: python:3.12-slim, non-root user, lockfile-only install,
   ships Alembic for boot migrations.
@@ -246,6 +260,21 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 
 ## Open items / next steps
 
+- [ ] **MIG-WO2 live cutover — the code is DONE, these are the owner
+      steps** (full checklist: `docs/deploy/MIG-WO2-runbook.md`): (1)
+      Supabase dashboard → custom SMTP via Resend (BLOCKER: the built-in
+      sender is 2/hr + team-addresses-only — real beta emails won't
+      deliver without it), (2) set Site URL + Redirect URLs (include
+      both /reset-password locales), (3) pg_dump backup, (4) run
+      `ops/mig_wo2_cutover.py --yes` between hunt windows (3 live
+      accounts; prints one-time temp passwords), (5) merge +
+      deploy both services (delete stale AUTH_SECRET/TRUST_PROXY_HEADERS
+      env vars in the Render dashboard if they survive the blueprint
+      sync — extra inputs are boot-fatal now), (6) set the Pages env
+      vars NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY
+      (publishable key) before `ops/deploy_frontend.sh`. Afterward:
+      drop users.token_version in a later migration (kept for rollback
+      safety).
 - [ ] **Restore point-of-collection privacy panels after beta** (owner
       decision 2026-09-01): both PrivacyNotice placements (account box,
       CV upload) removed for the tester phase; /privacy is the disclosure

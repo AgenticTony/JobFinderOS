@@ -18,7 +18,12 @@ Execution ledger:
 - **MIG-WO1** (move to Supabase Postgres): **executed 2026-08-28** — 797
   rows migrated, counts snapshot-verified, zero invariant violations;
   details in `docs/work-orders/README.md` under WO-03.
-- **MIG-WO2** (Supabase Auth): **open** — remaining build work.
+- **MIG-WO2** (Supabase Auth): **code complete 2026-09-08** on
+  `mig/wo2-supabase-auth` — fastapi-users deleted, JWKS (ES256, not
+  the RS256 this plan assumed — live-verified) verification + mirror
+  rows + GDPR dual-delete/tombstone shipped; the live cutover (Supabase
+  identities + FK remap + dashboard SMTP/redirect config) is the
+  remaining owner checklist: `docs/deploy/MIG-WO2-runbook.md`.
 - **MIG-WO3** (RLS): **open** — remaining build work.
 - **MIG-WO4**: overtaken by events — the WO-07 deploy shipped without it.
 - **MIG-WO5** (inference residency): **decided 2026-08-30** — stay on the
