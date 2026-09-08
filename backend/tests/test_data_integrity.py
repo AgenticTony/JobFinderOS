@@ -38,10 +38,6 @@ from app.models import (
 # Built by concatenation so no single credential-shaped literal sits in
 # the source (secret scanners flag fixed test passwords; the values are
 # throwaway fixtures that never authenticate anything real).
-PASSWORD = "TestPass-" + "2026!"
-NEW_PASSWORD = "NewPass-" + "2027!"
-
-
 @pytest.fixture(scope="module")
 def client():
     if os.path.exists("test_di.db"):

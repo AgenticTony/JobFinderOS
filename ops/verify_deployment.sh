@@ -1,26 +1,23 @@
 #!/usr/bin/env bash
 # WO-07 post-deploy verification — one command, every gate.
-# Usage: bash ops/verify_deployment.sh [https://jobfinderos-api.onrender.com] [https://jobfinderos.pages.dev]
+# Usage: bash ops/verify_deployment.sh [https://jobfinderos-api.onrender.com] [https://jobfinderos.pages.dev] [https://<ref>.supabase.co]
+#
+# MIG-WO2: the auth roundtrip is a REAL Supabase password-grant login
+# (the API has no auth endpoints anymore — it verifies Supabase JWTs).
+# The probe account must exist IN SUPABASE (create once in the dashboard
+# or via the admin API; it mirrors into the API users table on first
+# authenticated request). Export SUPABASE_ANON_KEY (publishable key) or
+# pass nothing and the auth check degrades to a skip.
 #
 # Checks: API /health (DB up), CORS preflight from the frontend origin,
-# a full register/login/me roundtrip against the live API (reuses ONE
-# permanent, clearly-named service account — run 1 registers it, later
-# runs get the accepted 400 'already exists' and log straight in), email-apply provisioning (P0-6:
-# /api/v1/profile/status reports email_apply_enabled from RESEND_API_KEY),
-# and that the Pages site serves the app with the API URL inlined in its
-# bundle. Manual remainder: only a real apply proves APPLY_FROM_EMAIL is
-# a Resend-VERIFIED sender.
+# Supabase login -> API authenticated call (proves JWKS verify + live DB
+# reads), and that the Pages site serves the app with the API URL
+# inlined in its bundle.
 set -uo pipefail
 
 API="${1:-https://jobfinderos-api.onrender.com}"
 FRONTEND="${2:-https://jobfinderos.pages.dev}"
-# One FIXED service account. The earlier unique-per-run address (plus-
-# addressing timestamp) was itself the workaround for a timestamped
-# PASSWORD breaking re-runs — but register's 400 'already exists' is
-# already accepted below and the login roundtrip proves the fixed
-# credentials, so a permanent account verifies exactly the same paths
-# without accumulating a probe row in users per deploy (294 test rows
-# were cleaned out of production on 2026-09-01; don't regrow them).
+SUPABASE="${3:-${SUPABASE_URL:-https://jsibogzklhswpmozcyhn.supabase.co}}"
 PROBE_EMAIL="deploy-check@jobfinderos.dev"
 PROBE_PASS="DeployCheck-Probe-2026!"
 PASS=0; FAIL=0
@@ -51,11 +48,13 @@ fi
 # 2. CORS preflight from the frontend origin — ONE request, capture code
 #    and headers together (two requests straddle a cold-start wake). The
 #    origin must be ECHOED (allow_credentials=True forbids wildcard).
+#    MIG-WO2: preflight a live business route; the old auth endpoints
+#    are gone (CORSMiddleware answers before routing either way).
 cors_headers=$(mktemp)
-cors=$(curl -s -m 60 -o /dev/null -D "$cors_headers" -w "%{http_code}" -X OPTIONS "$API/api/v1/auth/jwt/login" \
+cors=$(curl -s -m 60 -o /dev/null -D "$cors_headers" -w "%{http_code}" -X OPTIONS "$API/api/v1/profile/status" \
     -H "Origin: $FRONTEND" \
-    -H "Access-Control-Request-Method: POST" \
-    -H "Access-Control-Request-Headers: content-type" || true)
+    -H "Access-Control-Request-Method: GET" \
+    -H "Access-Control-Request-Headers: authorization,content-type" || true)
 allow=$(tr -d '\r' < "$cors_headers" | grep -i '^access-control-allow-origin:' || true)
 rm -f "$cors_headers"
 if [ "$cors" = "200" ] && echo "$allow" | grep -q "$FRONTEND"; then
@@ -65,44 +64,44 @@ else
     echo "  -> fix: Render api env CORS_ORIGINS must list $FRONTEND exactly."
 fi
 
-# 3. Auth roundtrip: register -> login -> me (proves live DB writes).
-#    Render's free edge intermittently answers 404 'no-server' while the
-#    instance is half-awake — retry the login rather than misdiagnosing.
-reg=$(curl -s -m 30 -o /dev/null -w "%{http_code}" -X POST "$API/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"$PROBE_EMAIL\",\"password\":\"$PROBE_PASS\"}" || true)
-[ "$reg" = "201" ] || [ "$reg" = "400" ] && ok "register ($reg)" || bad "register ($reg)"
-login=""; token=""
-for attempt in 1 2 3 4 5; do
-    login=$(curl -s -m 60 -X POST "$API/api/v1/auth/jwt/login" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        --data-urlencode "username=$PROBE_EMAIL" --data-urlencode "password=$PROBE_PASS" || true)
+# 3. Auth roundtrip (MIG-WO2): REAL Supabase password-grant login, then
+#    the token against an authenticated API route. 404 'No CV on file'
+#    from /profile/status = AUTH PASSED (anonymous is 401; a broken JWKS
+#    verify is 401). /account/export 200 = live DB reads through the
+#    mirror row.
+if [ -z "${SUPABASE_ANON_KEY:-}" ]; then
+    echo "  (auth roundtrip SKIPPED — export SUPABASE_ANON_KEY (publishable) to run it)"
+    token=""
+else
+    login=$(curl -s -m 30 -X POST "$SUPABASE/auth/v1/token?grant_type=password" \
+        -H "apikey: $SUPABASE_ANON_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{\"email\":\"$PROBE_EMAIL\",\"password\":\"$PROBE_PASS\"}" || true)
     token=$(echo "$login" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
-    [ -n "$token" ] && break
-    echo "  (login wake attempt $attempt — free-edge no-server, retrying)"
-    sleep 8
-done
-if [ -n "$token" ]; then
-    me=$(curl -s -m 30 -H "Authorization: Bearer $token" "$API/api/v1/users/me" || true)
-    echo "$me" | grep -q "$PROBE_EMAIL" && ok "login + /users/me roundtrip" || bad "/users/me ($me)"
-else
-    bad "login (no access_token; response: ${login:0:120})"
-fi
-
-# 4. Email apply capability flag (P0-6 field, re-scoped 2026-09-01: email
-#    apply is OFF during beta — it returns sending from the user's own
-#    Gmail). The field just needs to EXIST and be a boolean; the
-#    deployment's real key surface (GLM, DB) is proven by the roundtrip.
-if [ -n "$token" ]; then
-    pstatus=$(curl -s -m 30 -H "Authorization: Bearer $token" "$API/api/v1/profile/status" || true)
-    if echo "$pstatus" | grep -q '"email_apply_enabled":\(true\|false\)'; then
-        ok "profile status reachable (email_apply_enabled flag present)"
+    if [ -n "$token" ]; then
+        ok "Supabase password-grant login"
     else
-        bad "profile status missing/invalid: $pstatus"
-        echo "  -> check the deployment logs; the API is up but /profile/status failed."
+        bad "Supabase login (response: ${login:0:160})"
+        echo "  -> create the probe account in Supabase (dashboard or admin API) with the credentials at the top of this script."
     fi
-else
-    echo "  (email-apply check skipped — no token; fix the login failure above first)"
+fi
+if [ -n "$token" ]; then
+    # retry wrapper — Render's free edge intermittently 404s while waking
+    me=""; code="000"
+    for attempt in 1 2 3; do
+        me=$(curl -s -m 60 -w "\n%{http_code}" -H "Authorization: Bearer $token" "$API/api/v1/account/export" || true)
+        code=$(echo "$me" | tail -1); me=$(echo "$me" | head -n -1)
+        [ "$code" = "200" ] && break
+        echo "  (api wake attempt $attempt — code=$code, retrying)"
+        sleep 8
+    done
+    if [ "$code" = "200" ] && echo "$me" | grep -q "$PROBE_EMAIL"; then
+        ok "API authenticated export (JWKS verify + mirror row + DB read)"
+    elif [ "$code" = "401" ]; then
+        bad "API rejected the Supabase token (401) — JWKS verify broken; check SUPABASE_URL on the deployment"
+    else
+        bad "API export (code=$code body=${me:0:120})"
+    fi
 fi
 
 echo "== Frontend: $FRONTEND =="

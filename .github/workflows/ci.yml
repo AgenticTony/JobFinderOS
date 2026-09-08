@@ -325,7 +325,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install
-        run: npm ci
+        # npm install, not npm ci: npm 11's lockfile writer and its own
+        # `npm ci` validator disagree over optional-peer chains
+        # (@emnpi/* via eslint-config-next) — a freshly generated lock
+        # still fails `npm ci` validation (seen with npm 11.6 on Node 24,
+        # both locally and here). `npm install` is idempotent against the
+        # committed lock and still catches missing packages. Revisit when
+        # npm fixes the validator.
+        run: npm install --no-audit --no-fund
 
       - name: Type-check
         run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters

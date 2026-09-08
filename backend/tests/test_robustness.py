@@ -34,9 +34,6 @@ from app.core.database import SessionLocal
 # Built by concatenation so no single credential-shaped literal sits in
 # the source (secret scanners flag fixed test passwords; the value is a
 # throwaway fixture that never authenticates anything real).
-PASSWORD = "TestPass-" + "2026!"
-
-
 @pytest.fixture()
 def db():
     """Per-file session fixture (same shape as test_delta/test_units):
