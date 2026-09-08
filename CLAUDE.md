@@ -189,6 +189,20 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   401s instead of resurrecting rows. GET /api/v1/account/export (portability).
 - **Cross-tenant dismissal fixed**: dismissals live on match_results.dismissed_reason
   (per-user, per-job), never on shared job_postings.status.
+- **RLS two-session story (MIG-WO3, 2026-09-08)**: database-enforced tenancy.
+  `get_db` serves `RequestSessionLocal` — on Postgres every transaction
+  SETs LOCAL role `authenticated` + `request.jwt.claim.sub` (from the
+  verified token's contextvar; NO sub ⇒ auth.uid() NULL ⇒ the IS NOT
+  NULL policies filter everything — fail-closed). `SessionLocal` is the
+  SERVICE factory (hunt/scheduler/pipeline/worker/scripts/test seeding):
+  table-owner postgres, RLS not enforced, operates the shared pool.
+  Policies/grants/the vanilla-PG auth.uid() shim live in
+  `app/core/rls_sql.py` (single source: the migration AND conftest's
+  stamp_alembic_head apply it — create_all-built schemas skip
+  migrations). Trap test (Postgres-only): unscoped SELECT in a no-sub
+  request session returns ZERO rows; listener removal leaks
+  (revert-checked). Landing is gated on the MIG-WO2 live cutover (RLS
+  keys on Supabase UUIDs).
 
 ## Production infrastructure
 
