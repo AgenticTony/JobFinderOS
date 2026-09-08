@@ -1308,7 +1308,13 @@ class TestSupabaseTokenVerification:
             return app_users._jwks_cache
 
         monkeypatch.setattr(app_users, "fetch_jwks", stateful_fetch)
-        app_users._invalidate_jwks_cache()
+        # Deterministic COLD start: clear the cache directly (going
+        # through _invalidate_jwks_cache would also ARM the cooldown we
+        # are about to exercise) — earlier tests may leave the module
+        # cache warm, which changes the fetch count legitimately.
+        with app_users._jwks_lock:
+            app_users._jwks_cache = {}
+            app_users._jwks_fetched_at = 0.0
         app_users._reset_jwks_refresh_cooldown_for_tests()
 
         now = int(_time.time())
