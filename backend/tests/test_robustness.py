@@ -86,12 +86,14 @@ def client():
 
 
 def _register_and_auth(client, label):
+    # MIG-WO2: minted ES256 Supabase-shaped token (tests/auth_helpers.py)
+    from tests.auth_helpers import auth_client, get_or_create_user, mint_token
+
     email = f"rb-{label}-{uuid.uuid4().hex[:6]}@test.example"
-    r = client.post("/api/v1/auth/register", json={"email": email, "password": PASSWORD})
-    assert r.status_code == 201, r.text
-    r = client.post("/api/v1/auth/jwt/login", data={"username": email, "password": PASSWORD})
-    assert r.status_code == 200, r.text
-    return email, r.json()["access_token"]
+    uid = get_or_create_user(email)
+    token = mint_token(uid, email)
+    auth_client(client, email)
+    return email, token
 
 
 def _auth(client, token):

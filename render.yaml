@@ -52,26 +52,14 @@ services:
         sync: false
       - key: TRIAL_DAY1_SCORE_CAP
         sync: false
-      # Auth — Render generates a 256-bit value ONCE and persists it
-      # across deploys (blueprint-spec: generateValue). DEBUG=false
-      # rejects weak/short secrets at boot (config.py _production_guards).
-      - key: AUTH_SECRET
-        generateValue: true
+      # Auth (MIG-WO2): AUTH_SECRET is gone — Supabase Auth owns
+      # identities; the API verifies its ES256 JWTs against the JWKS at
+      # SUPABASE_URL (set below with storage). DEBUG=false refuses to
+      # boot without SUPABASE_URL (config.py _production_guards).
       - key: DEBUG
         value: "false"
       - key: ENVIRONMENT
         value: production
-      # P0-3/P1-8: the per-IP auth throttles (signup factory / password
-      # spray) key on the client IP. Render's edge proxies EVERY request,
-      # so request.client.host would be the proxy's address — every user
-      # sharing one 10-signups/day bucket. True here because a proxy front
-      # is guaranteed on Render web services (the app then prefers
-      # True-Client-IP, falling back to X-Forwarded-For — see
-      # backend/app/api/deps.py _client_ip); a LITERAL value so it
-      # survives service recreation (OPS-7 sync:false lesson). The cron
-      # service never serves HTTP, so it doesn't need the flag.
-      - key: TRUST_PROXY_HEADERS
-        value: "true"
       # CORS — explicit origins only (allow_credentials=True forbids *).
       # Set to the Pages URL after the frontend project exists, e.g.
       # https://jobfinderos.pages.dev[,https://www.yourdomain.com]
@@ -152,11 +140,12 @@ services:
         sync: false
       - key: TRIAL_DAY1_SCORE_CAP
         sync: false
-      # Settings validates AUTH_SECRET even in the worker (DEBUG=false
-      # guard is global); the worker never signs tokens, its value just
-      # has to exist and be strong.
-      - key: AUTH_SECRET
-        generateValue: true
+      # MIG-WO2: AUTH_SECRET retired. The DEBUG=false guard now requires
+      # SUPABASE_URL in BOTH processes (the worker runs _production_guards
+      # at import too, and the JWKS issuer bakes from it) — sync:false so
+      # the prompted value survives service recreation (OPS-7 lesson).
+      - key: SUPABASE_URL
+        sync: false
       - key: DEBUG
         value: "false"
       - key: ENVIRONMENT

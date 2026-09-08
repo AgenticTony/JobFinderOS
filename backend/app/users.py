@@ -1,264 +1,247 @@
 """
-Auth layer — fastapi-users v15 on SQLAlchemy (async adapter, per official
-docs: fastapi-users.github.io/fastapi-users/latest/configuration/databases/sqlalchemy/).
+Auth layer — MIG-WO2: Supabase Auth JWT verification (no fastapi-users).
 
-The app's main engine is sync; auth runs on a second, async engine over the
-same database (psycopg / aiosqlite — see core.database.async_database_url).
+The browser talks to Supabase Auth directly (sign-up, sign-in, password
+reset, email verification — all hosted, all native). This module is the
+backend's half: verify the Bearer token against the project's JWKS and
+resolve it to a User row.
 
-Phase 0 scope: register + login (JWT bearer) + /users/me. Email verification
-and password-reset routers are intentionally not mounted yet — they require a
-mailer; they'll be enabled with the Composio/Resend email work in Phase 2.
+JWKS, not a shared secret: this project (created 2026-08) signs with an
+asymmetric ES256 key published at
+  {SUPABASE_URL}/auth/v1/.well-known/jwks.json
+(live-verified 2026-09-08: one EC key, alg ES256 — NOT the RS256 that
+MIGRATION.md's 2026-08-27 doc check assumed; the algorithm is read from
+the key, never hardcoded). Verification is pure CPU — no call to the
+Auth server, no secret on our side.
 
-P1-7: tokens are revocable via a token_version claim — see
-VersionedJWTStrategy and UserManager._bump_token_version below. The stock
-fastapi-users JWT is valid until expiry no matter what happens to the
-account; with the JWT in localStorage and no refresh flow, a password
-change is the user's only "log everything else out" lever, and it used to
-do nothing.
+Mirror rows: Supabase owns identities; the `users` table remains the FK
+anchor for profiles/matches/drafts/applications. get_authenticated_user
+upserts the mirror on first sight (id + email from the token claims) and
+runs the registration side-effects that fastapi-users' on_after_register
+hook used to own (Profile row + onboarding drip).
+
+Deleted with this module's fastapi-users past: the three auth routers
+(register/login/users — Supabase's hosted pages+API own those flows),
+the async engine + ASYNC_DATABASE_URL dual-database machinery (it existed
+ONLY for fastapi-users' async adapter), the P1-7 token_version
+revocation scheme (Supabase terminates sessions on password change —
+doc-verified 2026-09-08), and the auth signup hardening (password policy
+and auth rate limits live in Supabase's service now).
 """
 
 import logging
+import threading
+import time
 import uuid
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
-from fastapi import Depends, Request
-from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin, schemas
-from fastapi_users.authentication import (
-    AuthenticationBackend,
-    BearerTransport,
-    JWTStrategy,
-)
-from fastapi_users.db import SQLAlchemyUserDatabase
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+import httpx
+import jwt as pyjwt
+from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import ASYNC_DATABASE_URL
+from app.core.database import get_db
 from app.models import User
 
 logger = logging.getLogger(__name__)
 
-# --- Async engine/session for auth (see module docstring) ---
-auth_engine = create_async_engine(ASYNC_DATABASE_URL)
-AsyncSessionLocal = async_sessionmaker(
-    auth_engine, class_=AsyncSession, expire_on_commit=False
-)
+# Token checks (Supabase access tokens: iss is the auth base URL, aud is
+# the role claim audience; exp is enforced by PyJWT with a small skew
+# allowance for the API server's clock).
+AUDIENCE = "authenticated"
+ISSUER = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
+CLOCK_SKEW_SECONDS = 30
+
+# JWKS cache. Keys rotate rarely; refresh when a token names a kid we
+# don't have (rotation moment) or the cache goes stale.
+_JWKS_TTL_SECONDS = 3600
+_jwks_lock = threading.Lock()
+_jwks_cache: dict = {}
+_jwks_fetched_at: float = 0.0
 
 
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
-        yield session
+def fetch_jwks() -> dict:
+    """Fetch (and cache) the project's public signing keys.
 
-
-async def get_user_db(session: AsyncSession = Depends(get_async_session)):
-    yield SQLAlchemyUserDatabase(session, User)
-
-
-class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
-    reset_password_token_secret = settings.AUTH_SECRET
-    verification_token_secret = settings.AUTH_SECRET
-
-    async def validate_password(self, password: str, user) -> None:
-        """Password policy (signup hardening). fastapi-users' default
-        accepts ANY string — 'a' registered fine. Runs on register AND on
-        every future password set/reset. Raises InvalidPasswordException,
-        which the routers map to a 400 carrying the reason."""
-        from fastapi_users.exceptions import InvalidPasswordException
-
-        n = len(password.encode("utf-8"))
-        if n < 8:
-            raise InvalidPasswordException(
-                reason="Password must be at least 8 characters"
-            )
-        if n > 72:
-            # bcrypt silently truncates beyond 72 bytes — a longer password
-            # lends false strength to its prefix
-            raise InvalidPasswordException(
-                reason="Password must be at most 72 characters"
-            )
-        local = (user.email or "").split("@")[0].lower()
-        if local and len(local) >= 4 and local in password.lower():
-            raise InvalidPasswordException(
-                reason="Password must not contain your email address"
-            )
-
-    async def on_after_register(
-        self, user: User, request: Optional[Request] = None
-    ) -> None:
-        # Every account gets its Profile row at registration — the per-user
-        # world hangs off this link
-        from app.core.database import SessionLocal
-        from app.models import Profile as ProfileModel
-
-        db = SessionLocal()
-        try:
-            if not db.query(ProfileModel).filter(ProfileModel.user_id == user.id).first():
-                db.add(ProfileModel(user_id=user.id, is_active=1))
-                db.commit()
-        finally:
-            db.close()
-
-        # Beta onboarding drip (owner decision 2026-09-03): best-effort
-        # create the Resend contact + fire user.created (English series)
-        # or user.created-sv (Swedish series, picked by the signup
-        # browser Accept-Language) — the matching automation runs the
-        # daily "how to use this section" series. Best-effort by
-        # contract: registration must succeed regardless (see
-        # onboarding_service).
-        try:
-            from app.services import onboarding_service
-
-            onboarding_service.notify_signup(
-                str(user.email),
-                first_name=None,
-                accept_language=(
-                    request.headers.get("accept-language") if request else None
-                ),
-            )
-        except Exception:  # noqa: BLE001 — never fail a signup over email
-            logger.exception(
-                "onboarding: signup notify failed for %s", user.email
-            )
-
-    async def on_after_update(
-        self, user: User, update_dict: dict, request: Optional[Request] = None
-    ) -> None:
-        # P1-7: fastapi-users v15 changes passwords via PATCH /users/me —
-        # update() calls _update (which commits the new hash) and then this
-        # hook with the ORIGINAL update dict. A password change must revoke
-        # every outstanding token; other fields (display_name, ...) must
-        # NOT log the user out.
-        if "password" in update_dict:
-            await self._bump_token_version(user, why="password change")
-
-    async def on_after_reset_password(
-        self, user: User, request: Optional[Request] = None
-    ) -> None:
-        # The forgot-password router is not mounted yet, but the manager
-        # method is reachable — a reset is an even stronger revocation
-        # trigger than a change. Wire it now so mounting the router later
-        # does not silently reopen the hole.
-        await self._bump_token_version(user, why="password reset")
-
-    async def _bump_token_version(self, user: User, *, why: str) -> None:
-        """Invalidate every token issued before now: version-pinned tokens
-        stop matching the row at the next request (see
-        VersionedJWTStrategy.read_token)."""
-        user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
-        session = getattr(self.user_db, "session", None)
-        if session is None:  # pragma: no cover — adapter always carries one
-            logger.warning(
-                "token_version bump for user %s skipped: auth session "
-                "unavailable", user.id,
-            )
-            return
-        session.add(user)
-        await session.commit()
-        logger.info("token_version bumped for user %s (%s) — outstanding "
-                    "tokens revoked", user.id, why)
-
-
-async def get_user_manager(
-    user_db: SQLAlchemyUserDatabase = Depends(get_user_db),
-):
-    yield UserManager(user_db)
-
-
-bearer_transport = BearerTransport(tokenUrl="api/v1/auth/jwt/login")
-
-
-class VersionedJWTStrategy(JWTStrategy):
-    """JWT strategy carrying the user's token_version as a 'ver' claim.
-
-    The stock fastapi-users JWT is unrevokable until expiry — with a
-    multi-day lifetime and the token sitting in localStorage, a password
-    change did nothing to a leaked token (P1-7). write_token pins the
-    claim to the user's CURRENT version; read_token re-reads the live
-    row (it already fetches the user) and rejects the token on mismatch,
-    which the bearer transport surfaces as 401 — the frontend already
-    treats any 401 as "clear the token, go to login".
-
-    Tokens minted before the column existed carry no 'ver'; they read as
-    version 0 so the rollout does not force a mass logout. The first
-    password change bumps the row to 1 and still revokes them (0 != 1).
+    Module-level and single-point so tests can monkeypatch it with a
+    fixture keypair (see conftest.py) — nothing else in the app performs
+    this fetch.
     """
-
-    async def write_token(self, user: User) -> str:
-        from fastapi_users.jwt import generate_jwt
-
-        data = {
-            "sub": str(user.id),
-            "aud": self.token_audience,
-            "ver": int(getattr(user, "token_version", 0) or 0),
-        }
-        return generate_jwt(
-            data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm
-        )
-
-    async def read_token(
-        self, token: Optional[str], user_manager: BaseUserManager[User, uuid.UUID]
-    ) -> Optional[User]:
-        import jwt as pyjwt
-        from fastapi_users import exceptions
-        from fastapi_users.jwt import decode_jwt
-
-        if token is None:
-            return None
-        try:
-            data = decode_jwt(
-                token, self.decode_key, self.token_audience,
-                algorithms=[self.algorithm],
-            )
-            user_id = data.get("sub")
-            if user_id is None:
-                return None
-        except pyjwt.PyJWTError:
-            return None
-
-        try:
-            parsed_id = user_manager.parse_id(user_id)
-            user = await user_manager.get(parsed_id)
-        except (exceptions.UserNotExists, exceptions.InvalidID):
-            return None
-        if user is None:
-            return None
-
-        try:
-            token_ver = int(data.get("ver", 0))
-        except (TypeError, ValueError):
-            return None  # malformed claim — fail closed
-        current_ver = int(getattr(user, "token_version", 0) or 0)
-        if token_ver != current_ver:
-            logger.info(
-                "Rejected version-mismatched token for user %s "
-                "(token ver=%s, row ver=%d)", user_id, data.get("ver"), current_ver,
-            )
-            return None
-        return user
+    global _jwks_cache, _jwks_fetched_at
+    with _jwks_lock:
+        now = time.monotonic()
+        if _jwks_cache and now - _jwks_fetched_at < _JWKS_TTL_SECONDS:
+            return _jwks_cache
+        url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        resp = httpx.get(url, timeout=10)
+        resp.raise_for_status()
+        _jwks_cache = resp.json()
+        _jwks_fetched_at = now
+        return _jwks_cache
 
 
-def get_jwt_strategy() -> JWTStrategy:
-    return VersionedJWTStrategy(
-        secret=settings.AUTH_SECRET,
-        lifetime_seconds=settings.AUTH_TOKEN_LIFETIME_SECONDS,
+def _invalidate_jwks_cache() -> None:
+    """Test hook: drop the cache so the next fetch_jwks() hits the wire
+    (or the monkeypatch)."""
+    global _jwks_cache, _jwks_fetched_at
+    with _jwks_lock:
+        _jwks_cache = {}
+        _jwks_fetched_at = 0.0
+
+
+def _key_for_kid(token: str) -> tuple:
+    """Return (verification_key, algorithm) for the token's kid.
+
+    Refreshes the JWKS once when a token carries an unknown kid — the
+    key-rotation moment — before giving up.
+    """
+    header = pyjwt.get_unverified_header(token)
+    kid = header.get("kid")
+    alg = header.get("alg")
+    keys = fetch_jwks().get("keys", [])
+    for k in keys:
+        if kid is None or k.get("kid") == kid:
+            return k, alg or k.get("alg", "ES256")
+    _invalidate_jwks_cache()
+    keys = fetch_jwks().get("keys", [])
+    for k in keys:
+        if kid is None or k.get("kid") == kid:
+            return k, alg or k.get("alg", "ES256")
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication token",
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
 
-auth_backend = AuthenticationBackend(
-    name="jwt", transport=bearer_transport, get_strategy=get_jwt_strategy
-)
+def verify_supabase_token(token: str) -> dict:
+    """Verify a Supabase access token; return its claims.
 
-fastapi_users = FastAPIUsers[User, uuid.UUID](get_user_manager, [auth_backend])
+    Fail-closed: signature (JWKS), issuer, audience and expiry must all
+    check out. Any failure is a 401 — the frontend treats 401 as "clear
+    the session, go to login" (unchanged contract from the JWT era).
+    """
+    try:
+        key, alg = _key_for_kid(token)
+        public_key = pyjwt.algorithms.RSAAlgorithm if alg.startswith("RS") else pyjwt.algorithms.ECAlgorithm
+        pem = public_key.from_jwk(key)
+        claims = pyjwt.decode(
+            token,
+            key=pem,
+            algorithms=[alg],
+            audience=AUDIENCE,
+            issuer=ISSUER,
+            leeway=CLOCK_SKEW_SECONDS,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # PyJWTError, KeyError, ValueError — all 401
+        logger.info("Rejected auth token: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    return claims
 
-current_active_user = fastapi_users.current_user(active=True)
+
+def get_authenticated_user(
+    request: Request, db: Session = Depends(get_db)
+) -> User:
+    """Every business route starts here — the caller's account.
+
+    Bearer token → Supabase claims → mirror row. The mirror row is
+    upserted on first sight: SELECT by id, INSERT when missing (email
+    from the token; hashed_password is a sentinel — Supabase owns the
+    real secret). First creation also runs the side-effects registration
+    used to own: the Profile row and the onboarding drip.
+    """
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    claims = verify_supabase_token(auth.removeprefix("Bearer ").strip())
+
+    try:
+        user_id = uuid.UUID(str(claims.get("sub", "")))
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    user = db.get(User, user_id)
+    if user is None:
+        user = User(
+            id=user_id,
+            email=str(claims.get("email") or f"{user_id}@unknown.invalid"),
+            hashed_password="supabase-auth",  # sentinel: column is NOT NULL
+        )
+        db.add(user)
+        _on_first_sight(user, db, request)
+        # get_db never commits (routes own their commits); a dependency
+        # that writes must commit its own work or the mirror row dies
+        # with the session — and the NEXT request re-inserts into a
+        # unique-constraint collision.
+        db.commit()
+        logger.info("Mirror row created for Supabase user %s", user_id)
+    if not user.is_active:
+        # Tombstone (GDPR erasure): the account is dead. Supabase's
+        # access tokens stay signature-valid up to ~1h after the
+        # identity is deleted — the tombstone is what turns that window
+        # into 401s instead of resurrected mirror rows.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 
-class UserRead(schemas.BaseUser[uuid.UUID]):
-    display_name: Optional[str] = None
+def _on_first_sight(user: User, db: Session, request: Request) -> None:
+    """Registration side-effects, moved from on_after_register.
+
+    Every account gets its Profile row (the per-user world hangs off
+    this link), and the beta onboarding drip fires best-effort
+    (Resend contact + user.created event; language picked by the
+    browser Accept-Language — same contract as the fastapi-users hook).
+    Runs uncommitted inside the caller's transaction; get_authenticated_
+    user commits the mirror + profile together.
+    """
+    from app.models import Profile as ProfileModel
+
+    if not db.query(ProfileModel).filter(ProfileModel.user_id == user.id).first():
+        db.add(ProfileModel(user_id=user.id, is_active=1))
+    try:
+        from app.services import onboarding_service
+
+        onboarding_service.notify_signup(
+            str(user.email),
+            first_name=None,
+            accept_language=request.headers.get("accept-language"),
+        )
+    except Exception:  # noqa: BLE001 — never fail a first request over email
+        logger.exception("onboarding: signup notify failed for %s", user.email)
 
 
-class UserCreate(schemas.BaseUserCreate):
-    display_name: Optional[str] = None
+# current_active_user is imported across the API layer (deps.py); keep
+# the name as an alias so the swap is one import, not twelve.
+current_active_user = get_authenticated_user
 
 
-class UserUpdate(schemas.BaseUserUpdate):
-    display_name: Optional[str] = None
+# Optional dependency retained for any future "maybe-authenticated"
+# route; returns None instead of 401.
+def get_optional_user(
+    request: Request, db: Session = Depends(get_db)
+) -> Optional[User]:
+    if not request.headers.get("authorization", "").startswith("Bearer "):
+        return None
+    try:
+        return get_authenticated_user(request, db)
+    except HTTPException:
+        return None

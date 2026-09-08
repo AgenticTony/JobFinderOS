@@ -36,15 +36,26 @@ os.environ["DEBUG"] = "true"  # tests run with production guards relaxed
 # default — draft tests script Layer A and must not spend judge calls.
 # TestProductionJudge opts in per-test.
 os.environ.setdefault("FABRICATION_JUDGE", "off")
-# P0-3/P1-8: raise the per-IP auth-throttle limits for the suite. The
-# whole suite drives the app from ONE TestClient source IP ("testclient")
-# — at the shipped 10 signups/IP/day the ~60 registrations in
-# test_multiuser.py would 429 after the first ten. The per-IP tests
-# restore the shipped values per-test by monkeypatching BUCKETS (see
-# TestPerIpAuthThrottles). TRUST_PROXY_HEADERS stays at its False default
-# so the header-spoofing gate is tested in its safe configuration.
-os.environ.setdefault("AUTH_REGISTER_IP_PER_DAY", "1000")
-os.environ.setdefault("AUTH_LOGIN_IP_PER_15MIN", "1000")
+# MIG-WO2: deterministic Supabase URL for auth verification — the JWKS
+# fetch is monkeypatched (never leaves the machine), but app.users bakes
+# the token ISSUER from this at import; a fixed value keeps the suite
+# independent of whatever backend/.env carries on a dev machine.
+# (The old per-IP auth-throttle env lifts died with the settings they
+# raised — signup/login moved to Supabase Auth.)
+os.environ.setdefault("SUPABASE_URL", "https://test-project.supabase.co")
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _supabase_admin_stub(monkeypatch):
+    """MIG-WO2: GDPR erasure calls the Supabase admin API — the suite
+    never leaves the machine. Erasure-ordering tests override this with
+    tests.auth_helpers.stub_supabase_delete(monkeypatch, result=False)."""
+    from app.services import supabase_admin
+
+    monkeypatch.setattr(supabase_admin, "delete_user", lambda uid: True)
 
 
 def stamp_alembic_head() -> None:

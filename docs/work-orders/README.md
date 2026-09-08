@@ -43,7 +43,6 @@ bare "WO3" in either document until this is settled** — always qualify it as
 
 | # | Work order | Pri | Depends on | Status | Why now |
 |---|---|---|---|---|---|
-| **WO-10** | Mount email verification + password reset | P2 | — | **NEXT UP** | Routers written, never mounted. Beta users forget passwords; without this the only answer is a support channel |
 | **WO-13** | Billing + tax posture (Paddle as Merchant of Record) | P1 | WO-07 ✅ | open | Decided. UK has a **zero** VAT threshold for non-established sellers, so a two-country launch means two registrations from the first sale — an MoR removes both. ~54% margin, ~6–7 user break-even |
 | **WO-15** | Career-site discovery (self-expanding employer boards) | P2 | WO-06 ✅ | open | Replaces the deleted slug-scraper with a mechanism that finds employer career feeds from Platsbanken application_urls (verified 2026-08-27: 79% carry one, custom-domain /jobs.json probes 4/4). Direct-from-employer inventory competitors don't have; vendor-neutral (Teamtailor JSON Feed now, Greenhouse/Lever later). ToS gate before shipping |
 | **WO-16** | Pricing + plan design (€24.99 / €59.97 quarterly) | P1 | WO-13, WO-14 | blocked | Decided. The category's weak point is **billing trust**, not features — AIApply has an F BBB rating over credits-on-top, LazyApply 2.1 over ignored refunds, Sonara auto-renews a €2.95 trial to €23.95. Clean billing is a free differentiator. Owns the price; WO-13 owns the tax posture |
@@ -62,6 +61,15 @@ path behind the approval gates is the remaining build.
 
 Nothing here is to be redone — this is the record of what shipped.
 
+- **WO-10** mount email verification + password reset — 2026-09-08:
+  **closed as superseded, never built** (owner decision). MIG-WO2
+  (fastapi-users → Supabase Auth, `MIGRATION.md`) deletes everything
+  WO-10 would have mounted — the reset/verify routers, the mailer hook,
+  the frontend forgot/reset pages, their rate-limit deps — and Supabase
+  Auth provides both outcomes natively (hosted reset + verification
+  emails). Building the bridge would have been 100% scheduled-for-
+  deletion work. The beta pain that motivated WO-10 (forgotten
+  passwords) is answered by MIG-WO2's own delivery instead.
 - **WO-01** fabrication harness — 2026-08-27. Post-fix baseline 40% (2/5)
   with ZERO Layer-A false positives; the judge runs in production on every
   draft (2026-08-28). Measurement protocol: FABRICATION_N=20 before/after

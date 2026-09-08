@@ -48,12 +48,10 @@ target_metadata = Base.metadata
 
 
 def _render_item(type_, obj, autogen_context):
-    """Render fastapi-users' GUID as SQLAlchemy's portable Uuid type."""
-    from fastapi_users_db_sqlalchemy.generics import GUID
-
-    if type_ == "type" and isinstance(obj, GUID):
-
-        return "sa.Uuid()"
+    """MIG-WO2: the fastapi-users GUID render shim is gone with the
+    package. The User model (and every migration since the initial
+    schema) uses SQLAlchemy's native sa.Uuid(), which autogenerate
+    renders correctly on its own — nothing special-cased anymore."""
     return False  # fall through to default rendering
 
 # other values from the config, defined by the needs of env.py,

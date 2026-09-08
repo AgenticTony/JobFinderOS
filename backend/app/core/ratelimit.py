@@ -11,8 +11,6 @@ from collections import defaultdict, deque
 
 from fastapi import HTTPException, status
 
-from app.core.config import settings
-
 
 class SlidingWindowLimiter:
     def __init__(self) -> None:
@@ -50,23 +48,10 @@ BUCKETS = {
     "hunt": (12, 3600),              # manual pipeline runs
     "match_run": (12, 3600),         # matching kicks
     "draft_prepare": (20, 3600),     # tailored packages
-    # Auth endpoints — the only routes an attacker can hit without an
-    # account. Two layers, because each alone misses a live attack shape:
-    #   - per EMAIL/ACCOUNT (see app/api/deps.py): the meaningful unit
-    #     for same-address hammering and single-account brute force.
-    #   - per IP (P0-3/P1-8, live-confirmed): the email/account keys are
-    #     ATTACKER-CHOOSABLE — a fresh address is a fresh bucket, so 8
-    #     distinct-email signups in ~8s created 8 accounts (each carrying
-    #     full AI budgets) and a distinct-account password spray from one
-    #     IP was untouched. The per-IP layer is the factory/spray brake;
-    #     how the IP is resolved behind Render's proxy is in deps._client_ip.
-    # Per-IP limits come from settings so the test suite — every request
-    # from one TestClient source IP — can raise them (tests/conftest.py);
-    # windows stay fixed here.
-    "auth_register": (5, 3600),      # signup attempts per address
-    "auth_login": (10, 900),         # logins per account per 15 min
-    "auth_register_ip": (settings.AUTH_REGISTER_IP_PER_DAY, 86400),
-    "auth_login_ip": (settings.AUTH_LOGIN_IP_PER_15MIN, 900),
+    # MIG-WO2: the four auth buckets (register/login, per-email and
+    # per-IP) are deleted — signup and login moved to Supabase Auth,
+    # which enforces its own rate limits. These per-USER buckets are the
+    # ceiling on GLM/Resend spend and stay keyed by the mirror-row id.
     # P1-3 (beta review): the send/spam chain had NO throttle — job
     # create (caller-controlled application_email), draft update, submit
     # and retry were all unlimited (live: 25 jobs in one burst, all 201).
@@ -99,14 +84,6 @@ def clear_user(user_id) -> None:
             del limiter._hits[key]
 
 
-def clear_email(email: str) -> None:
-    """GDPR: purge a deleted account's EMAIL-keyed auth-bucket entries
-    (reg:{email}, login:{email}) — clear_user() only covers user-id keys,
-    so these survived erasure for up to an hour, keeping live in-memory
-    state for the deleted address and 429ing its same-address re-signup.
-    Per-IP buckets (regip:/loginip:) cannot be keyed to a user; they
-    expire with their window, which is the documented position for them."""
-    e = str(email).lower()
-    with limiter._lock:
-        for key in [k for k in limiter._hits if k[0] in (f"reg:{e}", f"login:{e}")]:
-            del limiter._hits[key]
+# MIG-WO2: clear_email (the GDPR purge for the email-keyed auth buckets)
+# is deleted with those buckets — clear_user above remains and covers
+# every surviving per-user key.

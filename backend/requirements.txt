@@ -13,10 +13,11 @@ APScheduler>=3.10.0
 python-dotenv>=1.0.0
 fpdf2>=2.7.9
 
-# Phase 0: auth, migrations, storage
-fastapi-users[sqlalchemy]>=15.0.5
+# MIG-WO2: auth verifies Supabase JWTs (ES256 via JWKS) — no auth
+# framework; migrations, storage as before
+PyJWT>=2.13.0
+cryptography>=50.0.1
 alembic>=1.19.1
-aiosqlite>=0.22.1
 psycopg[binary]>=3.3.4
 sentry-sdk>=2.0
 

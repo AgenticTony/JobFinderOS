@@ -28,18 +28,36 @@ router = APIRouter()
 async def delete_account(
     db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
 ):
-    """Erase the account and every personal row: profile (+CV file),
-    matches, drafts, applications, then the user itself. Job postings are
-    shared scraped data and stay. Composio connections are keyed by user id
-    and become orphaned on Composio's side — teardown lands with the
-    Composio send-path work (noted, not silently claimed)."""
+    """Erase the account and every personal row: the Supabase identity,
+    profile (+CV file), matches, drafts, applications, then the user row.
+    Job postings are shared scraped data and stay. Composio connections
+    are keyed by user id and become orphaned on Composio's side —
+    teardown lands with the Composio send-path work (noted, not silently
+    claimed).
+
+    ORDER: the Supabase identity dies FIRST (MIG-WO2) — email and
+    password hash live there, so erasure without it is incomplete. If
+    that call fails we 503 having deleted nothing, and the user retries;
+    the alternative (local cascade first) leaves the strongest PII
+    surviving a half-completed request. The local users row becomes a
+    tombstone (see the comment at the update) — access tokens stay
+    signature-valid up to Supabase's ~1h expiry, and the tombstone turns
+    that window into 401s.
+    """
     uid = user.id
     user_email = user.email  # capture before detaching
-    # The injected user object belongs to the async auth session; re-fetch
-    # in this session so the delete cascade works on one session's objects
-    user = db.query(User).filter(User.id == uid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Account not found")
+
+    from app.services import supabase_admin
+
+    if not supabase_admin.delete_user(str(uid)):
+        raise HTTPException(
+            status_code=503,
+            detail="Identity erasure is temporarily unavailable — no data "
+            "has been deleted yet; please retry shortly",
+        )
+
+    # Same request-scoped session the dependency used — no re-fetch
+    # needed since MIG-WO2 (auth no longer runs on a second session).
     profile = get_active_profile(db, user_id=uid)
 
     # P1-5a: EVERY CV object of this user must go — the profile's current
@@ -82,7 +100,17 @@ async def delete_account(
     # appears — until then, account death takes its telemetry.
     ai_usage = db.query(AIUsage).filter(AIUsage.user_id == uid).delete()
 
-    db.delete(user)
+    # The users row becomes a TOMBSTONE, not a DELETE: Supabase access
+    # tokens stay signature-valid up to ~1h after the identity dies, and
+    # a hard-deleted row meant one post-erasure request resurrected a
+    # ghost mirror — re-creating the Profile AND re-firing the onboarding
+    # drip at the erased address. The tombstone (redacted email,
+    # is_active=False) turns that window into 401s (get_authenticated_
+    # user) and carries no personal data: email is a non-deliverable
+    # sentinel, display_name nulled, every FK child already deleted.
+    user.email = f"erased-{uid}@deleted.invalid"
+    user.display_name = None
+    user.is_active = False
     db.commit()
 
     # CV file removal AFTER the commit: doing it before meant a failed
@@ -103,15 +131,11 @@ async def delete_account(
         except Exception:
             logger.warning("GDPR delete: CV removal failed for %s", cv_path)
 
-    from app.core.ratelimit import clear_email, clear_user
+    from app.core.ratelimit import clear_user
     clear_user(uid)
-    # P1-8: the auth throttles are keyed by EMAIL (reg:{email},
-    # login:{email}), not user id — those entries outlived the account for
-    # up to an hour, keeping live in-memory state for the erased address
-    # and 429ing its same-address re-signup. The per-IP buckets
-    # (regip:/loginip:) cannot be keyed to a user and expire with their
-    # window.
-    clear_email(user_email)
+    # MIG-WO2: the email-keyed auth-bucket purge died with those buckets
+    # (signup/login moved to Supabase); clear_user above covers every
+    # surviving per-user spend key.
     # Beta onboarding drip (2026-09-03): the Resend contact (if one was
     # created at signup) must die with the account or the daily series
     # keeps emailing a deleted user. Best-effort — erasure completes

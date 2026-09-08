@@ -19,9 +19,8 @@ from app.models import (  # noqa: E402
     JobPosting,
     MatchResult,
     Profile,
+    User,
 )
-
-PASSWORD = "TestPass-2026!"
 
 
 @pytest.fixture(scope="module")
@@ -49,47 +48,23 @@ def db():
 
 
 def _register(client, email):
-    r = client.post(
-        "/api/v1/auth/register",
-        json={"email": email, "password": PASSWORD},
-    )
-    assert r.status_code == 201, r.text
-    return r.json()["id"]
+    """MIG-WO2: registration is Supabase's; the test mirror row is
+    created directly (tests/auth_helpers.py owns the mechanics)."""
+    from tests.auth_helpers import register
+
+    return register(client, email)
 
 
 def _auth_client(client, email):
-    """TestClient with Authorization header pre-set for this user."""
-    r = client.post(
-        "/api/v1/auth/jwt/login",
-        data={"username": email, "password": PASSWORD},
-    )
-    assert r.status_code == 200, r.text
-    token = r.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
-    return token
+    """TestClient with Authorization header pre-set for this user
+    (minted ES256 Supabase-shaped token)."""
+    from tests.auth_helpers import auth_client
+
+    return auth_client(client, email)
 
 
 def _clear_auth(client):
     client.headers.pop("Authorization", None)
-
-
-def _clear_ip_buckets():
-    """Zero the per-IP auth buckets before a per-IP test.
-
-    Every request in this module rides the SAME TestClient source IP
-    ("testclient"), so regip:/loginip: entries accumulate across tests —
-    a per-IP test that monkeypatches the SHIPPED limit (10/day) down from
-    the suite's raised limit (see tests/conftest.py) would start already
-    full and 429 on its first request. Email-keyed buckets need no such
-    clearing: tests use unique addresses."""
-    from app.core import ratelimit
-
-    with ratelimit.limiter._lock:
-        for key in [
-            k for k in ratelimit.limiter._hits
-            if k[0].startswith(("regip:", "loginip:"))
-        ]:
-            del ratelimit.limiter._hits[key]
 
 
 class TestAuthGate:
@@ -365,64 +340,77 @@ class TestGDPR:
         assert db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid_uuid).count() == 0
         assert db.query(Application).filter(Application.user_id == uid_uuid).count() == 0
 
-        # Token is dead after erasure
-        r = client.get("/api/v1/users/me")
-        assert r.status_code == 401
+        # MIG-WO2 tombstone: the minted token's signature stays valid
+        # until Supabase's ~1h access-token expiry — the tombstone row
+        # (is_active=False) is what turns that window into 401s instead
+        # of a resurrected mirror + Profile + onboarding drip.
+        r = client.get("/api/v1/profile/me")
+        assert r.status_code == 401, (
+            f"post-erasure request returned {r.status_code} — the "
+            "tombstone is not revoking the token window"
+        )
+        row = db.query(User).filter(User.id == uid_uuid).one()
+        assert row.is_active is False
+        assert row.email == f"erased-{uid_uuid}@deleted.invalid", (
+            "tombstone still carries the personal email — erasure must "
+            "redact it"
+        )
 
 
-class TestGDPRErasurePurgesAuthBuckets:
-    """P1-8: clear_user() purged only USER-ID-keyed buckets. The auth
-    throttles are keyed by EMAIL (reg:{email}, login:{email}), so those
-    entries survived 'erasure' — the deleted address kept live in-memory
-    state for up to an hour and could 429 the same person's re-signup.
-    Erasure must purge them with the account."""
+class TestGDPRErasurePurgesSpendBuckets:
+    """Erasure must purge the account's in-memory SPEND buckets
+    (clear_user) — the deleted user's cv_upload/hunt/match_run entries
+    kept live limiter state after the account was gone. (MIG-WO2: the
+    email-keyed auth buckets this class used to pin died with the
+    fastapi-users routes; signup/login are Supabase's now.)"""
 
-    def test_erasure_purges_email_keyed_auth_buckets(self, client):
+    def test_erasure_purges_user_keyed_buckets(self, client):
         from app.core import ratelimit
 
-        _clear_auth(client)
         email = f"ep-{uuid.uuid4().hex[:6]}@test.example"
-        _register(client, email)
-        # Fill reg:{email} to its ceiling (auth_register is 5/hour) —
-        # 4 more attempts land, the 5th trips the per-address bucket
-        codes = [
-            client.post("/api/v1/auth/register",
-                        json={"email": email, "password": PASSWORD}).status_code
-            for _ in range(5)
-        ]
-        assert 429 in codes, (
-            f"same-address hammering never tripped reg:{{email}}: {codes} — "
-            "the pre-erasure bucket state this test needs is missing"
-        )
-        r = client.post("/api/v1/auth/register",
-                        json={"email": email, "password": PASSWORD})
-        assert r.status_code == 429, "reg:{email} bucket not actually full"
+        uid = _register(client, email)
 
-        _auth_client(client, email)  # login:{email} now carries state too
+        # Fill the user's cv_upload bucket to its ceiling (5/hour) via
+        # the same entry point the route uses
+        from app.core.ratelimit import enforce
+
+        for _ in range(5):
+            enforce(uid, "cv_upload")
+        with ratelimit.limiter._lock:
+            assert any(
+                k == (str(uid), "cv_upload") for k in ratelimit.limiter._hits
+            ), "pre-erasure bucket state missing — test setup is broken"
+
+        _auth_client(client, email)
         assert client.delete("/api/v1/account/delete").status_code == 200
 
-        # White-box: erasure dropped BOTH email-keyed buckets for the
-        # address (checked before the re-signup below, which legitimately
-        # recreates reg:{email} with a fresh single hit)
         with ratelimit.limiter._lock:
-            keys = {k[0] for k in ratelimit.limiter._hits}
-        assert f"reg:{email.lower()}" not in keys, (
-            "reg:{email} survived erasure — deleted address still has "
-            "live in-memory limiter state"
-        )
-        assert f"login:{email.lower()}" not in keys, (
-            "login:{email} survived erasure — deleted address still has "
-            "live in-memory limiter state"
+            keys = {k for k in ratelimit.limiter._hits if k[0] == str(uid)}
+        assert not keys, (
+            f"spend buckets survived erasure: {keys} — deleted account "
+            "still carries live in-memory limiter state"
         )
 
-        # The erased address can sign up again IMMEDIATELY — before the
-        # fix this 429'd until the hour window expired
-        r = client.post("/api/v1/auth/register",
-                        json={"email": email, "password": PASSWORD})
-        assert r.status_code == 201, (
-            f"re-register after erasure returned {r.status_code} — the "
-            "deleted user's email-keyed limiter buckets outlived the "
-            "account (P1-8)"
+    def test_erasure_503s_before_local_delete_when_identity_unavailable(
+        self, client, monkeypatch, db
+    ):
+        """MIG-WO2 ordering: the Supabase identity (email + password
+        hash) dies FIRST. If that call fails, NOTHING local is deleted
+        and the caller gets a 503 — the alternative ordering leaves the
+        strongest PII surviving a half-completed erasure."""
+        from tests.auth_helpers import stub_supabase_delete
+
+        stub_supabase_delete(monkeypatch, result=False)
+        email = f"ep503-{uuid.uuid4().hex[:6]}@test.example"
+        uid = _register(client, email)
+        _auth_client(client, email)
+
+        r = client.delete("/api/v1/account/delete")
+        assert r.status_code == 503, r.text
+        uid_uuid = uuid.UUID(uid)
+        assert db.query(User).filter(User.id == uid_uuid).count() == 1, (
+            "local row deleted while the identity survived — erasure "
+            "ordering is inverted"
         )
 
 
@@ -488,7 +476,13 @@ class TestGDPRErasureFKChain:
             "application.draft_id) is breaking the delete transaction"
         )
 
-        assert db.query(UserModel).filter(UserModel.id == uid).count() == 0
+        # MIG-WO2: the users row is a TOMBSTONE, not a delete — access
+        # tokens outlive the Supabase identity by up to ~1h, and the
+        # tombstone (redacted email, is_active=False) is what 401s that
+        # window. Every PERSONAL row below it is gone.
+        tomb = db.query(UserModel).filter(UserModel.id == uid).one()
+        assert tomb.is_active is False
+        assert tomb.email == f"erased-{uid}@deleted.invalid"
         assert db.query(Profile).filter(Profile.user_id == uid).count() == 0
         assert db.query(MatchResult).filter(MatchResult.user_id == uid).count() == 0
         assert db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).count() == 0
@@ -1135,221 +1129,159 @@ class TestLayer1Routes:
         assert captured["profile"].full_name == "Match Runner"
 
 
-class TestSignupHardening:
-    """Signup items 3 and 4: rate limits on the auth endpoints and a real
-    password policy. fastapi-users' defaults accept ANY password string
-    ('a' registered fine) and neither /auth/register nor /auth/jwt/login
-    had enforce() applied — the two endpoints an attacker can hit without
-    an account. Tests written before the fix: weak passwords and unlimited
-    hammering currently pass."""
+class TestAuthEndpointsRemoved:
+    """MIG-WO2: the fastapi-users auth surface is deleted — signup,
+    login, /users/me now belong to Supabase Auth (browser talks to
+    Supabase directly). Pin that the routes are GONE, not merely
+    unauthenticated: a resurrected route would be a second, unverified
+    identity path into the API.
 
-    def test_weak_passwords_are_rejected(self, client):
+    Password policy and auth rate limits (the old TestSignupHardening /
+    TestPerIpAuthThrottles) moved to Supabase's service — not this
+    codebase's guarantee anymore."""
+
+    def test_old_auth_routes_are_gone(self, client):
         _clear_auth(client)
-        cases = [
-            ("a", "too short"),
-            ("short7", "7 chars — under the minimum"),
-            ("x" * 73, "over the bcrypt 72-byte boundary"),
-            ("tony-contains-email", "contains the account's email local part"),
-        ]
-        for pw, why in cases:
-            # unique per run: the suite's DB file can persist across
-            # pytest invocations, and a fixed address becomes a phantom
-            # REGISTER_USER_ALREADY_EXISTS
-            local = f"tony{uuid.uuid4().hex[:6]}"
-            email = f"{local}@test.example"
-            if "email" in why:
-                pw = f"{local}-hunter2"
-            r = client.post("/api/v1/auth/register",
-                            json={"email": email, "password": pw})
-            assert r.status_code == 400, (
-                f"password accepted that should be rejected ({why}): "
-                f"{r.status_code} {r.text[:150]}"
-            )
-            assert "assword" in r.text or "password" in r.text.lower(), (
-                f"rejection for ({why}) doesn't mention the password: {r.text[:150]}"
+        for method, path in [
+            ("post", "/api/v1/auth/register"),
+            ("post", "/api/v1/auth/jwt/login"),
+            ("get", "/api/v1/users/me"),
+            ("patch", "/api/v1/users/me"),
+        ]:
+            r = getattr(client, method)(path)
+            assert r.status_code == 404, (
+                f"{path} returned {r.status_code} — expected 404 (route "
+                "removed with fastapi-users; a live route here means an "
+                "unverified identity path is back)"
             )
 
-    def test_valid_password_registers(self, client):
+    def test_minted_token_opens_business_routes(self, client):
+        """The positive half: a Supabase-shaped ES256 token authenticates
+        (the mirror-upsert path) — 404 'no CV' means AUTH PASSED."""
+        from tests.auth_helpers import first_sight_request
+
         _clear_auth(client)
-        email = f"pw-ok-{uuid.uuid4().hex[:6]}@test.example"
-        r = client.post("/api/v1/auth/register",
-                        json={"email": email, "password": "A-Sensible-Passw0rd!"})
-        assert r.status_code == 201, r.text[:200]
+        resp, uid = first_sight_request(client, f"live-{uuid.uuid4().hex[:6]}@test.example")
+        # 200 + empty profile = AUTH PASSED and the mirror-upsert ran
+        # (anonymous would be 401; a broken verify would be 401)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["onboarded"] is False
 
-    def test_login_brute_force_is_rate_limited(self, client):
-        _clear_auth(client)
-        email = f"bf-{uuid.uuid4().hex[:6]}@test.example"
-        _register(client, email)
-        codes = []
-        for _ in range(14):
-            r = client.post("/api/v1/auth/jwt/login",
-                            data={"username": email, "password": "wrong"})
-            codes.append(r.status_code)
-        assert codes[0] == 400, f"first wrong login should be 400, got {codes[0]}"
-        assert 429 in codes, (
-            f"14 wrong-password logins on one account and no 429 ever fired: {codes}"
-        )
-        assert codes.index(429) >= 8, (
-            f"429 fired too early ({codes}) — legitimate re-logins must not trip"
+
+class TestSupabaseTokenVerification:
+    """MIG-WO2: the backend's whole identity check is verify_supabase_
+    token — every failure mode must 401 (fail closed), and the JWKS
+    rotation path must actually refresh. Red-first discipline: each
+    negative here is a token a naive implementation would accept."""
+
+    def _hit(self, client, token):
+        return client.get(
+            "/api/v1/profile/me", headers={"Authorization": f"Bearer {token}"}
         )
 
-    def test_register_hammering_is_rate_limited(self, client):
-        _clear_auth(client)
-        email = f"rh-{uuid.uuid4().hex[:6]}@test.example"
-        codes = []
-        for _ in range(8):
-            r = client.post("/api/v1/auth/register",
-                            json={"email": email, "password": PASSWORD})
-            codes.append(r.status_code)
-        assert codes[0] == 201, codes
-        assert all(c == 400 for c in codes[1:codes.index(429)]) if 429 in codes else True
-        assert 429 in codes, (
-            f"8 registration attempts on one address and no 429 ever fired: {codes}"
+    def test_valid_token_authenticates(self, client):
+        from tests.auth_helpers import get_or_create_user, mint_token
+
+        email = f"jw-ok-{uuid.uuid4().hex[:6]}@test.example"
+        uid = get_or_create_user(email)
+        assert self._hit(client, mint_token(uid, email)).status_code == 200
+
+    def test_garbage_token_is_401(self, client):
+        assert self._hit(client, "not-a-jwt").status_code == 401
+
+    def test_token_signed_by_wrong_key_is_401(self, client):
+        """The attacker-shape that matters: a WELL-FORMED ES256 token
+        signed by a DIFFERENT key (signature verification is the whole
+        point of JWKS — a decode-only implementation passes this)."""
+        import time as _time
+
+        import jwt as pyjwt
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        from app.users import ISSUER
+        from tests.auth_helpers import _ensure_fixture
+
+        _ensure_fixture()  # install the JWKS patch (fetch returns OUR key)
+        attacker_key = ec.generate_private_key(ec.SECP256R1())
+        now = int(_time.time())
+        token = pyjwt.encode(
+            {"sub": str(uuid.uuid4()), "email": "attacker@test.example",
+             "aud": "authenticated", "iss": ISSUER, "role": "authenticated",
+             "iat": now, "exp": now + 3600},
+            attacker_key, algorithm="ES256", headers={"kid": "test-signing-key-1"},
+        )
+        assert self._hit(client, token).status_code == 401, (
+            "a token signed by a foreign key authenticated — signature "
+            "verification is broken"
         )
 
+    def test_wrong_audience_is_401(self, client):
+        from tests.auth_helpers import mint_token
 
-class TestPerIpAuthThrottles:
-    """P0-3 / P1-8 (live-confirmed): the auth throttles keyed ONLY on
-    attacker-chosen strings — reg:{email} for signup, login:{account} for
-    login. A fresh address is a fresh bucket, so a distinct-email signup
-    burst created 8 accounts in ~8s with zero throttle (each carrying
-    full AI budgets), and a distinct-account password spray from one IP
-    was untouched. These tests pin the per-IP layer.
+        token = mint_token(uuid.uuid4(), "aud@test.example", aud="anon")
+        assert self._hit(client, token).status_code == 401
 
-    The "different IP passes" halves matter: without them a GLOBAL
-    signup freeze would false-pass the burst assertions."""
+    def test_wrong_issuer_is_401(self, client):
+        from tests.auth_helpers import mint_token
 
-    # The shipped limits (core/ratelimit.py defaults). The suite runs with
-    # them raised via env (conftest.py — one TestClient IP for ~60 suite
-    # signups), so each test restores the production value on the bucket.
-    SHIPPED_SIGNUP_IP = (10, 86400)
-    SHIPPED_LOGIN_IP = (30, 900)
+        token = mint_token(uuid.uuid4(), "iss@test.example",
+                           iss="https://evil.example/auth/v1")
+        assert self._hit(client, token).status_code == 401
 
-    def test_distinct_email_signup_burst_from_one_ip(self, client, monkeypatch):
-        """The live attack shape: N never-seen emails from one source —
-        every per-email bucket has one hit, so only the per-IP bucket can
-        stop it."""
-        from app.core import ratelimit
+    def test_expired_token_is_401(self, client):
+        from tests.auth_helpers import mint_token
 
-        monkeypatch.setitem(ratelimit.BUCKETS, "auth_register_ip",
-                            self.SHIPPED_SIGNUP_IP)
-        _clear_ip_buckets()
-        _clear_auth(client)
-        codes = []
-        for n in range(11):
-            r = client.post("/api/v1/auth/register",
-                            json={"email": f"ip-{n}-{uuid.uuid4().hex[:6]}@test.example",
-                                  "password": PASSWORD})
-            codes.append(r.status_code)
-        assert all(c == 201 for c in codes[:10]), (
-            f"first 10 signups should all create accounts: {codes} — the "
-            "per-IP limit must not fire before its 10th signup"
+        token = mint_token(uuid.uuid4(), "exp@test.example",
+                           lifetime_seconds=-120)
+        assert self._hit(client, token).status_code == 401
+
+    def test_unknown_kid_refreshes_jwks_then_authenticates(self, client, monkeypatch):
+        """Rotation: a token whose kid is not in the (stale) cache forces
+        ONE refresh; after the refresh serves the new key, the token
+        passes. Proves the refresh path is wired, not just the cache."""
+        import json
+
+        import jwt as pyjwt
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        from app import users as app_users
+        from app.users import ISSUER
+        from tests import auth_helpers
+
+        fx = auth_helpers._ensure_fixture()
+        # A SECOND keypair, as the rotated-in signing key
+        rotated = ec.generate_private_key(ec.SECP256R1())
+        rotated_jwk = json.loads(pyjwt.algorithms.ECAlgorithm.to_jwk(rotated))
+        rotated_jwk.update({"kid": "test-signing-key-2", "alg": "ES256", "use": "sig"})
+
+        fetch_calls = {"n": 0}
+        stale = {"keys": [fx["jwk"]]}
+
+        def rotating_fetch():
+            fetch_calls["n"] += 1
+            if fetch_calls["n"] == 1:
+                return stale  # the cached, pre-rotation view
+            return {"keys": [fx["jwk"], rotated_jwk]}  # post-rotation
+
+        monkeypatch.setattr(app_users, "fetch_jwks", rotating_fetch)
+        # Bust the module-level cache so the first call hits rotating_fetch
+        app_users._invalidate_jwks_cache()
+
+        now = int(__import__("time").time())
+        token = pyjwt.encode(
+            {"sub": str(uuid.uuid4()), "email": "rot@test.example",
+             "aud": "authenticated", "iss": ISSUER, "role": "authenticated",
+             "iat": now, "exp": now + 3600},
+            rotated, algorithm="ES256", headers={"kid": "test-signing-key-2"},
         )
-        assert codes[10] == 429, (
-            f"11 distinct-email signups from one IP and the 11th was "
-            f"{codes[10]} — no working per-IP signup throttle (P0-3: live "
-            "8-in-8s factory, each account carrying full AI budgets)"
+        r = self._hit(client, token)
+        assert r.status_code == 200, (
+            f"rotated-key token failed after refresh ({fetch_calls['n']} "
+            "fetches) — key rotation would lock every user out"
         )
-        # Same shape from a DIFFERENT IP passes — proves the bucket keys on
-        # the source IP, not a global signup freeze. IP varied via the
-        # trusted-proxy header (see the trust-gate test below for why the
-        # header only counts when trust is on).
-        from app.core.config import settings
+        assert fetch_calls["n"] == 2, "refresh must fetch exactly once more"
 
-        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
-        r = client.post("/api/v1/auth/register",
-                        json={"email": f"ip-x-{uuid.uuid4().hex[:6]}@test.example",
-                              "password": PASSWORD},
-                        headers={"X-Forwarded-For": "203.0.113.9"})
-        assert r.status_code == 201, (
-            f"signup from a fresh IP blocked ({r.status_code}) — the "
-            "per-IP bucket is behaving as a global block"
-        )
-        # ...and the ORIGINAL IP is still throttled
-        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", False)
-        r = client.post("/api/v1/auth/register",
-                        json={"email": f"ip-y-{uuid.uuid4().hex[:6]}@test.example",
-                              "password": PASSWORD})
-        assert r.status_code == 429, "original IP's bucket emptied early"
 
-    def test_proxy_headers_not_trusted_by_default(self, client, monkeypatch):
-        """Spoof gate: with TRUST_PROXY_HEADERS off (the default outside a
-        proxy-fronted deployment), a client-supplied X-Forwarded-For must
-        NOT move the bucket — otherwise anyone NOT behind a proxy rotates
-        fake IPs and bypasses the throttle entirely."""
-        from app.core import ratelimit
-        from app.core.config import settings
-
-        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", False)
-        monkeypatch.setitem(ratelimit.BUCKETS, "auth_register_ip", (3, 86400))
-        _clear_ip_buckets()
-        _clear_auth(client)
-        for n in range(3):
-            r = client.post("/api/v1/auth/register",
-                            json={"email": f"sp-{n}-{uuid.uuid4().hex[:6]}@test.example",
-                                  "password": PASSWORD})
-            assert r.status_code == 201, r.status_code
-        # bucket full for the real peer IP; a forged header must not help
-        r = client.post("/api/v1/auth/register",
-                        json={"email": f"sp-f-{uuid.uuid4().hex[:6]}@test.example",
-                              "password": PASSWORD},
-                        headers={"X-Forwarded-For": "198.51.100.7"})
-        assert r.status_code == 429, (
-            "untrusted X-Forwarded-For moved the bucket — header spoofing "
-            "bypasses the per-IP throttle when no proxy is in front"
-        )
-        # With trust ON (the Render deployment shape, render.yaml), the
-        # same header identifies a genuinely different source and passes
-        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
-        r = client.post("/api/v1/auth/register",
-                        json={"email": f"sp-t-{uuid.uuid4().hex[:6]}@test.example",
-                              "password": PASSWORD},
-                        headers={"X-Forwarded-For": "198.51.100.7"})
-        assert r.status_code == 201, (
-            f"trusted-proxy header ignored: {r.status_code} — behind "
-            "Render every request shares the proxy's address, so the "
-            "header MUST key the bucket there"
-        )
-
-    def test_password_spray_across_accounts_from_one_ip(self, client, monkeypatch):
-        """P1-8: login throttling was per-account only (10/15min keyed by
-        the TARGET account) — spraying MANY accounts from one IP is
-        untouched. Small limit here for speed; the shipped value is
-        (30, 900), restored on the bucket by SHIPPED_LOGIN_IP shape."""
-        from app.core import ratelimit
-        from app.core.config import settings
-
-        monkeypatch.setitem(ratelimit.BUCKETS, "auth_login_ip", (3, 900))
-        _clear_ip_buckets()
-        _clear_auth(client)
-        accounts = [f"spray-{n}-{uuid.uuid4().hex[:6]}@test.example"
-                    for n in range(5)]
-        for email in accounts:
-            _register(client, email)
-        codes = []
-        for email in accounts[:4]:
-            r = client.post("/api/v1/auth/jwt/login",
-                            data={"username": email, "password": "wrong"})
-            codes.append(r.status_code)
-        assert codes[:3] == [400, 400, 400], (
-            f"first three sprays should be plain bad-credentials 400s: "
-            f"{codes} — every account's own bucket saw one hit, so an "
-            "early 429 means the wrong bucket fired"
-        )
-        assert codes[3] == 429, (
-            f"4th DISTINCT-account login from one IP returned {codes[3]} — "
-            "password spraying across accounts is unthrottled (P1-8)"
-        )
-        # Different source IP, 5th distinct account: bad credentials, not
-        # a throttle — per-IP, not global.
-        monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
-        r = client.post("/api/v1/auth/jwt/login",
-                        data={"username": accounts[4], "password": "wrong"},
-                        headers={"X-Forwarded-For": "203.0.113.10"})
-        assert r.status_code == 400, (
-            f"fresh IP got {r.status_code} — the login spray bucket is "
-            "behaving as a global block"
-        )
 
 
 class TestCostDoSClamp:
@@ -2693,20 +2625,26 @@ class TestCvUploadFormats:
 
 
 class TestOnboardingDripTrigger:
-    """2026-09-03 beta onboarding series: on register the app best-effort
-    creates a Resend contact + fires user.created (the automation trigger),
-    gated by ONBOARDING_EMAILS_ENABLED; erasure removes the contact so a
-    deleted account stops receiving the series. All best-effort: a Resend
-    hiccup must never fail a signup or an erasure."""
+    """2026-09-03 beta onboarding series: on a new account's FIRST
+    AUTHENTICATED REQUEST (the MIG-WO2 first-sight path — registration
+    itself is Supabase's now) the app best-effort creates a Resend
+    contact + fires user.created (the automation trigger), gated by
+    ONBOARDING_EMAILS_ENABLED; erasure removes the contact so a deleted
+    account stops receiving the series. All best-effort: a Resend hiccup
+    must never fail a first request or an erasure."""
 
     @staticmethod
-    def _register(client, email):
-        return client.post(
-            "/api/v1/auth/register",
-            json={"email": email, "password": "Onboard-Pass-2026!"},
-        )
+    def _first_sight(client, email, headers=None):
+        from tests.auth_helpers import first_sight_request
 
-    def test_register_fires_resend_trigger_when_enabled(self, client, monkeypatch):
+        resp, uid = first_sight_request(client, email, extra_headers=headers)
+        # 200 with an EMPTY profile: auth passed and first-sight created
+        # the Profile row (get /profile/me only 404s when no row exists)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["onboarded"] is False
+        return uid
+
+    def test_first_sight_fires_resend_trigger_when_enabled(self, client, monkeypatch):
         import httpx as _httpx
 
         from app.core import config as cfg
@@ -2724,8 +2662,7 @@ class TestOnboardingDripTrigger:
         monkeypatch.setattr(_httpx, "delete", fake_request)
 
         email = f"onboard1-{uuid.uuid4().hex[:8]}@test.example"
-        r = self._register(client, email)
-        assert r.status_code == 201, r.text
+        self._first_sight(client, email)
         posts = [c for c in calls if c[0] == "POST"]
         assert len(posts) == 2, calls
         assert posts[0][1].endswith("/contacts") and posts[0][2]["email"] == email
@@ -2734,7 +2671,35 @@ class TestOnboardingDripTrigger:
         assert posts[1][2]["type"] == "user.created"
         assert posts[1][2]["contact"]["email"] == email
 
-    def test_register_does_nothing_when_disabled(self, client, monkeypatch):
+    def test_later_requests_do_not_refire_the_drip(self, client, monkeypatch):
+        """The trigger is FIRST-sight only: the second authenticated
+        request finds the mirror row and must not re-create the contact
+        or re-fire the event (the drip would restart for actives)."""
+        import httpx as _httpx
+
+        from app.core import config as cfg
+
+        calls = []
+        monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", True)
+        monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
+        monkeypatch.setattr(
+            _httpx, "post",
+            lambda *a, **k: calls.append("post") or type("R", (), {"status_code": 201, "text": ""})(),
+        )
+        email = f"onboard1b-{uuid.uuid4().hex[:8]}@test.example"
+        uid = self._first_sight(client, email)
+        from tests.auth_helpers import mint_token
+
+        token = mint_token(user_id=uid, email=email)
+        second = client.get(
+            "/api/v1/profile/me", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert second.status_code == 200
+        assert len(calls) == 2, (
+            f"second request refired the drip: {len(calls)} Resend calls"
+        )
+
+    def test_first_sight_does_nothing_when_disabled(self, client, monkeypatch):
         import httpx as _httpx
 
         from app.core import config as cfg
@@ -2746,11 +2711,10 @@ class TestOnboardingDripTrigger:
             _httpx, "post",
             lambda *a, **k: calls.append("post") or type("R", (), {"status_code": 201, "text": ""})(),
         )
-        r = self._register(client, f"onboard2-{uuid.uuid4().hex[:8]}@test.example")
-        assert r.status_code == 201, r.text
+        self._first_sight(client, f"onboard2-{uuid.uuid4().hex[:8]}@test.example")
         assert calls == [], "disabled flag must mean zero Resend calls"
 
-    def test_signup_survives_resend_outage(self, client, monkeypatch):
+    def test_first_sight_survives_resend_outage(self, client, monkeypatch):
         import httpx as _httpx
 
         from app.core import config as cfg
@@ -2761,8 +2725,7 @@ class TestOnboardingDripTrigger:
         monkeypatch.setattr(cfg.settings, "ONBOARDING_EMAILS_ENABLED", True)
         monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
         monkeypatch.setattr(_httpx, "post", boom)
-        r = self._register(client, f"onboard3-{uuid.uuid4().hex[:8]}@test.example")
-        assert r.status_code == 201, r.text
+        self._first_sight(client, f"onboard3-{uuid.uuid4().hex[:8]}@test.example")
 
     def test_sv_browser_fires_sv_event_en_default_unchanged(self, client, monkeypatch):
         import httpx as _httpx
@@ -2782,15 +2745,12 @@ class TestOnboardingDripTrigger:
 
         # no header -> English series
         en = f"onboardsv1-{uuid.uuid4().hex[:8]}@test.example"
-        assert self._register(client, en).status_code == 201
+        self._first_sight(client, en)
         # Swedish browser -> Swedish series event
         sv = f"onboardsv2-{uuid.uuid4().hex[:8]}@test.example"
-        r = client.post(
-            "/api/v1/auth/register",
-            json={"email": sv, "password": "Onboard-Pass-2026!"},
-            headers={"Accept-Language": "sv-SE,sv;q=0.9,en;q=0.8"},
+        self._first_sight(
+            client, sv, headers={"Accept-Language": "sv-SE,sv;q=0.9,en;q=0.8"}
         )
-        assert r.status_code == 201, r.text
 
         events = [c[1] for c in calls if c[0].endswith("/events")]
         assert [e["type"] for e in events] == ["user.created", "user.created-sv"]
@@ -2813,7 +2773,6 @@ class TestOnboardingDripTrigger:
         import httpx as _httpx
 
         from app.core import config as cfg
-        from app.models import User
 
         deleted = []
         monkeypatch.setattr(cfg.settings, "RESEND_API_KEY", "re_test_key")
@@ -2825,17 +2784,10 @@ class TestOnboardingDripTrigger:
         monkeypatch.setattr(_httpx, "delete", fake_delete)
 
         email = f"onboard4-{uuid.uuid4().hex[:8]}@test.example"
-        r = self._register(client, email)
-        assert r.status_code == 201, r.text
-        login = client.post(
-            "/api/v1/auth/jwt/login",
-            data={"username": email, "password": "Onboard-Pass-2026!"},
-        )
-        token = login.json()["access_token"]
-        # clear the register throttle for this address
-        from app.core.ratelimit import clear_email as _ce
+        uid = self._first_sight(client, email)
+        from tests.auth_helpers import mint_token
 
-        _ce(email)
+        token = mint_token(user_id=uid, email=email)
         r = client.delete(
             "/api/v1/account/delete",
             headers={"Authorization": f"Bearer {token}"},
@@ -2931,18 +2883,11 @@ class TestBetaRoutePrecheck:
         import uuid as _uuid
 
         from app.services import cv_service, matcher_service
+        from tests.auth_helpers import get_or_create_user, mint_token
 
         email = f"precap-{_uuid.uuid4().hex[:8]}@test.example"
-        r = client.post(
-            "/api/v1/auth/register",
-            json={"email": email, "password": "Onboard-Pass-2026!"},
-        )
-        assert r.status_code == 201, r.text
-        login = client.post(
-            "/api/v1/auth/jwt/login",
-            data={"username": email, "password": "Onboard-Pass-2026!"},
-        )
-        token = login.json()["access_token"]
+        uid = get_or_create_user(email)
+        token = mint_token(uid, email)
 
         class _Profile:
             cv_text = "x"
