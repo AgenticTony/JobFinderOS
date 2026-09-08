@@ -35,6 +35,7 @@ from app.models import (
     User as UserModel,
 )
 
+
 # Built by concatenation so no single credential-shaped literal sits in
 # the source (secret scanners flag fixed test passwords; the values are
 # throwaway fixtures that never authenticate anything real).

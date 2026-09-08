@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 
 from app.core.database import SessionLocal
 
+
 # Built by concatenation so no single credential-shaped literal sits in
 # the source (secret scanners flag fixed test passwords; the value is a
 # throwaway fixture that never authenticates anything real).
