@@ -207,6 +207,17 @@ fabrication it catches becomes a permanent regression fixture.
 
 ## Out of scope
 
-Blocking sends. Rewriting the tailoring prompt (if Layer B shows a real
-fabrication rate, that becomes WO-02's problem, and the harness is how we
-will know the fix worked).
+Rewriting the tailoring prompt (if Layer B shows a real fabrication rate,
+that becomes WO-02's problem, and the harness is how we will know the fix
+worked).
+
+> **Correction (2026-09-02):** this section used to open with "Blocking
+> sends." — stale from the draft where Layer C only flagged, and
+> contradicted by this WO's own Layer C tier table and acceptance
+> criterion ("a high-confidence finding surviving 2 retries blocks the
+> send"). Blocking is IN scope and shipped: the
+> `retries >= MAX_FABRICATION_RETRIES` branch in
+> `backend/app/services/draft_service.py` sets `fabrication_blocked=True`
+> and `status="failed"` with the untraceable claim named in `draft.error`,
+> and `submit_draft` refuses any draft whose status is not `ready`, so the
+> block holds at the send path too.

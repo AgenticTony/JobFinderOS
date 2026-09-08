@@ -141,3 +141,20 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Cookiebot floating widget (layout.tsx loads consent.cookiebot.com/uc.js,
+   which injects the reopen-consent button with INLINE positioning taken
+   from the Cookiebot dashboard — bottom-left there, which lands on top of
+   the console sidebar's Sign out button). Pin it to the bottom-right
+   corner instead: nothing in this app occupies that corner on any
+   breakpoint, and stylesheet !important beats the script's inline styles.
+   Only the WIDGET moves — the consent dialog itself
+   (#CybotCookiebotDialog) keeps its own positioning. Keeping the
+   dashboard setting (Settings → Dialog → widget position: bottom right)
+   in sync makes the inline styles agree with this instead of fighting it. */
+#CookiebotWidget,
+.CookiebotWidget {
+  left: auto !important;
+  right: 1rem !important;
+  bottom: 1rem !important;
+}
