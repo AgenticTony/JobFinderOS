@@ -104,7 +104,16 @@ def likely_same_job(
 
     Rule (precision over recall — a wrongly collapsed job is invisible
     forever, a missed duplicate wastes one queue slot):
-      1. same municipality (first location segment), AND
+      1. LOCATION TIER (WO-18): the location FIELD is unreliable on
+         aggregator copies — missing entirely, or disagreeing with the
+         original (live incident: jobtech carried the ad as Malmö, its
+         careerjet re-posts as Lund). Both present + equal -> location
+         confirms and every employer-link route is available. Either
+         missing -> nothing is contradicted; the employer link must
+         carry the pair (never title alone). Both present + DIFFERENT
+         -> the locations actively disagree, and only ad-text identity
+         (shingles) overrides that — the two-offices rule: same title +
+         same company in two cities can be two real openings.
       2. titles differ ONLY by NOISE tokens (_TITLE_NOISE_TOKENS:
          work-mode suffixes, seniority markers, filler words) after
          stripping the employer 'till/at/for X' suffix, AND the
@@ -123,8 +132,10 @@ def likely_same_job(
     def muni(loc: str | None) -> str:
         return (loc or "").split(",")[0].strip().lower()
 
-    if muni(location_a) != muni(location_b) or not muni(location_a):
-        return False
+    loc_a, loc_b = muni(location_a), muni(location_b)
+    # WO-18: name-based employer links may not override an ACTIVE
+    # location disagreement; ad-text identity may (see rule 1).
+    location_conflict = bool(loc_a and loc_b and loc_a != loc_b)
 
     ta, tb = _tokens(_TILL_SUFFIX.sub("", title_a or "")), _tokens(_TILL_SUFFIX.sub("", title_b or ""))
     if not ta or not tb:
@@ -157,33 +168,115 @@ def likely_same_job(
     if sa != sb:
         return False
 
-    # Employer link — three routes:
+    # Employer link — three routes (WO-18: the NAME routes a/b/c are
+    # unavailable when the locations actively disagree; ad-text identity
+    # always is):
     #   a) companies equal (legal suffixes don't distinguish employers)
     #   b) one company named in the OTHER posting's title (agency
     #      pattern: 'till Pågen' names the client PÅGEN AKTIEBOLAG)
     #   c) SAME AD TEXT: sister-brand re-posts (ManpowerGroup etc.)
     #      share neither company string nor title naming, but the
     #      descriptions are verbatim slices of one ad.
-    ca, cb = _norm(company_a), _norm(company_b)
-    if ca and cb and ca == cb:
-        return True
+    if not location_conflict:
+        ca, cb = _norm(company_a), _norm(company_b)
+        if ca and cb and ca == cb:
+            return True
 
-    def company_tokens(company: str | None) -> set[str]:
-        # legal suffixes don't distinguish employers
-        drop = {"ab", "aktiebolag", "hb", "inc", "ltd", "llc", "gmbh",
-                "co", "company", "publ"}
-        return {t for t in _tokens(company) if t not in drop}
+        def company_tokens(company: str | None) -> set[str]:
+            # legal suffixes don't distinguish employers
+            drop = {"ab", "aktiebolag", "hb", "inc", "ltd", "llc", "gmbh",
+                    "co", "company", "publ"}
+            return {t for t in _tokens(company) if t not in drop}
 
-    cta, ctb = company_tokens(company_a), company_tokens(company_b)
-    if cta and ctb and (cta <= ctb or ctb <= cta):
-        return True  # 'Axis Communications' == 'Axis Communications AB'
-    # one company named in the OTHER posting's title (agency pattern:
-    # 'till Pågen' names the client PÅGEN AKTIEBOLAG)
-    def company_in(company: str | None, title: str | None) -> bool:
-        ctoks = company_tokens(company)
-        ttoks = _tokens(title)
-        return any(len(t) >= 4 and t in ttoks for t in ctoks)
+        cta, ctb = company_tokens(company_a), company_tokens(company_b)
+        if cta and ctb and (cta <= ctb or ctb <= cta):
+            return True  # 'Axis Communications' == 'Axis Communications AB'
+        # one company named in the OTHER posting's title (agency pattern:
+        # 'till Pågen' names the client PÅGEN AKTIEBOLAG)
+        def company_in(company: str | None, title: str | None) -> bool:
+            ctoks = company_tokens(company)
+            ttoks = _tokens(title)
+            return any(len(t) >= 4 and t in ttoks for t in ctoks)
 
-    if company_in(company_a, title_b) or company_in(company_b, title_a):
-        return True
+        if company_in(company_a, title_b) or company_in(company_b, title_a):
+            return True
     return _descriptions_same_ad(desc_a, desc_b)
+
+
+# --- WO-18: which duplicate copy survives a collapse ---
+
+# Source ranking (WO-18 amendment 2026-09-08): official/board APIs and
+# employer-direct rows over aggregators — the aggregator's description
+# is a subset of the original's facts, so the score the user sees
+# should be computed on the richest text, and the apply link should be
+# the row that actually works.
+SOURCE_RANK: dict[str, int] = {
+    # official board APIs (WO-15 employer-direct rows join this tier)
+    "jobtech": 0, "reed": 0, "manual": 0,
+    # curated public feeds
+    "arbeitnow": 1, "remotive": 1, "jobicy": 1, "workingnomads": 1,
+    # aggregators — re-slice other boards' ads and wrap apply links in
+    # their own redirect hosts
+    "careerjet": 2, "adzuna": 2,
+}
+_SOURCE_RANK_DEFAULT = 1  # an unknown source ranks as a curated feed
+
+# Aggregator apply-redirect hosts: the link resolves to the aggregator's
+# interstitial, not the employer's portal (the live 2026-08-31 incident:
+# both careerjet copies pointed at jobviewtrack.com -> HTTP 502).
+_AGGREGATOR_REDIRECT_HOSTS = ("jobviewtrack.com",)
+
+
+def is_link_degraded(*, url: str | None,
+                     application_url: str | None,
+                     application_email: str | None) -> bool:
+    """A copy whose only path to the employer is an aggregator redirect
+    page — an interstitial the aggregator controls, with no direct
+    apply route at all (WO-18 rule 3)."""
+    if application_url or application_email:
+        return False
+    if not url:
+        return False
+    host = url.split("//")[-1].split("/")[0].lower()
+    return any(host == h or host.endswith("." + h) for h in _AGGREGATOR_REDIRECT_HOSTS)
+
+
+def collapse_preference(*, source: str, company: str | None, url: str | None,
+                        application_url: str | None = None,
+                        application_email: str | None = None,
+                        description: str | None = None) -> tuple:
+    """Lower tuple = the copy to KEEP when a collapse must pick a
+    survivor (WO-18 rule 3 + the 2026-09-08 source-ranking tiebreak):
+
+      1. not link-degraded — the live 2026-08-31 incident: the user
+         approved the copies whose only link was a dead jobviewtrack
+         redirect and rejected the live original;
+      2. carries a direct apply route (application_url / email);
+      3. higher-ranked source — official board APIs and employer-direct
+         rows over aggregators, even when both copies carry a live
+         apply path (the aggregator's description is a subset of the
+         original's facts);
+      4. direct employer over staffing agency (the Pågen rule);
+      5. the fuller description (ties prefer the richer text — the full
+         ad scores truer than a snippet).
+    """
+    degraded = 1 if is_link_degraded(
+        url=url, application_url=application_url,
+        application_email=application_email) else 0
+    direct = 0 if (application_url or application_email) else 1
+    agency = 1 if any(m in (company or "").lower() for m in _AGENCY_MARKERS) else 0
+    return (
+        degraded,
+        direct,
+        SOURCE_RANK.get(source, _SOURCE_RANK_DEFAULT),
+        agency,
+        -len(description or ""),
+    )
+
+
+def title_bucket(title: str | None) -> str:
+    """Exact normalized title — the O(1) pre-filter for the WO-18
+    all-history twin scan. Pairwise likely_same_job over every matched
+    row is too wide; only same-normalized-title rows can ever satisfy
+    the fuzzy title discipline anyway."""
+    return _norm(title)

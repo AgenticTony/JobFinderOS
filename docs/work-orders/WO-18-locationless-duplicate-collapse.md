@@ -1,7 +1,7 @@
 # WO-18 — Collapse location-less cross-board duplicates; prefer original-source apply links
 
 > Priority: P1 (beta) · Depends on: none
-> Status: not started
+> Status: **COMPLETE — 2026-09-08** (see execution record)
 
 ## Why (the incident, 2026-08-31)
 
@@ -26,15 +26,30 @@ All three consequences the dedupe gates exist to prevent, observed live:
   liveness probe — `draft_service._probe_apply_portal` — which warns on
   a definite HTTP ≥ 400; this WO is the structural fix.)
 
-## Why every existing gate misses these
+## Why every existing gate missed these
 
-- **Exact gate**: `dedupe_key_for(title, company, location)` — the
-  careerjet copies carry **no location**, so their keys differ from the
-  original's (`...|lund` vs `...|`).
+*(Corrected 2026-09-08 against the live rows — the original write-up
+below assumed the careerjet copies carried no location.)*
+
+The real rows carry **conflicting locations and differing company
+strings**: #47 is `Experis AB` / `Malmö, Skåne län`, the careerjet twins
+are `Manpower` and `Experis` / `Lund, Skåne`. (Careerjet can also return
+no location at all — both failure modes are covered.)
+
+- **Exact gate**: keys on normalized title+company — the three company
+  strings (`experisab` / `manpower` / `experis`) hash differently, and
+  the key does not normalize legal suffixes.
 - **Match-time cross-board gate**: dismisses when a posting with the
   SAME key already has a match — same key problem.
-- **Fuzzy gate (the Pågen rule)**: `likely_same_job` requires the same
-  municipality on both sides — a location-less copy never qualifies.
+- **Fuzzy gate (the Pågen rule)**: `likely_same_job` required the same
+  municipality on both sides — `malmö` vs `lund` is rejected before any
+  employer-link route runs. A copy with NO location was equally dead.
+
+The 2026-09-02 sister-brand fix (PR #72, the Dispatcher incident) added
+the shingle-identity employer link but kept the municipality
+precondition — it collapsed pairs 424↔425 (both "Lund") but not the
+original-vs-copy pairs. That precondition was the remaining blocker; the
+shingle route itself is reused, not rebuilt.
 
 ## Constraint: precision first (DEDUPE-FP precedent)
 
@@ -90,6 +105,73 @@ deterministic ordering instead of arrival order.
   (DEDUPE-FP parity).
 - Live check: the three incident rows — post-fix, a fresh user's run
   evaluates exactly one of them.
+
+## Execution record (2026-09-08)
+
+**Shipped in `app/core/dedupe.py` + `app/services/matcher_service.py`,
+tests in `tests/test_units.py` (three new classes, 19 tests), written
+red-first — 14 failed against the pre-change code before
+implementation. Suite: 436 passed / 2 skipped.**
+
+What was built:
+
+1. **Location tiers in `likely_same_job`** (the structural fix): both
+   locations present and equal → all employer-link routes (unchanged
+   behavior); either missing → all routes, the employer link carries
+   the pair (WO-18 rule 1 — never title alone); both present but
+   DIFFERENT → **ad-text identity (shingles) only** — the two-offices
+   rule: same title + same company in two cities can be two real
+   openings, so company equality and title-naming must not override an
+   active location conflict. The live incident pairs (Malmö vs Lund)
+   link via shingles; company-only pairs across conflicting cities
+   never collapse.
+2. **`collapse_preference`** (WO-18 rule 3 + the 2026-09-08
+   source-ranking tiebreak): the survivor of any collapse is the copy
+   with, in order — a non-degraded link (`is_link_degraded`:
+   aggregator-redirect host AND no `application_url` /
+   `application_email` — `jobviewtrack.com` today), a direct apply
+   route, the higher-ranked source (`SOURCE_RANK`: official boards
+   jobtech/reed + manual 0, curated feeds 1, aggregators
+   careerjet/adzuna 2), the direct employer over a staffing agency
+   (the Pågen rule, absorbed from the old `_is_agency_posting`
+   heuristic), and the fuller description. Applied at both collapse
+   sites: the fuzzy gate's stored-match flip and in-batch survivor
+   choice (generalized from agency-vs-direct to any preference), and
+   the twin pass below.
+3. **Twin pass in `_apply_cheap_gates`** (the all-history net): the
+   fuzzy window only sees undecided matches ≤14 days old — decided,
+   auto-dismissed, and older matches blocked nothing. The twin pass
+   snapshots the user's matched postings pre-run (with a
+   `was_undecided` flag so mid-run retirements can't poison it),
+   buckets by normalized title, confirms candidates with
+   `likely_same_job`, and: a stored DECIDED or dismissed match drops
+   the incoming twin (user judgments are never re-opened); a stored
+   UNDECIDED match loses to a strictly preferred incoming copy (the
+   flip — arrival order can no longer lock in the dead-link fragment).
+4. **Not done, deliberately** (per the WO's own optionality): no
+   ingest-side storage change, no backfill — historical rows keep
+   their recorded decisions; the gate protects every fresh user and
+   every future copy. `scripts/dedupe_existing_matches.py` keeps its
+   score-first winner rule: it re-collapses ALREADY-SCORED rows (keep
+   the best score the user saw), a different context from choosing
+   which copy to score.
+
+Verification: red-first (14 red pre-change, all green after); full
+suite 436 passed / 2 skipped; flow test PASS; CI-shaped ruff
+(`--select I,F`) clean; function-span verification on
+`_apply_cheap_gates` / `_dismiss_fuzzy_duplicates` / `_collapse_key`;
+**live check against the production rows** (read-only): all three
+incident pairs now collapse through `likely_same_job`, and
+`collapse_preference` strictly prefers #47 — the live-portal jobtech
+original — over both jobviewtrack copies.
+
+Known accepted corner (documented in code): if two NEW variants of one
+job enter the same run AND both beat a stored undecided match, the
+in-run preference between the two variants resolves only through the
+fuzzy gate's in-batch list; in the pathological both-flip-the-stored
+shape both can survive one run (one extra AI call, correct single-copy
+display thereafter). This predates WO-18 (the agency flip had the same
+structure) and is not made worse by it.
 
 ## Data for reproduction
 
