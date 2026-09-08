@@ -173,6 +173,20 @@ shape both can survive one run (one extra AI call, correct single-copy
 display thereafter). This predates WO-18 (the agency flip had the same
 structure) and is not made worse by it.
 
+## Addendum (2026-09-08, same day): probe 401/403 semantics
+
+Second review of the reference repo (`ai-job-search`
+09-web-research.md, external evidence) surfaced a false alarm in the
+same-day mitigation this WO rides on: `_probe_apply_portal` reported
+HTTP 401/403 as "posting may have expired" — but bank, insurer and
+recruiter domains routinely 403 non-browser clients (our httpx HEAD)
+while serving browsers the identical page. 401/403 now get their own
+message ("blocked our automated check … the link will likely open
+fine"); only 404/410/5xx say expiry. Red-first (2 new tests in
+`TestBrowserHandoffPortalProbe`); suite 438 passed / 2 skipped. The
+follow-up ladder (find the live twin at hand-off instead of warning)
+is WO-22.
+
 ## Data for reproduction
 
 - Rows: `job_postings` ids 47, 424, 425 (scraped 2026-08-28/30).

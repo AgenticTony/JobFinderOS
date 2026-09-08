@@ -747,3 +747,24 @@ class TestBrowserHandoffPortalProbe:
 
         app = self._submit(db, monkeypatch, httpx.ConnectError("probe network hiccup"))
         assert app.error is None, "probe connectivity noise must never cry wolf"
+
+    def test_botblocked_403_is_not_reported_as_expiry(self, db, monkeypatch):
+        # ai-job-search evidence (2026-09-08 review): bank, insurer and
+        # recruiter domains 403 non-browser clients while serving the
+        # identical page to a browser — the probe's httpx HEAD is exactly
+        # such a client. A 403 refused the CHECK, not the user: reporting
+        # "may have expired" is a false alarm the probe promises never to
+        # raise. Name the real situation instead.
+        app = self._submit(db, monkeypatch, 403)
+        assert app.status == "manual_pending", "a blocked check must not block the hand-off"
+        assert app.error and "blocked our automated check" in app.error, (
+            f"403 = client refused, not expiry — name it honestly: {app.error!r}"
+        )
+        assert "expired" not in (app.error or "").lower(), (
+            "a 403 must never be told to the user as expiry"
+        )
+
+    def test_botblocked_401_is_not_reported_as_expiry(self, db, monkeypatch):
+        app = self._submit(db, monkeypatch, 401)
+        assert app.status == "manual_pending"
+        assert app.error and "blocked our automated check" in app.error
