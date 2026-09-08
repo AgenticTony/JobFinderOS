@@ -39,7 +39,7 @@ WO0–WO5 into this queue as the single source of sequencing. **Do not cite a
 bare "WO3" in either document until this is settled** — always qualify it as
 `MIGRATION.md WO3` or `work-orders/WO-03`.
 
-## Queue — open work (board refreshed 2026-08-31)
+## Queue — open work (board refreshed 2026-09-08)
 
 | # | Work order | Pri | Depends on | Status | Why now |
 |---|---|---|---|---|---|
@@ -48,7 +48,10 @@ bare "WO3" in either document until this is settled** — always qualify it as
 | **WO-15** | Career-site discovery (self-expanding employer boards) | P2 | WO-06 ✅ | open | Replaces the deleted slug-scraper with a mechanism that finds employer career feeds from Platsbanken application_urls (verified 2026-08-27: 79% carry one, custom-domain /jobs.json probes 4/4). Direct-from-employer inventory competitors don't have; vendor-neutral (Teamtailor JSON Feed now, Greenhouse/Lever later). ToS gate before shipping |
 | **WO-16** | Pricing + plan design (€24.99 / €59.97 quarterly) | P1 | WO-13, WO-14 | blocked | Decided. The category's weak point is **billing trust**, not features — AIApply has an F BBB rating over credits-on-top, LazyApply 2.1 over ignored refunds, Sonara auto-renews a €2.95 trial to €23.95. Clean billing is a free differentiator. Owns the price; WO-13 owns the tax posture |
 | **WO-17** | Cancellation feedback loop | P2 | WO-13, WO-16 | blocked | The highest-signal moment in the product. Hired users are the only source of genuine 5-star reviews; everyone else is the only honest diagnostic we get. Hard constraint: cancel first, ask after — a survey before the button IS the friction that dominates Jobright's one-star reviews |
-| **WO-18** | Location-less duplicate collapse; prefer original-source apply links | P1 | — | **assigned (developers)** | The 2026-08-31 apply-incident post-mortem: one ad × three pool copies scored 55/65/68; the user approved the dead-link copies and rejected the live portal. Full detail: `WO-18-locationless-duplicate-collapse.md` |
+| **WO-18** | Location-less duplicate collapse; prefer original-source apply links | P1 | — | **assigned (developers)** | The 2026-08-31 apply-incident post-mortem: one ad × three pool copies scored 55/65/68; the user approved the dead-link copies and rejected the live portal. Full detail: `WO-18-locationless-duplicate-collapse.md` (+2026-09-08 source-ranking tiebreak) |
+| **WO-19** | Honest gates II: work rights, language requirements, posting trust boundary | P1 | — | open | Three verified gaps (2026-09-08 review of `ai-job-search`, the only production-grade repo surveyed): posting text reaches match/tailor/judge prompts with no trust boundary; we gate on everything EXCEPT work rights (WO-01's live run caught the tailor INVENTING "EU citizen, full work rights"); the language filter tests the ad's language, not the job's required language. Full detail: `WO-19-honest-gates.md` |
+| **WO-20** | Outcome layer: canonical statuses, reply detection, deadline & follow-up nudges | P1 | — | open | ROADMAP's launch weapon, executed. Replies already land in the user's inbox (`reply_to` = account email) and Composio Gmail is connected in production — reply detection is a read-side use of machinery we own. Manual markers ship first; stats get a real denominator. Full detail: `WO-20-outcome-layer.md` |
+| **WO-21** | Outbound PDF text-layer verification | P2 | — | open | Half-day: pypdf extraction check on every generated CV/cover letter (test-time assert + runtime send-block). The PDF is the artifact the employer keeps; the unicode-font fallback path can silently break the text layer ATS parsers read. Full detail: `WO-21-pdf-text-layer.md` |
 
 Also live on the platform but tracked outside this queue (see CLAUDE.md open
 items): **send-from-own-Gmail as a submit `method`** — the Composio

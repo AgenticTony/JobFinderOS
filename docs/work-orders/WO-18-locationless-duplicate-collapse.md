@@ -63,6 +63,19 @@ equality must carry the weight.
 4. *Optional, ingest-side*: stop storing a third copy of an already
    twice-stored secondary key. Match-time-only is acceptable for beta.
 
+**Addition 2026-09-08 — source ranking as a collapse tiebreak**
+(external validation: `MadsLorentzen/ai-job-search`, whose apply flow
+prefers the employer's own posting over aggregator listings because
+aggregators drop requisition IDs and seniority grades). Extend rule 3:
+when collapsing copies, prefer the row from the higher-ranked source —
+official/board APIs (jobtech, reed) and employer-direct (WO-15
+career-site rows) over aggregators (careerjet, adzuna) — even when
+both copies carry a live apply path. The aggregator copy's description
+is a subset of the original's facts; the score the user sees should be
+computed on the richest text, not on whichever copy ingested first.
+This also complements the existing `kept_batch` preference with a
+deterministic ordering instead of arrival order.
+
 ## Acceptance
 
 - jobtech original matched + careerjet location-less copy enters the
