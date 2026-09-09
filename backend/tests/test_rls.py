@@ -211,16 +211,33 @@ class TestLiveSchemaCarriesTheLayer:
                 )
 
     def test_anon_role_holds_no_table_grants(self):
-        """Security Advisor follow-through (2026-09-09): Supabase's
-        creation-time defaults grant anon FULL DML+TRUNCATE on public
-        tables — TRUNCATE bypasses RLS entirely. RLS denies anon rows
-        today, but the grants are latent exposure; ensure_rls revokes
-        them. Assert the live end state."""
+        """Security Advisor follow-through (2026-09-09). Review made the
+        original version honest: (a) provision the adversary — seed
+        Supabase-shaped anon grants first, or the revoke has nothing to
+        remove and the test passes vacuously on CI's vanilla PG;
+        (b) assert via aclexplode on pg_class.relacl —
+        information_schema.role_table_grants only shows grants where
+        the grantor is a currently-enabled role, so a supabase_admin
+        grant is invisible to a postgres connection (the same blind
+        spot that scopes REVOKE itself)."""
+        with engine.begin() as conn:
+            # Seed the adversary: recreate Supabase's creation-time
+            # default, grantor postgres
+            conn.execute(text(
+                "GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE "
+                "ON profiles, job_postings TO anon"))
+        from app.core.rls_sql import ensure_rls
+
+        with engine.begin() as conn:
+            ensure_rls(conn)
         with engine.connect() as conn:
             leaked = conn.execute(
                 text(
-                    "SELECT table_name FROM information_schema.role_table_grants "
-                    "WHERE table_schema = 'public' AND grantee = 'anon'"
+                    "SELECT c.relname FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid=c.relnamespace, "
+                    "aclexplode(c.relacl) a "
+                    "JOIN pg_roles r ON r.oid=a.grantee "
+                    "WHERE n.nspname='public' AND r.rolname='anon'"
                 )
             ).scalars().all()
             assert not leaked, (
@@ -228,6 +245,54 @@ class TestLiveSchemaCarriesTheLayer:
                 "DISABLE ROW LEVEL SECURITY away from full exposure "
                 "(and TRUNCATE is not governed by RLS at all)"
             )
+
+    def test_no_anon_default_privilege_survives(self):
+        """The future-tables half of the revocation (review: it had NO
+        assertion — the neighbouring default-privileges test counts
+        entries with no grantee filter and stays green regardless).
+        Assert via aclexplode(defaclacl) that NO grantor's public-
+        schema default ACL grants anon anything."""
+        with engine.connect() as conn:
+            n = conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_default_acl d "
+                    "JOIN pg_namespace ns ON ns.oid=d.defaclnamespace, "
+                    "aclexplode(d.defaclacl) a "
+                    "JOIN pg_roles r ON r.oid=a.grantee "
+                    "WHERE ns.nspname='public' AND r.rolname='anon'"
+                )
+            ).scalar()
+            assert n == 0, (
+                f"{n} anon default-privilege entries survive — the next "
+                "table created under that grantor re-grants anon full DML"
+            )
+
+    def test_table_created_now_gets_no_anon_grants(self):
+        """Ground truth for the role-scoping blind spot (review, 2026-09-09):
+        ALTER DEFAULT PRIVILEGES rewrites only the executing role's entry,
+        and stock Supabase installs a supabase_admin-grantor entry too.
+        The question that actually matters: does a table created by OUR
+        migration role (postgres) arrive clean? Probe it directly."""
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE IF NOT EXISTS __anon_probe(id int)"))
+            try:
+                n = conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_class c "
+                        "JOIN pg_namespace ns ON ns.oid=c.relnamespace, "
+                        "aclexplode(c.relacl) a "
+                        "JOIN pg_roles r ON r.oid=a.grantee "
+                        "WHERE ns.nspname='public' "
+                        "AND c.relname='__anon_probe' AND r.rolname='anon'"
+                    )
+                ).scalar()
+            finally:
+                conn.execute(text("DROP TABLE __anon_probe"))
+        assert n == 0, (
+            "a table created right now, as postgres (our migration role), "
+            "arrives with anon grants — future migrations re-open the "
+            "exposure the revocation closed"
+        )
 
     def test_future_table_default_privileges_exist(self):
         """The default privileges are what make ensure_rls-per-boot
