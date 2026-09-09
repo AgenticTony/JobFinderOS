@@ -1849,6 +1849,29 @@ class TestSyncEngineDriverSafety:
             )
 
 
+class TestRLSLayerCoversEveryUserTable:
+    """MIG-WO3 review (2026-09-09): ALL_RLS_TABLES in core/rls_sql.py is
+    a hand-maintained list — a future per-user table landing outside it
+    would silently skip the policies. Pin the list against the ORM
+    metadata: every table with a user_id column, plus users itself, must
+    be covered. Runs on both backends (pure metadata)."""
+
+    def test_every_user_id_table_is_in_the_rls_list(self):
+        from app.core.orm import Base
+        from app.core.rls_sql import ALL_RLS_TABLES
+
+        expected = {"users"}
+        for table in Base.metadata.tables.values():
+            if "user_id" in table.c:
+                expected.add(table.name)
+        missing = expected - set(ALL_RLS_TABLES)
+        assert not missing, (
+            f"tables with user_id outside ALL_RLS_TABLES: {sorted(missing)} — "
+            "add them to app/core/rls_sql.py or their rows are invisible to "
+            "every request session (RLS fail-closed)"
+        )
+
+
 class TestDependencyFreeMigrations:
     """WO-11 review round 2: alembic's env.py imported app.core.database,
     which instantiates Settings() at module scope — so 'alembic upgrade

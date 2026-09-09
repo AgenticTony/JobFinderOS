@@ -38,7 +38,7 @@ from typing import Optional
 import httpx
 import jwt as pyjwt
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -246,6 +246,14 @@ def get_authenticated_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
+    # MIG-WO3 review (2026-09-09): the RLS identity rides the SESSION
+    # object (session.info['rls_sub']) — set HERE, from the VERIFIED
+    # claims, the only setter. It must not be a contextvar: FastAPI runs
+    # each sync dependency in its own threadpool context copy, so a set
+    # in this dependency would not reliably reach get_db's session.
+    # Whatever the dependency verified is exactly what the policies see.
+    db.info["rls_sub"] = user_id
+
     user = db.get(User, user_id)
     if user is None:
         user = User(
@@ -270,11 +278,22 @@ def get_authenticated_user(
             db.flush()
             _ensure_profile(user, db)
             db.commit()
-        except IntegrityError:
+        except (IntegrityError, DBAPIError) as exc:
+            # IntegrityError: the race (duplicate PK) — the normal case.
+            # DBAPIError: the BELT (MIG-WO3 review, 2026-09-09) — an RLS
+            # policy rejection surfaces as SQLSTATE 42501 → ProgrammingError,
+            # which the IntegrityError catch alone let escape as a
+            # CORS-less 500. Any insert failure here re-selects: the row
+            # either exists (adopt it) or the caller is not who the
+            # policies think they are (401).
             db.rollback()  # rolls back to (and releases) the savepoint
             user = db.get(User, user_id)
             if user is None:
                 # the collision was NOT our primary key — treat as 401
+                logger.info(
+                    "Mirror insert rejected for %s (%s) — no adoptable row",
+                    user_id, type(exc).__name__,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid authentication token",

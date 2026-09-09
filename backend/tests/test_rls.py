@@ -25,7 +25,6 @@ from app.core.database import (
     engine,
 )
 from app.models import JobPosting, MatchResult, Profile, User
-from app.services.ai_service import current_user_id
 
 pytestmark = pytest.mark.skipif(
     engine.dialect.name != "postgresql",
@@ -79,10 +78,13 @@ def two_tenants(db):
     return users
 
 
-def _unscoped_count(table: str) -> int:
+def _unscoped_count(table: str, sub=None) -> int:
     """A deliberately UNSCOPED SELECT through a REQUEST session — the
-    exact bug class RLS exists to catch (a forgotten user_id filter)."""
+    exact bug class RLS exists to catch (a forgotten user_id filter).
+    sub=None models a session the auth dependency never stamped."""
     with RequestSessionLocal() as session:
+        if sub is not None:
+            session.info["rls_sub"] = sub  # what get_authenticated_user sets
         return session.execute(text(f"SELECT count(*) FROM {table}")).scalar()
 
 
@@ -97,21 +99,12 @@ class TestRequestSessionIsolation:
 
     def test_identity_sees_only_its_own_rows(self, two_tenants):
         a, _b = two_tenants
-        token_hex = a.hex
-        with RequestSessionLocal() as session:
-            # Simulate a request: the contextvar the middleware sets —
-            # set it INSIDE a token so the listener (which runs on the
-            # session's first statement) observes it.
-            tok = current_user_id.set(uuid.UUID(token_hex))
-            try:
-                profiles = session.execute(text("SELECT count(*) FROM profiles")).scalar()
-                matches = session.execute(text("SELECT count(*) FROM match_results")).scalar()
-                users = session.execute(text("SELECT count(*) FROM users")).scalar()
-            finally:
-                current_user_id.reset(tok)
-        assert profiles == 1
-        assert matches == 1
-        assert users == 1
+        # rls_sub is what the VERIFIED dependency stamps on the session
+        # (MIG-WO3 review 2026-09-09: session.info, never a contextvar —
+        # threadpool context copies don't cross dependencies).
+        assert _unscoped_count("profiles", sub=a) == 1
+        assert _unscoped_count("match_results", sub=a) == 1
+        assert _unscoped_count("users", sub=a) == 1
 
     def test_service_session_sees_everything(self, two_tenants):
         """The worker/scheduler half of the two-session story: the
@@ -121,6 +114,58 @@ class TestRequestSessionIsolation:
             assert session.execute(text("SELECT count(*) FROM profiles")).scalar() >= 2
             assert session.execute(
                 text("SELECT count(*) FROM match_results")).scalar() >= 2
+
+
+class TestWriteIsolation:
+    """The WITH CHECK half of the layer — review (2026-09-09): every
+    read-side assertion is a SELECT count; nothing ever proved a write
+    the policies should REFUSE is refused. A future edit narrowing the
+    policies to FOR SELECT, or dropping WITH CHECK, would have left the
+    suite green with cross-tenant writes permitted. These pin it."""
+
+    def test_insert_for_another_tenant_is_refused(self, two_tenants):
+        import pytest as _pytest
+        from sqlalchemy.exc import DBAPIError
+
+        a, b = two_tenants
+        with RequestSessionLocal() as session:
+            session.info["rls_sub"] = a
+            job_id = session.execute(
+                text("SELECT id FROM job_postings LIMIT 1")
+            ).scalar()
+            with _pytest.raises(DBAPIError, match="row-level security"):
+                session.execute(
+                    text(
+                        "INSERT INTO match_results (user_id, job_id, score, "
+                        "tier) VALUES (:u, :j, 50, 'fair_match')"
+                    ),
+                    {"u": b, "j": job_id},
+                )
+                session.commit()
+
+    def test_update_of_another_tenants_row_affects_nothing(self, two_tenants):
+        a, b = two_tenants
+        with RequestSessionLocal() as session:
+            session.info["rls_sub"] = a
+            result = session.execute(
+                text(
+                    "UPDATE profiles SET full_name = 'hijacked' "
+                    "WHERE user_id = :victim"
+                ),
+                {"victim": b},
+            )
+            session.commit()
+            assert result.rowcount == 0, (
+                "an authenticated session UPDATED another tenant's row — "
+                "the USING half of the policy is not filtering writes"
+            )
+        # the victim's row is untouched
+        with SessionLocal() as session:
+            name = session.execute(
+                text("SELECT full_name FROM profiles WHERE user_id = :v"),
+                {"v": b},
+            ).scalar()
+            assert name is None
 
 
 class TestListenerIsLoadBearing:

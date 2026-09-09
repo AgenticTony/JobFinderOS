@@ -60,47 +60,61 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 #   RequestSessionLocal — INTERACTIVE sessions: the only factory get_db
 #                         hands to routes. On Postgres every transaction
 #                         SETs LOCAL role 'authenticated' plus
-#                         request.jwt.claim.sub from the request context
-#                         (the same contextvar set_user_context_middleware
-#                         already stamps for ai_usage attribution). The
-#                         role is set even WITHOUT a known sub: an
-#                         unidentified session runs as authenticated with
-#                         auth.uid() NULL, and the policies' IS NOT NULL
-#                         guard filters EVERYTHING — fail-closed, the
+#                         request.jwt.claim.sub from the VERIFIED claims
+#                         (app.users.get_authenticated_user is the sole
+#                         request-path setter of that contextvar — MIG-WO3
+#                         review 2026-09-09; the old unsigned
+#                         base64-decode middleware would have made the
+#                         tenancy key client-asserted). The role is set
+#                         even WITHOUT a known sub: an unidentified
+#                         session runs as authenticated with auth.uid()
+#                         NULL, and the policies' IS NOT NULL guard
+#                         filters EVERYTHING — fail-closed, the
 #                         documented Supabase stance for NULL identities.
-#                         RLS itself is additive Postgres state owned by
-#                         the MIG-WO3 migration; on SQLite (tests, local
-#                         dev) the listener is a no-op.
+#
+#   SCOPE, honestly drawn: request-surface CRUD (everything through
+#   get_db) is RLS-enforced. Pipeline machinery that request handlers
+#   SPAWN — the background matcher (matches.py), the hunt lock/renew/
+#   release sessions (pipeline.py) — deliberately stays on SessionLocal:
+#   it mutates the SHARED pool (job_postings status, scrape_runs,
+#   locks) alongside its per-user writes, which the authenticated role
+#   must never touch. Those paths remain discipline-enforced: the
+#                         keyword-only user_id parameters plus the
+#                         isolation suite. RLS is the backstop for the
+#                         interactive surface, not for the machinery.
 # ---------------------------------------------------------------------------
 
 RequestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def _request_jwt_sub() -> "str | None":
-    """The caller's id from the request context, or None. The middleware
-    parses it as a UUID before storing, and we re-stringify through
-    uuid.UUID so a SET statement can never carry injected syntax."""
-    import uuid as _uuid
-
-    from app.services.ai_service import current_user_id
-
-    value = current_user_id.get(None)
-    if value is None:
-        return None
-    return str(_uuid.UUID(str(value)))
 
 
 def _propagate_request_jwt(session, transaction, connection) -> None:
     """SQLAlchemy 'after_begin' listener on RequestSessionLocal: runs on
     the FIRST use of a connection inside a transaction, before any
     statement of ours — the right moment for transaction-scoped SET
-    LOCAL (per Supabase's RLS direct-connection pattern)."""
+    LOCAL (per Supabase's RLS direct-connection pattern).
+
+    The identity comes from session.info['rls_sub'], which ONLY the
+    verified get_authenticated_user sets (MIG-WO3 review, 2026-09-09).
+    Deliberately NOT a contextvar: FastAPI runs each sync dependency in
+    its own threadpool context copy, so a set in one dependency does
+    not reliably reach another's session — the identity must travel
+    with the session object itself. No rls_sub (unauthenticated or
+    pre-verification use) still sets the ROLE: auth.uid() NULL, the
+    policies' IS NOT NULL guard filters everything — fail-closed.
+    """
     if connection.dialect.name != "postgresql":
         return  # SQLite: no roles, no RLS — the migration never enables it
-    sub = _request_jwt_sub()  # uuid.UUID-round-tripped: injection-proof
     connection.exec_driver_sql("SET LOCAL role 'authenticated'")
+    sub = session.info.get("rls_sub")
     if sub is not None:
-        connection.exec_driver_sql(f"SET LOCAL request.jwt.claim.sub = '{sub}'")
+        # uuid-shaped by construction (the dependency parsed it) — and
+        # re-validated here so a SET can never carry injected syntax.
+        import uuid as _uuid
+
+        connection.exec_driver_sql(
+            "SET LOCAL request.jwt.claim.sub = "
+            f"'{_uuid.UUID(str(sub))}'"
+        )
 
 
 from sqlalchemy import event as _sa_event  # noqa: E402

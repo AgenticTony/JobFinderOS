@@ -67,6 +67,21 @@ def ensure_rls(connection) -> None:
     # session, and users must never UPDATE or DELETE shared rows.
     run("GRANT INSERT ON job_postings TO authenticated")
 
+    # Point-in-time grants are not enough (MIG-WO3 review, 2026-09-09):
+    # ON ALL TABLES covers what exists NOW — the next migration that
+    # adds a table would leave it ungranted, and request sessions would
+    # hit "permission denied" on first touch (the exact symptom the
+    # conftest stamp path already recorded once). Default privileges
+    # cover everything postgres creates in public from here on.
+    run(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        "GRANT SELECT ON TABLES TO authenticated"
+    )
+    run(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        "GRANT USAGE, SELECT ON SEQUENCES TO authenticated"
+    )
+
     # --- RLS + policies ---
     for table in ALL_RLS_TABLES:
         key = "id" if table == "users" else "user_id"

@@ -72,6 +72,16 @@ def fake_complete(self, system_prompt, user_message, temperature=0.3, kind=None)
 def main():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # MIG-WO3 review (2026-09-09): create_all reproduces every TABLE but
+    # no migration ever runs — without reapplying the RLS layer this
+    # rebuild would strip every policy/grant from the database (every
+    # other rebuild path calls stamp_alembic_head, which re-applies it).
+    # This script itself runs on the service session and would stay
+    # green either way; the point is what it leaves behind for whatever
+    # runs next on the same database.
+    from conftest import stamp_alembic_head
+
+    stamp_alembic_head()
     AIService._complete = fake_complete  # monkeypatch the GLM call
     fake_service = AIService.__new__(AIService)
     fake_service.model = "glm-test"

@@ -111,6 +111,16 @@ async def run_matching(
 
     def _task():
         task_db = SessionLocal()
+        # WO-04/MIG-WO3 review (2026-09-09): stamp the caller onto the
+        # request context INSIDE the task — ai_service reads this
+        # contextvar for ai_usage attribution. The old middleware used
+        # to carry it here via an unsigned decode (retired: RLS now
+        # reads the same contextvar, so its request-path setter had to
+        # become the VERIFIED dependency — whose threadpool context
+        # copy does not survive into this background task).
+        from app.services.ai_service import current_user_id
+
+        ctx_token = current_user_id.set(user.id)
         try:
             # TENANCY LAYER 1: resolve the caller's profile HERE (on this
             # task's own session) and inject it — run_matching never
@@ -131,6 +141,7 @@ async def run_matching(
             )
             logger.info("Background matching finished: %s", summary)
         finally:
+            current_user_id.reset(ctx_token)
             task_db.close()
 
     background.add_task(_task)

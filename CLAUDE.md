@@ -191,11 +191,18 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   (per-user, per-job), never on shared job_postings.status.
 - **RLS two-session story (MIG-WO3, 2026-09-08)**: database-enforced tenancy.
   `get_db` serves `RequestSessionLocal` — on Postgres every transaction
-  SETs LOCAL role `authenticated` + `request.jwt.claim.sub` (from the
-  verified token's contextvar; NO sub ⇒ auth.uid() NULL ⇒ the IS NOT
-  NULL policies filter everything — fail-closed). `SessionLocal` is the
-  SERVICE factory (hunt/scheduler/pipeline/worker/scripts/test seeding):
-  table-owner postgres, RLS not enforced, operates the shared pool.
+  SETs LOCAL role `authenticated` + `request.jwt.claim.sub` — the
+  contextvar's SOLE request-path setter is the VERIFIED
+  get_authenticated_user (the old unsigned-decode middleware is retired:
+  a client-asserted tenancy key is exactly what RLS must not consume;
+  NO sub ⇒ auth.uid() NULL ⇒ the IS NOT NULL policies filter
+  everything — fail-closed). `SessionLocal` is the SERVICE factory
+  (hunt/scheduler/pipeline/worker/scripts/test seeding): table-owner
+  postgres, RLS not enforced, operates the shared pool. HONEST BOUNDARY:
+  request-surface CRUD is RLS-enforced; request-SPAWNED machinery (the
+  background matcher, hunt-lock sessions) stays service-level because
+  it also mutates the shared pool — discipline-enforced there
+  (keyword-only user_id + the isolation suite), not RLS.
   Policies/grants/the vanilla-PG auth.uid() shim live in
   `app/core/rls_sql.py` (single source: the migration AND conftest's
   stamp_alembic_head apply it — create_all-built schemas skip

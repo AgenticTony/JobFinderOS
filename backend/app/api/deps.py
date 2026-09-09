@@ -42,10 +42,17 @@ def owns_or_404(resource_user_id, user: User, what: str) -> None:
 
 
 def set_user_context_middleware(request, call_next):
-    """WO-04/WO-05: stamp the authenticated caller into request context
-    so ai_usage rows attribute cost per user. FastAPI dependency
-    resolution happens later, so decode the JWT best-effort here — no
-    verification cost, just the claim; auth itself stays at the routes.
+    """WO-04/WO-05: stamp the caller into request context so ai_usage
+    rows attribute cost per user. FastAPI dependency resolution happens
+    later, so decode the JWT best-effort here — no verification cost,
+    just the claim; auth itself stays at the routes.
+
+    MIG-WO3 review (2026-09-09): this is a COST LABEL, nothing more.
+    RLS reads the session's rls_sub (set from the VERIFIED claims in
+    app.users.get_authenticated_user) — deliberately NOT this value,
+    which is client-asserted. In-request AI calls happen in the route
+    thread, whose context copy this async-context set survives into —
+    which is why the label lives here and not in the dependency.
     """
     from app.services.ai_service import current_user_id
 
@@ -55,7 +62,7 @@ def set_user_context_middleware(request, call_next):
             import base64
             import json as _json
 
-            payload = auth.split(" ")[1].split(".")[1]
+            payload = auth.split()[1].split(".")[1]
             payload += "=" * (-len(payload) % 4)
             claims = _json.loads(base64.urlsafe_b64decode(payload))
             sub = claims.get("sub")
