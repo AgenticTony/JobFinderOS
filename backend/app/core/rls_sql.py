@@ -1,18 +1,32 @@
 """MIG-WO3's RLS layer as a callable — the single source of truth.
 
 The alembic migration (20260908_e8f1a3c5d7b9) runs this on upgrade;
-tests/conftest.py's stamp_alembic_head() ALSO runs it, because test
-modules that rebuild the schema with Base.metadata.create_all and stamp
-head produce a HEAD-shaped schema whose tables were never touched by
-any migration — without this, RLS/grants silently vanish mid-suite on
-the Postgres leg (permission denied for role authenticated).
+init_db() re-runs it after every `upgrade head` (per-boot convergence);
+tests/conftest.py's stamp_alembic_head() runs it, because test modules
+that rebuild the schema with Base.metadata.create_all and stamp head
+produce a HEAD-shaped schema whose tables were never touched by any
+migration.
 
 Deliberately dependency-free like core/dburl (importable by alembic
 without app config): plain SQL over a DBAPI-capable connection.
 
 Vanilla-Postgres portability: provisions the Supabase-shaped context
-(`authenticated` role + auth.uid() shim) when missing; on hosted
-Supabase both exist and everything is an idempotent no-op.
+(`authenticated` role + auth.uid() shim) when missing — GUARDED, never
+replaced: on hosted Supabase auth.uid() is owned by supabase_auth_admin
+and a CREATE OR REPLACE from postgres aborts the migration (audit round
+3, 2026-09-09 — cutover-fatal); the real function also coalesces the
+request.jwt.claims JSON GUC that PostgREST writes, so replacing it
+would break the Data API even where ownership allowed it.
+
+Coverage (audit round 3): EVERY table in public carries RLS — either an
+own_rows policy (identity tables) or bare ENABLE with NO policy (the
+service tables: shared-pool machinery the anon/authenticated roles must
+never reach through the Data API; the table owner — the worker/pipeline
+connection — bypasses RLS, so operations are unaffected). Supabase's
+defaults grant anon/authenticated full DML on public tables, and the
+anon key is published to every browser by design: without RLS on those
+tables the job pool, scrape bookkeeping and the hunt lock are reachable
+with the publishable key alone.
 """
 
 USER_TABLES = [
@@ -25,13 +39,23 @@ USER_TABLES = [
 ]
 ALL_RLS_TABLES = USER_TABLES + ["users"]
 
+# Service tables: shared-pool machinery. RLS enabled with NO policies —
+# deny-all for anon/authenticated (the Data API path), owner-bypassed
+# for the worker/pipeline sessions. job_postings and scrape_runs are
+# READ by request sessions (and job_postings INSERTed by manual create),
+# so they carry explicit read/insert policies for authenticated.
+SHARED_READ_TABLES = ["job_postings", "scrape_runs"]
+LOCKED_SERVICE_TABLES = ["scrape_watermarks", "system_locks", "alembic_version"]
+
 
 def rls_layer_complete(connection) -> bool:
-    """True when every ALL_RLS_TABLES table carries relrowsecurity and
-    the own_rows policy. The cheap pre-check that lets ensure_rls skip
-    its ALTER TABLE section on the common boot — ENABLE ROW LEVEL
-    SECURITY takes ACCESS EXCLUSIVE per table, and per-boot exclusive
-    locks wedge against any idle-in-transaction pooled session."""
+    """True when every public table carries relrowsecurity and the
+    identity tables carry own_rows. The cheap pre-check that lets
+    ensure_rls skip its ALTER TABLE section on the common boot — ENABLE
+    ROW LEVEL SECURITY takes ACCESS EXCLUSIVE per table, and per-boot
+    exclusive locks wedge against any idle-in-transaction pooled
+    session. Covers EVERY public table (audit round 3): a table without
+    RLS is the fail-open state regardless of which list it belongs to."""
     if connection.dialect.name != "postgresql":
         return True
     rows = connection.exec_driver_sql(
@@ -39,12 +63,12 @@ def rls_layer_complete(connection) -> bool:
         "(SELECT count(*) FROM pg_policies p WHERE p.schemaname = 'public' "
         " AND p.tablename = c.relname AND p.policyname = 'own_rows') "
         "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-        f"WHERE n.nspname = 'public' AND c.relname IN "
-        f"({', '.join(repr(t) for t in ALL_RLS_TABLES)})"
+        "WHERE n.nspname = 'public' AND c.relkind = 'r'"
     ).fetchall()
-    by_name = {r[0]: (r[1], r[2]) for r in rows}
-    return len(by_name) == len(ALL_RLS_TABLES) and all(
-        relayed and policies == 1 for relayed, policies in by_name.values()
+    if not rows:
+        return False  # nothing to protect yet — never report complete
+    return all(relayed for _name, relayed, _p in rows) and all(
+        p == 1 for name, _r, p in rows if name in ALL_RLS_TABLES
     )
 
 
@@ -69,12 +93,19 @@ def ensure_rls(connection) -> None:
         "END $$"
     )
     run("CREATE SCHEMA IF NOT EXISTS auth")
-    # The shim Supabase itself ships; on Supabase this replaces the
-    # function with the identical body.
+    # The shim, GUARDED: only when auth.uid() does not exist. On hosted
+    # Supabase it exists and is owned by supabase_auth_admin — CREATE OR
+    # REPLACE from postgres aborts (cutover-fatal), and the real body
+    # coalesces request.jwt.claims, which ours must never clobber.
     run(
-        "CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid"
+        "DO $$ BEGIN"
+        "  IF to_regprocedure('auth.uid()') IS NULL THEN"
+        "    CREATE FUNCTION auth.uid() RETURNS uuid"
         " LANGUAGE sql STABLE AS"
-        " $$ SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$"
+        " $f$ SELECT NULLIF(current_setting('request.jwt.claim.sub', true),"
+        " '')::uuid $f$;"
+        "  END IF;"
+        "END $$"
     )
 
     # --- Grants: authenticated may read the shared pool, write its own ---
@@ -112,16 +143,44 @@ def ensure_rls(connection) -> None:
     # always re-asserted)
     if rls_layer_complete(connection):
         return
+
+    # Identity tables: own_rows, with the two documented conventions
+    # (audit round 3): TO authenticated stops policy evaluation for
+    # other roles instead of running the predicate; (select auth.uid())
+    # wraps the call in an initPlan the optimizer caches per statement —
+    # the point on match_results/ai_usage row counts.
     for table in ALL_RLS_TABLES:
         key = "id" if table == "users" else "user_id"
         run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         run(f"DROP POLICY IF EXISTS own_rows ON {table}")
         run(
             f"CREATE POLICY own_rows ON {table}"
-            f" FOR ALL"
-            f" USING (auth.uid() IS NOT NULL AND {key} = auth.uid())"
-            f" WITH CHECK (auth.uid() IS NOT NULL AND {key} = auth.uid())"
+            f" FOR ALL TO authenticated"
+            f" USING ((select auth.uid()) IS NOT NULL AND {key} = (select auth.uid()))"
+            f" WITH CHECK ((select auth.uid()) IS NOT NULL AND {key} = (select auth.uid()))"
         )
+
+    # Shared-read tables: readable by authenticated (the request surface
+    # reads the pool and scrape bookkeeping), insertable only where a
+    # route does it (manual job create). No UPDATE/DELETE, ever.
+    for table in SHARED_READ_TABLES:
+        run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        run(f"DROP POLICY IF EXISTS shared_read ON {table}")
+        run(
+            f"CREATE POLICY shared_read ON {table}"
+            f" FOR SELECT TO authenticated USING (true)"
+        )
+    run("DROP POLICY IF EXISTS manual_create ON job_postings")
+    run(
+        "CREATE POLICY manual_create ON job_postings"
+        " FOR INSERT TO authenticated WITH CHECK (true)"
+    )
+
+    # Locked service tables: RLS with NO policy — deny-all for
+    # anon/authenticated through the Data API; the owner (worker,
+    # pipeline, alembic) bypasses RLS and is unaffected.
+    for table in LOCKED_SERVICE_TABLES:
+        run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
 
 
 def remove_rls(connection) -> None:
@@ -133,4 +192,10 @@ def remove_rls(connection) -> None:
         return
     for table in ALL_RLS_TABLES:
         connection.exec_driver_sql(f"DROP POLICY IF EXISTS own_rows ON {table}")
+        connection.exec_driver_sql(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+    for table in SHARED_READ_TABLES:
+        connection.exec_driver_sql(f"DROP POLICY IF EXISTS shared_read ON {table}")
+        connection.exec_driver_sql(f"DROP POLICY IF EXISTS manual_create ON {table}")
+        connection.exec_driver_sql(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+    for table in LOCKED_SERVICE_TABLES:
         connection.exec_driver_sql(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
