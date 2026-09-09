@@ -53,6 +53,24 @@
    that braces. This also closes the standing "restore rehearsal"
    open item if you walk the restore once.
 
+**Pre-cutover live-DB checks (audit round 3, 2026-09-09)** — three
+questions only the live project can answer; run in the SQL editor
+BEFORE the deploy, since CI's Postgres is vanilla and cannot see any of
+them:
+
+- `SELECT pg_get_userbyid(proowner) FROM pg_proc WHERE oid =
+  'auth.uid()'::regprocedure;` — must NOT be `postgres`. If it is, the
+  guarded shim would create (not replace) and the guard is moot; if it
+  is `supabase_auth_admin` (expected), the guard is required and the
+  migration must never try to replace it.
+- `SELECT pg_has_role('postgres', 'authenticated', 'MEMBER');` — must
+  be true, or every request session's `SET LOCAL role 'authenticated'`
+  fails. Supabase grants this membership by default; verify anyway.
+- Dashboard → Security Advisor → "RLS Disabled in Public" must show
+  ZERO tables after the deploy boots (init_db enables RLS on every
+  public table). If it lists any, the per-boot `ensure_rls` did not
+  converge — check the boot logs before letting users in.
+
 ## Cutover (a few minutes, between hunt windows)
 
 The hunts run 06:00/18:00 UTC — run this mid-window so no worker is

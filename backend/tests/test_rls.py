@@ -173,11 +173,11 @@ class TestLiveSchemaCarriesTheLayer:
     the LIVE schema has RLS enabled with the own_rows policy — the
     metadata drift test compares Python lists, and conftest re-applies
     the layer to test databases, so production could silently diverge
-    while the suite stayed green. These query the catalogs directly:
-    relrowsecurity and pg_policies after a real init_db (the boot path
-    production takes)."""
+    while the suite stayed green. Audit round 3 strengthened this to
+    EVERY public table: the four service tables carry Supabase's default
+    anon grants, and the anon key is public by design."""
 
-    def test_every_rls_table_has_rls_and_the_own_rows_policy(self):
+    def test_every_public_table_has_rls_and_identity_tables_the_policy(self):
         from app.core.rls_sql import ALL_RLS_TABLES
 
         with engine.connect() as conn:
@@ -185,13 +185,15 @@ class TestLiveSchemaCarriesTheLayer:
                 text(
                     "SELECT relname FROM pg_class c JOIN pg_namespace n "
                     "ON n.oid = c.relnamespace "
-                    "WHERE n.nspname = 'public' AND NOT c.relrowsecurity"
+                    "WHERE n.nspname = 'public' AND c.relkind = 'r' "
+                    "AND NOT c.relrowsecurity"
                 )
             ).scalars().all()
-            missing = [t for t in ALL_RLS_TABLES if t in not_relayed]
-            assert not missing, (
+            assert not not_relayed, (
                 f"tables without ENABLE ROW LEVEL SECURITY after init_db: "
-                f"{missing} — a request session reads them cross-tenant"
+                f"{not_relayed} — with Supabase's default grants the anon "
+                "key (published to every browser) reaches them via the "
+                "Data API"
             )
             for table in ALL_RLS_TABLES:
                 policies = conn.execute(
@@ -226,6 +228,43 @@ class TestLiveSchemaCarriesTheLayer:
                 "be pre-granted; if this is intentional, the per-boot "
                 "ensure_rls in init_db covers them anyway"
             )
+
+
+class TestMultiTransactionRequests:
+    """Audit round 3 residual: the RLS identity rides session.info —
+    which must survive a route that COMMITS mid-request and opens a
+    second transaction from the handler's context. The PG suite covers
+    this incidentally; this is the deliberate trap (the audit's PUT
+    /profile/me shape, second transaction, identity-less = the
+    ObjectDeletedError 500)."""
+
+    def test_committing_route_keeps_identity_across_transactions(
+        self, two_tenants
+    ):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+        from tests.auth_helpers import mint_token
+
+        a, _b = two_tenants
+        token = mint_token(a, f"rls-mt-{a.hex[:6]}@test.example")
+        with TestClient(app) as client:
+            r = client.put(
+                "/api/v1/profile/me",
+                json={"full_name": "Second Txn Name"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 200, (
+                f"{r.status_code}: {r.text[:200]} — a committing route "
+                "lost its RLS identity on the second transaction (the "
+                "ObjectDeletedError/CORS-less-500 shape)"
+            )
+        with SessionLocal() as session:
+            name = session.execute(
+                text("SELECT full_name FROM profiles WHERE user_id = :u"),
+                {"u": a},
+            ).scalar()
+        assert name == "Second Txn Name"
 
 
 class TestListenerIsLoadBearing:
