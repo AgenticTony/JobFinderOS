@@ -25,8 +25,9 @@ Deleted with this module's fastapi-users past: the three auth routers
 the async engine + ASYNC_DATABASE_URL dual-database machinery (it existed
 ONLY for fastapi-users' async adapter), the P1-7 token_version
 revocation scheme (Supabase terminates sessions on password change —
-doc-verified 2026-09-08), and the auth signup hardening (password policy
-and auth rate limits live in Supabase's service now).
+doc-verified 2026-09-08; the column itself was dropped 2026-09-09
+after the verified cutover), and the auth signup hardening (password
+policy and auth rate limits live in Supabase's service now).
 """
 
 import logging

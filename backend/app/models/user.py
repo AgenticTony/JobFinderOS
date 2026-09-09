@@ -8,12 +8,12 @@ user's first authenticated request.
 Columns match the physical table exactly (created by the initial schema
 migration under fastapi-users) — the NOT NULL columns stay mapped even
 where the app no longer writes meaningful values: hashed_password gets
-the "supabase-auth" sentinel on mirror insert, token_version is dead
-weight from the P1-7 JWT-revocation scheme (kept for rollback safety;
-a later migration may drop it).
+the "supabase-auth" sentinel on mirror insert. (token_version, dead
+weight from the P1-7 scheme, was dropped 2026-09-09 once the MIG-WO2
+cutover was verified.)
 """
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Uuid
+from sqlalchemy import Boolean, Column, DateTime, String, Uuid
 
 from app.core.orm import Base
 from app.core.timeutil import utc_now
@@ -30,7 +30,6 @@ class User(Base):
     is_verified = Column(Boolean, nullable=False, default=False)
     # Space for Phase 1+ account fields (stripe_customer_id, plan, etc.)
     display_name = Column(String(120), nullable=True)
-    token_version = Column(Integer, default=0, nullable=False, server_default="0")
     created_at = Column(DateTime, default=utc_now, nullable=False)  # python-side: sqlite has no now()
 
     def __repr__(self):  # pragma: no cover

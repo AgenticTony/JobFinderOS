@@ -117,7 +117,7 @@ def backup_users_rows(conn, old_ids) -> dict:
     for uid in old_ids:
         r = conn.execute(
             text("SELECT id, email, hashed_password, is_active, is_superuser, "
-                 "is_verified, display_name, token_version, created_at "
+                 "is_verified, display_name, created_at "
                  "FROM users WHERE id = :o"), {"o": uid}).mappings().one()
         out[str(uid)] = {
             "id": str(r["id"]),
@@ -127,7 +127,6 @@ def backup_users_rows(conn, old_ids) -> dict:
             "is_superuser": bool(r["is_superuser"]),
             "is_verified": bool(r["is_verified"]),
             "display_name": r["display_name"],
-            "token_version": int(r["token_version"] or 0),
             # datetime on Postgres, str on SQLite — accept both
             "created_at": (
                 r["created_at"].isoformat()
@@ -184,10 +183,10 @@ def _relocate_user(wconn, *, from_id: str, to_id: str, insert: dict) -> int:
     )
     wconn.execute(
         text("INSERT INTO users (id, email, hashed_password, is_active, "
-             "is_superuser, is_verified, display_name, token_version, "
+             "is_superuser, is_verified, display_name, "
              "created_at) VALUES (:id, :email, :hashed_password, "
              ":is_active, :is_superuser, :is_verified, :display_name, "
-             ":token_version, :created_at)"),
+             ":created_at)"),
         insert,
     )
     moved = 0
@@ -266,7 +265,6 @@ def cutover(conn, users, args) -> None:
                             "is_superuser": cols["is_superuser"],
                             "is_verified": True,
                             "display_name": cols["display_name"],
-                            "token_version": 0,
                             "created_at": cols["created_at"]},
                 )
     except Exception:
@@ -343,7 +341,6 @@ def reverse(conn) -> None:
                             "is_superuser": row["is_superuser"],
                             "is_verified": row["is_verified"],
                             "display_name": row["display_name"],
-                            "token_version": row["token_version"],
                             "created_at": row["created_at"]},
                 )
     except Exception:

@@ -291,6 +291,8 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
       confident (it carries pre-migration password hashes); fix the
       apex jobfinderos.com DNS (www works, bare domain doesn't
       connect); run Supabase Security Advisor once (RLS lint).
+      users.token_version was DROPPED 2026-09-09 (migration
+      a9c2e4f6b8d0) after the verified cutover.
 - [ ] **Restore point-of-collection privacy panels after beta** (owner
       decision 2026-09-01): both PrivacyNotice placements (account box,
       CV upload) removed for the tester phase; /privacy is the disclosure
