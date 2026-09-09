@@ -112,12 +112,12 @@ async def run_matching(
     def _task():
         task_db = SessionLocal()
         # WO-04/MIG-WO3 review (2026-09-09): stamp the caller onto the
-        # request context INSIDE the task — ai_service reads this
-        # contextvar for ai_usage attribution. The old middleware used
-        # to carry it here via an unsigned decode (retired: RLS now
-        # reads the same contextvar, so its request-path setter had to
-        # become the VERIFIED dependency — whose threadpool context
-        # copy does not survive into this background task).
+        # request context INSIDE the task so ai_service attributes its
+        # ai_usage rows. This contextvar is a COST LABEL and NOTHING
+        # ELSE — RLS never reads it (the tenancy key is session.info
+        # ['rls_sub'], set from verified claims; and this task's session
+        # is a SERVICE session anyway, where RLS is not enforced).
+        # Tenancy here rests on the keyword-only user_id threading below.
         from app.services.ai_service import current_user_id
 
         ctx_token = current_user_id.set(user.id)

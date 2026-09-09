@@ -58,8 +58,9 @@ def _supabase_admin_stub(monkeypatch):
     monkeypatch.setattr(supabase_admin, "delete_user", lambda uid: True)
 
 
-def stamp_alembic_head() -> None:
-    """Record the current ORM metadata shape as alembic head.
+def stamp_alembic_head(url: str | None = None) -> None:
+    """Record the current ORM metadata shape as alembic head — for the
+    database at `url` (default: this conftest's TEST_DB).
 
     Modules that rebuild the schema with Base.metadata.create_all (the
     per-file db fixtures in test_delta/test_radius/test_taxonomy) leave a
@@ -83,21 +84,30 @@ def stamp_alembic_head() -> None:
     the rest of the suite, and request sessions would run as
     `authenticated` against ungranted tables (permission denied). The
     same single-source layer the migration runs is applied right here.
+
+    The `url` parameter exists because callers may NOT share this
+    conftest's TEST_DB: tests/test_flow.py binds its own engine from
+    DATABASE_URL BEFORE importing this module (whose body re-points
+    that env var at TEST_DB) — hardcoded, it stamped and RLS-armed a
+    SQLite file while the Postgres database it had just rebuilt stayed
+    stripped (review round 2, 2026-09-09).
     """
+    target = url or TEST_DB
+
     from alembic.config import Config
 
     from alembic import command
 
     ini = pathlib.Path(__file__).resolve().parent.parent / "alembic.ini"
     cfg = Config(str(ini))
-    cfg.set_main_option("sqlalchemy.url", TEST_DB)
+    cfg.set_main_option("sqlalchemy.url", target)
     command.stamp(cfg, "head")
 
     from sqlalchemy import create_engine
 
     from app.core.rls_sql import ensure_rls
 
-    eng = create_engine(TEST_DB)
+    eng = create_engine(target)
     try:
         with eng.begin() as conn:
             ensure_rls(conn)

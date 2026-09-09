@@ -168,6 +168,66 @@ class TestWriteIsolation:
             assert name is None
 
 
+class TestLiveSchemaCarriesTheLayer:
+    """MIG-WO3 review round 2 (2026-09-09): nothing anywhere asserted
+    the LIVE schema has RLS enabled with the own_rows policy — the
+    metadata drift test compares Python lists, and conftest re-applies
+    the layer to test databases, so production could silently diverge
+    while the suite stayed green. These query the catalogs directly:
+    relrowsecurity and pg_policies after a real init_db (the boot path
+    production takes)."""
+
+    def test_every_rls_table_has_rls_and_the_own_rows_policy(self):
+        from app.core.rls_sql import ALL_RLS_TABLES
+
+        with engine.connect() as conn:
+            not_relayed = conn.execute(
+                text(
+                    "SELECT relname FROM pg_class c JOIN pg_namespace n "
+                    "ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND NOT c.relrowsecurity"
+                )
+            ).scalars().all()
+            missing = [t for t in ALL_RLS_TABLES if t in not_relayed]
+            assert not missing, (
+                f"tables without ENABLE ROW LEVEL SECURITY after init_db: "
+                f"{missing} — a request session reads them cross-tenant"
+            )
+            for table in ALL_RLS_TABLES:
+                policies = conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_policies "
+                        "WHERE schemaname = 'public' AND tablename = :t "
+                        "AND policyname = 'own_rows'"
+                    ),
+                    {"t": table},
+                ).scalar()
+                assert policies == 1, (
+                    f"{table} has no own_rows policy after init_db — "
+                    "RLS without a policy blocks even the owner's reads; "
+                    "with grants but no policy it leaks"
+                )
+
+    def test_future_table_default_privileges_exist(self):
+        """The default privileges are what make ensure_rls-per-boot
+        necessary (they pre-grant future tables); assert they are
+        actually installed, so the fail-open precondition is at least
+        visible — paired with the per-boot re-assertion in init_db."""
+        with engine.connect() as conn:
+            has_default = conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_default_acl d "
+                    "JOIN pg_namespace n ON n.oid = d.defaclnamespace "
+                    "WHERE n.nspname = 'public'"
+                )
+            ).scalar()
+            assert has_default >= 1, (
+                "no default privileges in public — future tables will not "
+                "be pre-granted; if this is intentional, the per-boot "
+                "ensure_rls in init_db covers them anyway"
+            )
+
+
 class TestListenerIsLoadBearing:
     def test_without_propagation_the_isolation_disappears(self, two_tenants):
         """Revert-check: the listener removed — the regression shape of

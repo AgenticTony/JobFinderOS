@@ -181,6 +181,18 @@ def init_db():
             finally:
                 lock_conn.execute(sa_text(
                     f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_KEY})"))
+        # MIG-WO3 review round 2 (2026-09-09): re-assert the RLS layer on
+        # EVERY boot, inside the same advisory-locked window. The layer's
+        # default privileges auto-grant SELECT on future tables to
+        # `authenticated` — a table added by a later migration would land
+        # granted-but-unprotected (fail-open) unless something re-runs the
+        # policies after `upgrade head`. The e8f1a3c5d7b9 migration applied
+        # them once; this makes every deploy converge to the intended state
+        # instead of trusting migrations to remember. Idempotent.
+        from app.core.rls_sql import ensure_rls
+
+        with engine.begin() as conn:
+            ensure_rls(conn)
         logger.info("Alembic migrations applied (postgres, advisory-locked)")
         return
 

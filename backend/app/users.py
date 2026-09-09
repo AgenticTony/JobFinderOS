@@ -278,22 +278,11 @@ def get_authenticated_user(
             db.flush()
             _ensure_profile(user, db)
             db.commit()
-        except (IntegrityError, DBAPIError) as exc:
-            # IntegrityError: the race (duplicate PK) — the normal case.
-            # DBAPIError: the BELT (MIG-WO3 review, 2026-09-09) — an RLS
-            # policy rejection surfaces as SQLSTATE 42501 → ProgrammingError,
-            # which the IntegrityError catch alone let escape as a
-            # CORS-less 500. Any insert failure here re-selects: the row
-            # either exists (adopt it) or the caller is not who the
-            # policies think they are (401).
+        except IntegrityError:
+            # The race (duplicate PK) — the normal case: adopt the winner.
             db.rollback()  # rolls back to (and releases) the savepoint
             user = db.get(User, user_id)
             if user is None:
-                # the collision was NOT our primary key — treat as 401
-                logger.info(
-                    "Mirror insert rejected for %s (%s) — no adoptable row",
-                    user_id, type(exc).__name__,
-                )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid authentication token",
@@ -301,6 +290,33 @@ def get_authenticated_user(
                 )
             logger.info(
                 "Mirror race lost for %s — adopting the winner's row", user_id
+            )
+        except DBAPIError as exc:
+            # BELT (MIG-WO3 review rounds, 2026-09-09): an RLS policy
+            # rejection surfaces as SQLSTATE 42501 → ProgrammingError,
+            # which the IntegrityError catch alone let escape as a
+            # CORS-less 500. GATED ON THE SQLSTATE: IntegrityError is a
+            # DBAPIError subclass, so an ungated catch also swallowed
+            # OperationalError (failover, connection reset) and answered
+            # a transient database hiccup with 401 — which the frontend
+            # interceptor turns into a sign-out. Anything that is not
+            # 42501 propagates as the honest 5xx.
+            if getattr(getattr(exc, "orig", None), "sqlstate", None) != "42501":
+                raise
+            db.rollback()
+            user = db.get(User, user_id)
+            if user is None:
+                logger.info(
+                    "Mirror insert RLS-refused for %s — no adoptable row",
+                    user_id,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication token",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            logger.info(
+                "Mirror race lost for %s (RLS refusal) — adopting", user_id
             )
         else:
             # AFTER commit, best-effort: firing the drip pre-commit meant
