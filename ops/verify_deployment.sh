@@ -119,10 +119,13 @@ echo "== Frontend: $FRONTEND =="
 fcode=$(curl -s -m 30 -o /dev/null -w "%{http_code}" -L "$FRONTEND" || true)
 if [ "$fcode" = "200" ]; then
     ok "site serves 200"
-    # scan EVERY chunk referenced by the page — the API URL lives in
-    # whichever chunk compiled src/lib/api.ts, not necessarily the first
+    # scan every chunk referenced by the PAGES THAT USE THE API — the
+    # root is the static marketing page; src/lib/api.ts compiles into the
+    # /login and /app chunks (2026-09-09: root-only scanning false-failed
+    # a working deploy)
     found=0
-    for c in $(curl -s -m 30 -L "$FRONTEND" | grep -o '/_next/static/chunks/[^"]*\.js' | sort -u); do
+    pages="/ /login /app"
+    for c in $(for pg in $pages; do curl -s -m 30 -L "$FRONTEND$pg"; done | grep -o '/_next/static/chunks/[^"]*\.js' | sort -u); do
         if curl -s -m 30 "$FRONTEND$c" | grep -q "$(echo "$API" | sed 's|https://||')"; then
             found=1; break
         fi
