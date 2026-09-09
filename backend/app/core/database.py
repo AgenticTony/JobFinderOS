@@ -48,10 +48,71 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Supabase JWTs on the sync engine (app/users.py).
 
 
+# ---------------------------------------------------------------------------
+# MIG-WO3: the two-session story, made structural.
+#
+#   SessionLocal        — SERVICE sessions: the hunt/scheduler/pipeline
+#                         machinery, worker cron, scripts, and the tests'
+#                         seeding. Plain postgres (table owner): RLS is not
+#                         enforced for the owner, so shared-pool work
+#                         (job_postings, scrape_runs, locks) keeps running.
+#
+#   RequestSessionLocal — INTERACTIVE sessions: the only factory get_db
+#                         hands to routes. On Postgres every transaction
+#                         SETs LOCAL role 'authenticated' plus
+#                         request.jwt.claim.sub from the request context
+#                         (the same contextvar set_user_context_middleware
+#                         already stamps for ai_usage attribution). The
+#                         role is set even WITHOUT a known sub: an
+#                         unidentified session runs as authenticated with
+#                         auth.uid() NULL, and the policies' IS NOT NULL
+#                         guard filters EVERYTHING — fail-closed, the
+#                         documented Supabase stance for NULL identities.
+#                         RLS itself is additive Postgres state owned by
+#                         the MIG-WO3 migration; on SQLite (tests, local
+#                         dev) the listener is a no-op.
+# ---------------------------------------------------------------------------
+
+RequestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def _request_jwt_sub() -> "str | None":
+    """The caller's id from the request context, or None. The middleware
+    parses it as a UUID before storing, and we re-stringify through
+    uuid.UUID so a SET statement can never carry injected syntax."""
+    import uuid as _uuid
+
+    from app.services.ai_service import current_user_id
+
+    value = current_user_id.get(None)
+    if value is None:
+        return None
+    return str(_uuid.UUID(str(value)))
+
+
+def _propagate_request_jwt(session, transaction, connection) -> None:
+    """SQLAlchemy 'after_begin' listener on RequestSessionLocal: runs on
+    the FIRST use of a connection inside a transaction, before any
+    statement of ours — the right moment for transaction-scoped SET
+    LOCAL (per Supabase's RLS direct-connection pattern)."""
+    if connection.dialect.name != "postgresql":
+        return  # SQLite: no roles, no RLS — the migration never enables it
+    sub = _request_jwt_sub()  # uuid.UUID-round-tripped: injection-proof
+    connection.exec_driver_sql("SET LOCAL role 'authenticated'")
+    if sub is not None:
+        connection.exec_driver_sql(f"SET LOCAL request.jwt.claim.sub = '{sub}'")
+
+
+from sqlalchemy import event as _sa_event  # noqa: E402
+
+_sa_event.listen(RequestSessionLocal, "after_begin", _propagate_request_jwt)
+
+
 
 def get_db():
-    """FastAPI dependency yielding a database session."""
-    db = SessionLocal()
+    """FastAPI dependency yielding a REQUEST session (MIG-WO3: RLS-
+    propagated on Postgres — see RequestSessionLocal above)."""
+    db = RequestSessionLocal()
     try:
         yield db
     finally:

@@ -24,7 +24,20 @@ Execution ledger:
   rows + GDPR dual-delete/tombstone shipped; the live cutover (Supabase
   identities + FK remap + dashboard SMTP/redirect config) is the
   remaining owner checklist: `docs/deploy/MIG-WO2-runbook.md`.
-- **MIG-WO3** (RLS): **open** — remaining build work.
+- **MIG-WO3** (RLS): **code complete 2026-09-08** on
+  `mig/wo2-supabase-auth` — RequestSessionLocal propagates
+  SET LOCAL role authenticated + request.jwt.claim.sub per request
+  transaction (sub from the verified token); SessionLocal stays the
+  service factory (worker/pipeline — RLS not enforced for the table
+  owner); the single-source RLS layer (app/core/rls_sql.py — policies
+  on the 7 identity tables, grants, and a vanilla-PG auth.uid() shim
+  so CI's plain postgres exercises the REAL policies) ships as an
+  alembic migration. The reviewer trap is pinned: unscoped SELECT in
+  a no-sub request session returns ZERO rows; listener removal leaks
+  (revert-checked); service sessions see all. Full suite green on
+  BOTH backends with RLS live on Postgres (454 passed). Lands with
+  the MIG-WO2 cutover (RLS keys on Supabase UUIDs — enabling before
+  the remap returns zero rows for everyone).
 - **MIG-WO4**: overtaken by events — the WO-07 deploy shipped without it.
 - **MIG-WO5** (inference residency): **decided 2026-08-30** — stay on the
   GLM beta; the Mistral EU endpoint stays armed as a config switch.

@@ -77,6 +77,12 @@ def stamp_alembic_head() -> None:
     stamping head after it is the truthful record. Alembic owns the
     schema on both backends; this keeps its version table honest when a
     test fixture rebuilds what alembic would have built.
+
+    MIG-WO3: create_all reproduces every TABLE but no migration ever
+    runs — the RLS layer (policies/grants) would silently vanish for
+    the rest of the suite, and request sessions would run as
+    `authenticated` against ungranted tables (permission denied). The
+    same single-source layer the migration runs is applied right here.
     """
     from alembic.config import Config
 
@@ -86,6 +92,17 @@ def stamp_alembic_head() -> None:
     cfg = Config(str(ini))
     cfg.set_main_option("sqlalchemy.url", TEST_DB)
     command.stamp(cfg, "head")
+
+    from sqlalchemy import create_engine
+
+    from app.core.rls_sql import ensure_rls
+
+    eng = create_engine(TEST_DB)
+    try:
+        with eng.begin() as conn:
+            ensure_rls(conn)
+    finally:
+        eng.dispose()
 
 
 def pytest_collection_modifyitems(session, config, items):
