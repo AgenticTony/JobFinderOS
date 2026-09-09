@@ -590,8 +590,8 @@ class TestDoubleSubmitWindow:
 # change) is deleted — session revocation on password change is now a
 # Supabase Auth property (doc-verified 2026-09-08: "a session terminates
 # when the user changes their password"), not this codebase's machinery.
-# The users.token_version column stays on the table for rollback safety;
-# nothing writes it.
+# (The users.token_version column was dropped 2026-09-09 after the
+# verified MIG-WO2 cutover.)
 
 
 # =====================================================================

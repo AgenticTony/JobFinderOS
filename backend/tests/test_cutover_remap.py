@@ -49,8 +49,8 @@ def _seed(conn, mod, email):
     uid = str(uuid.uuid4())
     conn.execute(
         text("INSERT INTO users (id, email, hashed_password, is_active, "
-             "is_superuser, is_verified, token_version, created_at) VALUES "
-             "(:id, :email, 'old-hash', 1, 0, 1, 0, '2026-01-01')"),
+             "is_superuser, is_verified, created_at) VALUES "
+             "(:id, :email, 'old-hash', 1, 0, 1, '2026-01-01')"),
         {"id": uid, "email": email})
     conn.execute(text("INSERT INTO profiles (user_id, is_active, remote_ok, "
                       "remote_only, include_remote, onboarded, created_at, "
@@ -86,7 +86,7 @@ class TestCutoverRelocate:
                         "is_active": row["is_active"],
                         "is_superuser": row["is_superuser"],
                         "is_verified": True, "display_name": row["display_name"],
-                        "token_version": 0, "created_at": row["created_at"]})
+                        "created_at": row["created_at"]})
         assert moved == 3  # profile + match + ai_usage
 
         with scratch_db.connect() as conn:
@@ -112,9 +112,9 @@ class TestCutoverRelocate:
             with scratch_db.begin() as wconn:
                 wconn.execute(
                     text("INSERT INTO users (id, email, hashed_password, "
-                         "is_active, is_superuser, is_verified, token_version, "
+                         "is_active, is_superuser, is_verified, "
                          "created_at) VALUES (:id, 'kept@example.com', "
-                         "'supabase-auth', 1, 0, 1, 0, '2026-01-01')"),
+                         "'supabase-auth', 1, 0, 1, '2026-01-01')"),
                     {"id": str(uuid.uuid4())})
 
     def test_roundtrip_forward_then_reverse_restores_the_original_row(
@@ -137,7 +137,7 @@ class TestCutoverRelocate:
                 "hashed_password": "supabase-auth",
                 "is_active": row["is_active"], "is_superuser": row["is_superuser"],
                 "is_verified": True, "display_name": row["display_name"],
-                "token_version": 0, "created_at": row["created_at"]})
+                "created_at": row["created_at"]})
         # reverse: back onto the original row contents
         with scratch_db.begin() as wconn:
             mod._relocate_user(wconn, from_id=new_id, to_id=old_id, insert={
@@ -145,7 +145,6 @@ class TestCutoverRelocate:
                 "hashed_password": row["hashed_password"],
                 "is_active": row["is_active"], "is_superuser": row["is_superuser"],
                 "is_verified": row["is_verified"], "display_name": row["display_name"],
-                "token_version": row["token_version"],
                 "created_at": row["created_at"]})
 
         with scratch_db.connect() as conn:

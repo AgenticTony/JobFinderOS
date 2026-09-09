@@ -56,7 +56,7 @@ Scheduler is deliberately OUT of the API process (WO-04): the cron worker claims
 
 ## 4. Backend — `backend/`
 
-FastAPI + SQLAlchemy 2 (sync engine; async engine only for fastapi-users auth), pydantic v2,
+FastAPI + SQLAlchemy 2 (single sync engine; auth = Supabase JWKS verification since MIG-WO2), pydantic v2,
 per-user tenancy enforced at routes. Run: `cd backend && .venv/bin/uvicorn app.main:app --port 8000`.
 Tests: `PYTHONPATH=. .venv/bin/python -m pytest tests/ -q` (217 test functions).
 
@@ -64,8 +64,8 @@ Tests: `PYTHONPATH=. .venv/bin/python -m pytest tests/ -q` (217 test functions).
 
 | File | Role | Key contents |
 |---|---|---|
-| `app/main.py` | FastAPI entry | Lifespan: `init_db()` (Alembic under Postgres advisory lock 821371), `start_scheduler()`, taxonomy warm-up. Routers under `/api/v1/{profile,pipeline,jobs,matches,applications,settings,account}` + fastapi-users `/auth/jwt /auth /users` with login/register rate-limit deps. `GET /health` (DB readiness), CORS, global exception handler. |
-| `app/users.py` | fastapi-users v15 auth | Separate async engine (aiosqlite/psycopg). `UserManager`: password validation (8–72 bytes), `on_after_register` creates the Profile row. Bearer + JWT (7-day). `current_active_user`. |
+| `app/main.py` | FastAPI entry | Lifespan: `init_db()` (Alembic under Postgres advisory lock 821371), `start_scheduler()`, taxonomy warm-up. Routers under `/api/v1/{profile,pipeline,jobs,matches,applications,settings,account}` (no auth routers — Supabase Auth hosts those since MIG-WO2). `GET /health` (DB readiness), CORS, global exception handler. |
+| `app/users.py` | Supabase Auth JWT verification (MIG-WO2) | ES256 JWKS verify (algorithm from the key) + mirror-row upsert on first sight (creates the Profile row, fires the onboarding drip). Race-safe savepoint insert. |
 | `app/api/deps.py` | Shared dependencies | `register/login_rate_limit` (keyed by submitted email); `get_authenticated_user`; `get_user_profile` (404 if no CV); `owns_or_404` IDOR guard — fails closed on NULL; `set_user_context_middleware` stamps `ai_service.current_user_id` ContextVar for per-user cost rows. |
 
 ### 4.2 `app/api/v1/`
@@ -97,7 +97,7 @@ Tests: `PYTHONPATH=. .venv/bin/python -m pytest tests/ -q` (217 test functions).
 
 | File | Table | Key columns / constraints |
 |---|---|---|
-| `user.py` | `users` | fastapi-users UUID table + `display_name`. |
+| `user.py` | `users` | local mirror of the Supabase identity: UUID id, email, sentinel hashed_password (MIG-WO2; token_version kept for rollback, drop pending). |
 | `profile.py` | `profiles` | `user_id` UNIQUE NOT NULL (one per user). Immutable CV block (cv_text/path), AI-extracted JSON (skills/roles/education/keywords), preferences, onboarding (country/region, `municipalities` JSON, `search_radius_km`, `occupation_codes` JSON, queries, languages). |
 | `job.py` | `job_postings` | **No user_id — shared pool.** source, `dedupe_key` (indexed), description, salary, status lifecycle, published/scraped timestamps. |
 | `match.py` | `match_results` | user_id+job_id NOT NULL, `UniqueConstraint(user_id, job_id)`. score/tier/reasoning/skill lists/recommendation/confidence, decision, per-user `dismissed_reason`, `prompt_version` (indexed). |

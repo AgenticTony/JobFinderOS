@@ -100,6 +100,9 @@ This is a deploy blocker, not a tuning detail. Decide it before WO-07.
 
 ### F2 — We run asyncpg, which is documented to fail on BOTH Supabase poolers
 
+> **RESOLVED** — WO-11 unified on psycopg; MIG-WO2 (2026-09-08) deleted
+> the async auth engine entirely. Retained as the finding that motivated both.
+
 `app/core/database.py` runs **two engines**: sync `psycopg` for the app, and
 async **`asyncpg`** for the fastapi-users auth layer. Supabase's own docs state
 transaction mode *"does not support prepared statements"*, and asyncpg uses
