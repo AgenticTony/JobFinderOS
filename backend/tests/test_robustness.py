@@ -455,6 +455,92 @@ def _erase_user(uid):
         s.close()
 
 
+class TestMatchingFanOut:
+    """2026-09-09: the matching loop's AI scoring runs on a bounded
+    pool while every DB write stays on the calling thread. These pin
+    the two properties that make the fan-out real and safe."""
+
+    def test_ai_calls_actually_overlap(self, db, monkeypatch):
+        """Red-proof target: with MATCH_CONCURRENCY=1 this fails — the
+        serial loop can never have two calls in flight."""
+        import threading
+        import time as _time
+
+        from app.core.config import settings as cfg
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+        from app.services.cv_service import get_active_profile
+
+        monkeypatch.setattr(cfg, "MATCH_CONCURRENCY", 4)
+        uid, _jobs = _user_with_profile_and_jobs(db, n_jobs=12)
+
+        lock = threading.Lock()
+        state = {"now": 0, "max": 0}
+
+        def slow_match(self, profile_context, cv_text, job_description):
+            with lock:
+                state["now"] += 1
+                state["max"] = max(state["max"], state["now"])
+            _time.sleep(0.05)
+            with lock:
+                state["now"] -= 1
+            return {"score": 80, "reasoning": "ok", "recommendation": "apply",
+                    "confidence": "high", "matched_skills": ["Python"],
+                    "missing_skills": [], "transferable_skills": []}
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "match_job", slow_match)
+
+        profile = get_active_profile(db, user_id=uid)
+        summary = matcher_service.run_matching(db, profile=profile, user_id=uid)
+        assert summary["status"] == "completed", summary
+        assert state["max"] > 1, (
+            f"peak in-flight AI calls was {state['max']} — the fan-out is "
+            "decorative; the loop is still serial"
+        )
+
+    def test_contextvar_attribution_survives_the_pool(self, db, monkeypatch):
+        """The cost-label contextvar (ai_usage attribution, trial-cap
+        metering) must reach every pool thread: tasks run inside a copy
+        of the caller's context. A bare executor thread would see None."""
+        from app.services import matcher_service
+        from app.services.ai_service import AIService, current_user_id
+        from app.services.cv_service import get_active_profile
+
+        uid, _jobs = _user_with_profile_and_jobs(db, n_jobs=6)
+        seen_uids = []
+
+        def recording_match(self, profile_context, cv_text, job_description):
+            seen_uids.append(current_user_id.get())
+            return {"score": 80, "reasoning": "ok", "recommendation": "apply",
+                    "confidence": "high", "matched_skills": ["Python"],
+                    "missing_skills": [], "transferable_skills": []}
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "match_job", recording_match)
+
+        token = current_user_id.set(uid)
+        try:
+            profile = get_active_profile(db, user_id=uid)
+            summary = matcher_service.run_matching(
+                db, profile=profile, user_id=uid
+            )
+        finally:
+            current_user_id.reset(token)
+        assert summary["status"] == "completed", summary
+        assert seen_uids and all(u == uid for u in seen_uids), (
+            f"pool threads lost the user context: {seen_uids} — ai_usage "
+            "rows would record user_id=None and the trial caps would "
+            "stop metering"
+        )
+
+
 class TestDeletedUserAbortsMatching:
     def test_user_deleted_mid_run_aborts_no_further_model_calls(self, db, monkeypatch):
         """The user is erased during the FIRST job's evaluation. The
@@ -463,7 +549,15 @@ class TestDeletedUserAbortsMatching:
         from app.services.cv_service import get_active_profile
 
         monkeypatch.setattr(matcher_service, "USER_LIVENESS_CHECK_EVERY", 1)
-        uid, jobs = _user_with_profile_and_jobs(db, n_jobs=3)
+        # Enough jobs to engage the fan-out window: the serial-era
+        # assertion (exactly ONE job evaluated) pins the old shape. The
+        # pooled contract (2026-09-09): submissions stop once the erase
+        # is detected — at a loop-top liveness check or the FK belt on
+        # the first consume — and at most the in-flight window plus the
+        # liveness stride may already be spent.
+        from app.core.config import settings as cfg
+
+        uid, jobs = _user_with_profile_and_jobs(db, n_jobs=25)
 
         def on_call(n):
             if n == 1:
@@ -476,9 +570,10 @@ class TestDeletedUserAbortsMatching:
         assert summary["status"] == "aborted", (
             f"a deleted user must abort the run, got {summary}"
         )
-        assert len(seen["jobs"]) == 1, (
-            f"no further jobs may be evaluated after the user is gone, "
-            f"got {seen['jobs']}"
+        assert len(seen["jobs"]) <= cfg.MATCH_CONCURRENCY + 1, (
+            f"matching kept spending long after the user was erased: "
+            f"{len(seen['jobs'])} jobs evaluated "
+            f"(window={cfg.MATCH_CONCURRENCY}) — {seen['jobs']}"
         )
         assert "user" in (summary.get("error") or "").lower()
 
@@ -544,8 +639,6 @@ class TestDeletedUserAbortsMatching:
         from app.services.cv_service import get_active_profile
 
         monkeypatch.setattr(matcher_service, "USER_LIVENESS_CHECK_EVERY", 10_000)
-        uid, jobs = _user_with_profile_and_jobs(db, n_jobs=3)
-        by_title = {j.title: j for j in jobs}
 
         from app.models import Profile, User  # noqa: F401 — used in on_call
 
@@ -573,6 +666,15 @@ class TestDeletedUserAbortsMatching:
                 finally:
                     s.close()
 
+        # Liveness stride disabled (the belt under test); jobs engage
+        # the fan-out window. Pooled contract (2026-09-09): the FK belt
+        # fires on the FIRST consume; at most the in-flight window may
+        # already be spent beyond it.
+        from app.core.config import settings as cfg
+
+        uid, jobs = _user_with_profile_and_jobs(db, n_jobs=25)
+        by_title = {j.title: j for j in jobs}
+
         seen = _scripted_ai(monkeypatch, on_call=on_call, with_title=True)
         run_db = SessionLocal()
         try:
@@ -584,8 +686,10 @@ class TestDeletedUserAbortsMatching:
         assert summary["status"] == "aborted", (
             f"an insert failure with the user gone must abort, got {summary}"
         )
-        assert len(seen["jobs"]) == 1, (
-            f"only the in-flight job may be evaluated, got {seen['jobs']}"
+        assert len(seen["jobs"]) <= cfg.MATCH_CONCURRENCY + 1, (
+            f"the FK belt did not stop the spending promptly: "
+            f"{len(seen['jobs'])} jobs evaluated "
+            f"(window={cfg.MATCH_CONCURRENCY}) — {seen['jobs']}"
         )
 
     def test_non_user_integrity_error_does_not_abort(self, db, monkeypatch):

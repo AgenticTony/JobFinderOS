@@ -143,7 +143,11 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 ## AI setup (GLM via Z.ai)
 
 - **Model: `glm-5.1`** (switched from glm-4.6 which had 24-point run-to-run variance)
-- Matching: temperature=0.0, anchored rubric in prompt, ~6s/call, 10 concurrent
+- Matching: temperature=0.0, anchored rubric in prompt, ~6s/call, fanned out
+  MATCH_CONCURRENCY-wide (default 8) on a bounded pool — AI calls on pool
+  threads inside copied contexts (ai_usage attribution survives), every DB
+  write on the calling thread. The flat-rate key's behavior under
+  parallelism is unmeasured: watch the first uncapped hunts and tune.
 - Tailoring: default temperature 0.3 (variety in cover letters is desirable)
 - Prompt version: `AIService.matching_prompt_version()` — SHA-256 of the prompt
   text; any accidental edit changes the version and calibration tests fail

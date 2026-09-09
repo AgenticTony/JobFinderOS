@@ -614,13 +614,75 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages):
     return unmatched
 
 
+def _score_job(service, profile_context, cv_text, job_text):
+    """Pure-AI half of one job's evaluation: the primary sample plus the
+    dead-band re-samples. Runs on a POOL thread — must touch no ORM
+    objects (the caller pre-renders job_text) and no sessions; the
+    shared OpenAI/httpx client is thread-safe, and _record_usage opens
+    its own session. Returns (samples, sampling_failed); samples=None
+    means the PRIMARY call failed (leave the job 'new')."""
+    try:
+        result = service.match_job(
+            profile_context=profile_context,
+            cv_text=cv_text,
+            job_description=job_text,
+        )
+    except Exception as e:  # noqa: BLE001 — any AI failure skips the job, never kills the run
+        logger.error("Match failed (%s): %s", type(e).__name__, e)
+        return None, False  # caller leaves the job 'new' for the next run
+
+    samples = [result]  # full result dicts, not just scores
+    sampling_failed = False
+    # How many samples this job earns comes from the SHARED policy
+    # (needs_another_sample) — dead-band second opinion, then top-up
+    # to 3 for anything heading into the queue. The re-score script
+    # calls the same function; duplicating the thresholds is what
+    # dismissed 62 rows on a single sample.
+    while needs_another_sample(samples):
+        try:
+            samples.append(
+                service.match_job(
+                    profile_context=profile_context,
+                    cv_text=cv_text,
+                    job_description=job_text,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Re-sample failed: %s", e)
+            # A failure while still inside the dead-band leaves one
+            # ±11 sample in the uncertain zone — NOT enough for a
+            # permanent dismissal. Leave the job 'new' for retry,
+            # matching the convention for unparseable responses.
+            # Above the band we already have enough to store.
+            sampling_failed = len(samples) < 2 and (
+                samples[0]["score"] < settings.MATCH_KEEP_MIN_SCORE
+            )
+            break
+    return samples, sampling_failed
+
+
 def _run_matching_loop(
     db, unmatched, profile, user_id, *, limit, max_seconds,
     daily_binding=False, scored_today=0, allowance=0, heartbeat=None,
 ) -> Dict:
     """The evaluation loop proper. Called with the per-user running mark
     already set (AI-14) — returns the summary dict, aborts early when
-    the user is erased mid-run (PIPE-19)."""
+    the user is erased mid-run (PIPE-19).
+
+    FAN-OUT (2026-09-09): the AI scoring runs on a bounded pool
+    (MATCH_CONCURRENCY wide) while EVERY database write, check and
+    decision stays on this calling thread — the Session is not
+    thread-safe and never crosses. Jobs are consumed FIFO by
+    submission order, so results and row state are deterministic and
+    the existing suite semantics hold. Each pool task runs inside a
+    COPY OF THIS THREAD'S CONTEXT (contextvars) so ai_usage cost rows
+    keep their user_id attribution — a bare executor thread would see
+    a fresh context and record user_id=None, silently breaking the
+    trial-cap metering that keys off those rows."""
+    import contextvars
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+
     service = get_ai_service()
     profile_context = build_profile_context(profile)
     exclude_keywords = [k.lower() for k in parse_json_list(profile.exclude_keywords)]
@@ -632,74 +694,34 @@ def _run_matching_loop(
     deadline = (time.time() + max_seconds) if max_seconds else None
     matches_created = 0
     evaluated = 0
-    for job in unmatched:
-        # PIPE-19 liveness check: a GDPR erase mid-run deletes the
-        # user row; every later INSERT would fail its FK (and on
-        # SQLite, where FKs are off, silently write ghost rows).
-        # Checked every USER_LIVENESS_CHECK_EVERY evaluations so a
-        # 200-evaluation run stops within ~25 slots of the erase.
-        if (
-            evaluated
-            and evaluated % USER_LIVENESS_CHECK_EVERY == 0
-            and not _user_exists(db, user_id)
-        ):
-            return _user_gone_summary(user_id, len(unmatched), matches_created)
+    pending = deque()  # (future, job, started) — FIFO by submission
+    abort_summary = None
 
-        # PIPE-18b: renew the hunt claim mid-run so an uncapped
-        # pass never outlives its TTL. Best-effort — a failed
-        # renewal surfaces through the holder's own renew/release
-        # logging, and the stealer story stays the documented one.
-        if heartbeat is not None and evaluated and evaluated % HEARTBEAT_EVERY == 0:
-            try:
-                heartbeat()
-            except Exception:  # noqa: BLE001
-                logger.warning("hunt heartbeat raised", exc_info=True)
+    executor = ThreadPoolExecutor(
+        max_workers=max(1, settings.MATCH_CONCURRENCY),
+        thread_name_prefix="match-ai",
+    )
 
-        # Cheap pre-filter: hard excludes skip the AI call entirely
-        haystack = f"{job.title} {job.company or ''}".lower()
-        if any(kw in haystack for kw in exclude_keywords):
-            # THIS user's exclude list — never the shared job row, or one
-            # user's "senior" filter hides senior roles from everyone
-            _dismiss_for_user(db, user_id, job, "excluded_keyword", service.model)
-            db.commit()
-            continue
-
-        if not job.description:
-            # Nothing to assess — dismiss rather than waste an AI call
-            _dismiss_for_user(db, user_id, job, "no_description", service.model)
-            db.commit()
-            continue
-
-        # The evaluation cap counts AI SPEND, not candidates: the
-        # free gates above must never consume a slot.
-        if evaluated >= limit:
-            logger.info(
-                "Evaluation cap (%d) reached after %d matches — "
-                "remaining candidates stay queued for the next run",
-                limit,
-                matches_created,
-            )
-            break
-
-        if deadline and time.time() > deadline:
-            logger.info(
-                "Matching time budget (%ss) reached after %d matches — remaining jobs stay 'new'",
-                max_seconds,
-                matches_created,
-            )
-            break
-
-        evaluated += 1
+    def _submit(job):
+        # Pre-render on the CALLER thread: pool threads must not touch
+        # ORM objects (lazy loads would fire off-thread).
+        job_text = _job_text(job)
         started = time.time()
-        try:
-            result = service.match_job(
-                profile_context=profile_context,
-                cv_text=profile.cv_text,
-                job_description=_job_text(job),
-            )
-        except Exception as e:  # noqa: BLE001 — any AI failure skips the job, never kills the run
-            logger.error("Match failed for job %s (%s): %s", job.id, type(e).__name__, e)
-            continue  # leave as 'new' for the next run
+        ctx = contextvars.copy_context()  # carries current_user_id
+        future = executor.submit(
+            ctx.run, _score_job, service, profile_context, profile.cv_text, job_text
+        )
+        pending.append((future, job, started))
+
+    def _consume_one():
+        """Take the OLDEST submitted job, wait for its scoring, and do
+        every database write on THIS thread. Returns an abort summary
+        dict when the user vanished mid-run (PIPE-19), else None.
+        Caller owns matches_created via the nonlocal."""
+        nonlocal matches_created
+
+        future, job, started = pending.popleft()
+        samples, sampling_failed = future.result()
 
         # SCORING PROTOCOL (review-hardened):
         # - Collect full result dicts (not just scores) from each sample
@@ -713,36 +735,10 @@ def _run_matching_loop(
         #
         # Cost: 41% of backlog rows clear keep-min → ~2.06× the single-
         # sample cost. The embeddings prefilter (ROADMAP) is the lever.
-        samples = [result]  # full result dicts, not just scores
-
-        # How many samples this job earns comes from the SHARED policy
-        # (needs_another_sample) — dead-band second opinion, then top-up
-        # to 3 for anything heading into the queue. The re-score script
-        # calls the same function; duplicating the thresholds is what
-        # dismissed 62 rows on a single sample.
-        sampling_failed = False
-        while needs_another_sample(samples):
-            try:
-                samples.append(
-                    service.match_job(
-                        profile_context=profile_context,
-                        cv_text=profile.cv_text,
-                        job_description=_job_text(job),
-                    )
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Re-sample failed for job %s: %s", job.id, e)
-                # A failure while still inside the dead-band leaves one
-                # ±11 sample in the uncertain zone — NOT enough for a
-                # permanent dismissal. Leave the job 'new' for retry,
-                # matching the convention for unparseable responses.
-                # Above the band we already have enough to store.
-                sampling_failed = len(samples) < 2 and (
-                    samples[0]["score"] < settings.MATCH_KEEP_MIN_SCORE
-                )
-                break
+        if samples is None:
+            return None  # primary call failed — job stays 'new'
         if sampling_failed:
-            continue
+            return None  # one uncertain sample — retry next run
 
         # Average once; F1: the payload comes from the sample closest to
         # the mean — via resolve_samples, the shared protocol the
@@ -794,7 +790,7 @@ def _run_matching_loop(
                     return _user_gone_summary(
                         user_id, len(unmatched), matches_created
                     )
-            continue
+            return None
 
         match = MatchResult(
             user_id=user_id,
@@ -838,7 +834,95 @@ def _run_matching_loop(
             logger.warning(
                 "Job %s already had a match — reconciled status, batch continues", job.id
             )
-            continue
+        return None
+
+    try:
+        for job in unmatched:
+            # PIPE-19 liveness check: a GDPR erase mid-run deletes the
+            # user row; every later INSERT would fail its FK (and on
+            # SQLite, where FKs are off, silently write ghost rows).
+            if (
+                evaluated
+                and evaluated % USER_LIVENESS_CHECK_EVERY == 0
+                and not _user_exists(db, user_id)
+            ):
+                abort_summary = _user_gone_summary(
+                    user_id, len(unmatched), matches_created
+                )
+                break
+
+            # PIPE-18b: renew the hunt claim mid-run so an uncapped
+            # pass never outlives its TTL. Best-effort — a failed
+            # renewal surfaces through the holder's own renew/release
+            # logging, and the stealer story stays the documented one.
+            if heartbeat is not None and evaluated and evaluated % HEARTBEAT_EVERY == 0:
+                try:
+                    heartbeat()
+                except Exception:  # noqa: BLE001
+                    logger.warning("hunt heartbeat raised", exc_info=True)
+
+            # Cheap pre-filter: hard excludes skip the AI call entirely
+            haystack = f"{job.title} {job.company or ''}".lower()
+            if any(kw in haystack for kw in exclude_keywords):
+                # THIS user's exclude list — never the shared job row, or one
+                # user's "senior" filter hides senior roles from everyone
+                _dismiss_for_user(db, user_id, job, "excluded_keyword", service.model)
+                db.commit()
+                continue
+
+            if not job.description:
+                # Nothing to assess — dismiss rather than waste an AI call
+                _dismiss_for_user(db, user_id, job, "no_description", service.model)
+                db.commit()
+                continue
+
+            # The evaluation cap counts AI SPEND, not candidates: the
+            # free gates above must never consume a slot.
+            if evaluated >= limit:
+                logger.info(
+                    "Evaluation cap (%d) reached after %d matches — "
+                    "remaining candidates stay queued for the next run",
+                    limit,
+                    matches_created,
+                )
+                break
+
+            if deadline and time.time() > deadline:
+                logger.info(
+                    "Matching time budget (%ss) reached after %d matches — remaining jobs stay 'new'",
+                    max_seconds,
+                    matches_created,
+                )
+                break
+
+            evaluated += 1
+            _submit(job)
+
+            # Keep the in-flight window bounded: consume the OLDEST
+            # future once the pool is saturated.
+            while pending and len(pending) >= max(1, settings.MATCH_CONCURRENCY):
+                abort_summary = _consume_one()
+                if abort_summary:
+                    break
+            if abort_summary:
+                break
+
+        # Drain whatever is still in flight — their GLM calls are
+        # already spent, so the rows belong in the database.
+        while pending and abort_summary is None:
+            abort_summary = _consume_one()
+            if abort_summary:
+                break
+    finally:
+        if abort_summary is not None:
+            # A mid-run abort (GDPR erase) must stop SPENDING too:
+            # cancel everything not yet started; running calls finish.
+            executor.shutdown(wait=False, cancel_futures=True)
+        else:
+            executor.shutdown(wait=True)
+
+    if abort_summary is not None:
+        return abort_summary
 
     logger.info("Matching run: %d jobs considered, %d matches created", len(unmatched), matches_created)
     if daily_binding and evaluated >= limit:
@@ -853,7 +937,6 @@ def _run_matching_loop(
         "jobs_considered": len(unmatched),
         "matches_created": matches_created,
     }
-
 
 
 def _dismiss_for_user(db, user_id, job: JobPosting, reason: str, model: str) -> None:
