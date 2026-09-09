@@ -138,6 +138,33 @@ def ensure_rls(connection) -> None:
         "GRANT USAGE, SELECT ON SEQUENCES TO authenticated"
     )
 
+    # Security Advisor follow-through (2026-09-09): Supabase's
+    # creation-time defaults leave `anon` holding FULL grants on every
+    # public table — including TRUNCATE, which RLS does not govern.
+    # RLS denies anon all rows today (no anon policies), so nothing
+    # leaks, but that is latent exposure: one accidental DISABLE ROW
+    # LEVEL SECURITY and the pool is wide open. We never use anon (the
+    # browser authenticates via Supabase Auth; the API connects as the
+    # table owner), so revoke outright — current tables and future ones.
+    run(
+        "DO $$ BEGIN"
+        "  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')"
+        "  THEN REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;"
+        "       REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;"
+        "  END IF;"
+        "END $$"
+    )
+    run(
+        "DO $$ BEGIN"
+        "  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')"
+        "  THEN EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        "REVOKE ALL ON TABLES FROM anon';"
+        "       EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        "REVOKE ALL ON SEQUENCES FROM anon';"
+        "  END IF;"
+        "END $$"
+    )
+
     # --- RLS + policies --- (ACCESS EXCLUSIVE per table — the ONLY
     # section gated on completeness: grants above are lock-light and
     # always re-asserted)
