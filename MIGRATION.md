@@ -1,4 +1,4 @@
-# MIGRATION — Supabase consolidation (EXECUTING: WO1 done, WO2/WO3 remain)
+# MIGRATION — Supabase consolidation (COMPLETE 2026-09-09 — retained as the decision record)
 
 Status: **executing** (refreshed 2026-08-31 — the header previously said
 "not yet started", which stopped being true on 2026-08-28). Reason for the
@@ -18,12 +18,14 @@ Execution ledger:
 - **MIG-WO1** (move to Supabase Postgres): **executed 2026-08-28** — 797
   rows migrated, counts snapshot-verified, zero invariant violations;
   details in `docs/work-orders/README.md` under WO-03.
-- **MIG-WO2** (Supabase Auth): **code complete 2026-09-08** on
-  `mig/wo2-supabase-auth` — fastapi-users deleted, JWKS (ES256, not
-  the RS256 this plan assumed — live-verified) verification + mirror
-  rows + GDPR dual-delete/tombstone shipped; the live cutover (Supabase
-  identities + FK remap + dashboard SMTP/redirect config) is the
-  remaining owner checklist: `docs/deploy/MIG-WO2-runbook.md`.
+- **MIG-WO2** (Supabase Auth): **EXECUTED 2026-09-09** — code (2026-09-08,
+  three review rounds) + live cutover: 4 accounts remapped in one
+  transaction (counts snapshot-verified, zero orphans), identities
+  email_confirmed, both services deployed, SMTP via Resend live
+  (reset email delivered end-to-end), browser login verified against
+  production with all data intact. Runbook:
+  `docs/deploy/MIG-WO2-runbook.md`; rollback snapshot retained until
+  destroyed per its final step.
 - **MIG-WO3** (RLS): **code complete 2026-09-08** on
   `mig/wo2-supabase-auth` — RequestSessionLocal propagates
   SET LOCAL role authenticated + request.jwt.claim.sub per request
@@ -35,14 +37,18 @@ Execution ledger:
   alembic migration. The reviewer trap is pinned: unscoped SELECT in
   a no-sub request session returns ZERO rows; listener removal leaks
   (revert-checked); service sessions see all. Full suite green on
-  BOTH backends with RLS live on Postgres (454 passed). Lands with
-  the MIG-WO2 cutover (RLS keys on Supabase UUIDs — enabling before
-  the remap returns zero rows for everyone).
+  BOTH backends with RLS live on Postgres (454 passed). **LIVE since
+  the 2026-09-09 cutover deploy**: policies applied on the hosted
+  project, the guarded auth.uid() shim proved itself against the real
+  supabase_auth_admin ownership, and the probe's first request
+  exercised the authenticated-role mirror insert under live RLS.
 - **MIG-WO4**: overtaken by events — the WO-07 deploy shipped without it.
 - **MIG-WO5** (inference residency): **decided 2026-08-30** — stay on the
   GLM beta; the Mistral EU endpoint stays armed as a config switch.
 
-This file retires when MIG-WO2 and MIG-WO3 land. The decision gate is kept
+Both have landed; this file is the decision record (kept per the
+owner's doc-ownership rules — the queue in docs/work-orders/ is the
+execution surface). The decision gate is kept
 below as historical context so it isn't re-litigated, not as an open
 question.
 

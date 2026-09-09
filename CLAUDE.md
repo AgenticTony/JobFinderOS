@@ -281,21 +281,16 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 
 ## Open items / next steps
 
-- [ ] **MIG-WO2 live cutover — the code is DONE, these are the owner
-      steps** (full checklist: `docs/deploy/MIG-WO2-runbook.md`): (1)
-      Supabase dashboard → custom SMTP via Resend (BLOCKER: the built-in
-      sender is 2/hr + team-addresses-only — real beta emails won't
-      deliver without it), (2) set Site URL + Redirect URLs (include
-      both /reset-password locales), (3) pg_dump backup, (4) run
-      `ops/mig_wo2_cutover.py --yes` between hunt windows (3 live
-      accounts; prints one-time temp passwords), (5) merge +
-      deploy both services (delete stale AUTH_SECRET/TRUST_PROXY_HEADERS
-      env vars in the Render dashboard if they survive the blueprint
-      sync — extra inputs are boot-fatal now), (6) set the Pages env
-      vars NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY
-      (publishable key) before `ops/deploy_frontend.sh`. Afterward:
-      drop users.token_version in a later migration (kept for rollback
-      safety).
+- [x] **MIG-WO2/WO3 live cutover — EXECUTED 2026-09-09**: 4 accounts
+      remapped (verified, zero orphans), both Render services deployed,
+      frontend deployed with the anon key, SMTP via Resend proven
+      (reset email delivered), browser login verified end-to-end with
+      all data intact, verify_deployment 6/6. Remaining owner actions:
+      hand the 3 remaining temp passwords to their users (printed at
+      cutover, stored nowhere); destroy ops/mig_wo2_snapshot.json once
+      confident (it carries pre-migration password hashes); fix the
+      apex jobfinderos.com DNS (www works, bare domain doesn't
+      connect); run Supabase Security Advisor once (RLS lint).
 - [ ] **Restore point-of-collection privacy panels after beta** (owner
       decision 2026-09-01): both PrivacyNotice placements (account box,
       CV upload) removed for the tester phase; /privacy is the disclosure
