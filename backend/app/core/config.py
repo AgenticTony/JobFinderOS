@@ -113,6 +113,15 @@ class Settings(BaseSettings):
     MATCH_STALE_DAYS: int = 30  # pending matches older than this are auto-passed
     MAX_POSTING_AGE_DAYS: int = 30  # postings older than this are never stored
     MATCH_TIME_BUDGET_SECONDS: int = 420  # hard stop; frontend pipeline timeout is 600s
+    # Fan-out width for the per-job AI scoring in the matching loop
+    # (2026-09-09): the loop was serial — one ~6s GLM call at a time,
+    # dead-band re-samples inside the same iteration — and the hunt's
+    # lock TTL literally encodes users × 7min. GLM calls are I/O-wait,
+    # so the worker's 0.5 CPU is not the limit; the serial await is.
+    # 8 is the default; the flat-rate key's behaviour under parallelism
+    # is UNMEASURED — watch latency/errors on the first uncapped hunts
+    # and tune here, not in code.
+    MATCH_CONCURRENCY: int = 8
     COMPOSIO_API_KEY: str = ""  # integrations layer (Settings page)
     # Beta (owner decision 2026-09-01): email applications ship from the
     # USER'S OWN connected Gmail, not a platform sender. The interim
