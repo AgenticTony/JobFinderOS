@@ -72,6 +72,18 @@ def fake_complete(self, system_prompt, user_message, temperature=0.3, kind=None)
 def main():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # MIG-WO3 review (2026-09-09): create_all reproduces every TABLE but
+    # no migration ever runs — without reapplying the RLS layer this
+    # rebuild would strip every policy/grant from the database (every
+    # other rebuild path calls stamp_alembic_head, which re-applies it).
+    # The URL is passed EXPLICITLY (render_as_string — str(engine.url)
+    # MASKS the password as ***, which then fails auth), because
+    # importing conftest re-points DATABASE_URL at its own TEST_DB: the
+    # hardcoded form stamped a SQLite file instead of the Postgres
+    # database this script had just stripped (review round 2).
+    from conftest import stamp_alembic_head
+
+    stamp_alembic_head(engine.url.render_as_string(hide_password=False))
     AIService._complete = fake_complete  # monkeypatch the GLM call
     fake_service = AIService.__new__(AIService)
     fake_service.model = "glm-test"

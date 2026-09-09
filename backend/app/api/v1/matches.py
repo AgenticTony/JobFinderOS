@@ -111,6 +111,16 @@ async def run_matching(
 
     def _task():
         task_db = SessionLocal()
+        # WO-04/MIG-WO3 review (2026-09-09): stamp the caller onto the
+        # request context INSIDE the task so ai_service attributes its
+        # ai_usage rows. This contextvar is a COST LABEL and NOTHING
+        # ELSE — RLS never reads it (the tenancy key is session.info
+        # ['rls_sub'], set from verified claims; and this task's session
+        # is a SERVICE session anyway, where RLS is not enforced).
+        # Tenancy here rests on the keyword-only user_id threading below.
+        from app.services.ai_service import current_user_id
+
+        ctx_token = current_user_id.set(user.id)
         try:
             # TENANCY LAYER 1: resolve the caller's profile HERE (on this
             # task's own session) and inject it — run_matching never
@@ -131,6 +141,7 @@ async def run_matching(
             )
             logger.info("Background matching finished: %s", summary)
         finally:
+            current_user_id.reset(ctx_token)
             task_db.close()
 
     background.add_task(_task)

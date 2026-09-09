@@ -26,9 +26,34 @@ USER_TABLES = [
 ALL_RLS_TABLES = USER_TABLES + ["users"]
 
 
+def rls_layer_complete(connection) -> bool:
+    """True when every ALL_RLS_TABLES table carries relrowsecurity and
+    the own_rows policy. The cheap pre-check that lets ensure_rls skip
+    its ALTER TABLE section on the common boot — ENABLE ROW LEVEL
+    SECURITY takes ACCESS EXCLUSIVE per table, and per-boot exclusive
+    locks wedge against any idle-in-transaction pooled session."""
+    if connection.dialect.name != "postgresql":
+        return True
+    rows = connection.exec_driver_sql(
+        "SELECT c.relname, c.relrowsecurity, "
+        "(SELECT count(*) FROM pg_policies p WHERE p.schemaname = 'public' "
+        " AND p.tablename = c.relname AND p.policyname = 'own_rows') "
+        "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        f"WHERE n.nspname = 'public' AND c.relname IN "
+        f"({', '.join(repr(t) for t in ALL_RLS_TABLES)})"
+    ).fetchall()
+    by_name = {r[0]: (r[1], r[2]) for r in rows}
+    return len(by_name) == len(ALL_RLS_TABLES) and all(
+        relayed and policies == 1 for relayed, policies in by_name.values()
+    )
+
+
 def ensure_rls(connection) -> None:
     """Apply the full MIG-WO3 layer: context, grants, RLS, policies.
-    Idempotent; no-op on non-PostgreSQL connections."""
+    Idempotent; no-op on non-PostgreSQL connections. The ALTER/policy
+    section is SKIPPED when the layer is already complete — those
+    statements take ACCESS EXCLUSIVE locks, and running them on every
+    boot (init_db calls this) would wedge against pooled sessions."""
     if connection.dialect.name != "postgresql":
         return
 
@@ -67,7 +92,26 @@ def ensure_rls(connection) -> None:
     # session, and users must never UPDATE or DELETE shared rows.
     run("GRANT INSERT ON job_postings TO authenticated")
 
-    # --- RLS + policies ---
+    # Point-in-time grants are not enough (MIG-WO3 review, 2026-09-09):
+    # ON ALL TABLES covers what exists NOW — the next migration that
+    # adds a table would leave it ungranted, and request sessions would
+    # hit "permission denied" on first touch (the exact symptom the
+    # conftest stamp path already recorded once). Default privileges
+    # cover everything postgres creates in public from here on.
+    run(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        "GRANT SELECT ON TABLES TO authenticated"
+    )
+    run(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        "GRANT USAGE, SELECT ON SEQUENCES TO authenticated"
+    )
+
+    # --- RLS + policies --- (ACCESS EXCLUSIVE per table — the ONLY
+    # section gated on completeness: grants above are lock-light and
+    # always re-asserted)
+    if rls_layer_complete(connection):
+        return
     for table in ALL_RLS_TABLES:
         key = "id" if table == "users" else "user_id"
         run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
