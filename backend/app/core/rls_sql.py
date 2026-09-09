@@ -90,6 +90,9 @@ def ensure_rls(connection) -> None:
         "  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated')"
         "  THEN CREATE ROLE authenticated NOLOGIN;"
         "  END IF;"
+        "  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')"
+        "  THEN CREATE ROLE anon NOLOGIN;"
+        "  END IF;"
         "END $$"
     )
     run("CREATE SCHEMA IF NOT EXISTS auth")
@@ -146,22 +149,33 @@ def ensure_rls(connection) -> None:
     # LEVEL SECURITY and the pool is wide open. We never use anon (the
     # browser authenticates via Supabase Auth; the API connects as the
     # table owner), so revoke outright — current tables and future ones.
+    run("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon")
+    run("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon")
     run(
-        "DO $$ BEGIN"
-        "  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')"
-        "  THEN REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;"
-        "       REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;"
-        "  END IF;"
-        "END $$"
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        "REVOKE ALL ON TABLES FROM anon"
     )
     run(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+        "REVOKE ALL ON SEQUENCES FROM anon"
+    )
+    # Role-scoped blind spot (review, 2026-09-09): ALTER DEFAULT PRIVILEGES
+    # without FOR ROLE only rewrites the EXECUTING role's entry. Stock
+    # Supabase also installs a supabase_admin-grantor entry granting anon
+    # full DML — verified live. Best-effort revoke of that too: postgres is
+    # normally NOT a member of supabase_admin, so this may be refused; the
+    # exception handler leaves the residual documented rather than
+    # boot-fatal. The residual is bounded: our alembic chain creates as
+    # postgres (probe-verified 2026-09-09 — tables created by postgres get
+    # ZERO anon grants), so only platform-internal objects follow the
+    # supabase_admin defaults.
+    run(
         "DO $$ BEGIN"
-        "  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon')"
-        "  THEN EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-        "REVOKE ALL ON TABLES FROM anon';"
-        "       EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-        "REVOKE ALL ON SEQUENCES FROM anon';"
-        "  END IF;"
+        "  EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin "
+        "IN SCHEMA public REVOKE ALL ON TABLES FROM anon';"
+        "  EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin "
+        "IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon';"
+        "EXCEPTION WHEN insufficient_privilege OR undefined_object THEN NULL;"
         "END $$"
     )
 
