@@ -210,6 +210,25 @@ class TestLiveSchemaCarriesTheLayer:
                     "with grants but no policy it leaks"
                 )
 
+    def test_anon_role_holds_no_table_grants(self):
+        """Security Advisor follow-through (2026-09-09): Supabase's
+        creation-time defaults grant anon FULL DML+TRUNCATE on public
+        tables — TRUNCATE bypasses RLS entirely. RLS denies anon rows
+        today, but the grants are latent exposure; ensure_rls revokes
+        them. Assert the live end state."""
+        with engine.connect() as conn:
+            leaked = conn.execute(
+                text(
+                    "SELECT table_name FROM information_schema.role_table_grants "
+                    "WHERE table_schema = 'public' AND grantee = 'anon'"
+                )
+            ).scalars().all()
+            assert not leaked, (
+                f"anon still holds grants on {leaked} — one accidental "
+                "DISABLE ROW LEVEL SECURITY away from full exposure "
+                "(and TRUNCATE is not governed by RLS at all)"
+            )
+
     def test_future_table_default_privileges_exist(self):
         """The default privileges are what make ensure_rls-per-boot
         necessary (they pre-grant future tables); assert they are
