@@ -384,7 +384,7 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 <!-- gstack-gbrain-search-guidance:start -->
 
 GBrain indexes this repo. Layout (verified 173/173 files vs origin/main 2026-08-30):
-- **Pinned code source** (`.gbrain-source` pin): 133 code pages, symbol-aware. All code
+- **Pinned code source** (`.gbrain-source` pin): 185 code pages, symbol-aware. All code
   queries (`code-def`, `code-refs`, `code-callers`, `code-callees`, bare `search`) scope
   to it automatically from anywhere in this worktree.
 - **default source**: every non-code file as note pages — 24 markdown docs (import slugs
