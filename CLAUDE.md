@@ -161,7 +161,7 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 |---|---|---|---|
 | jobtech (Platsbanken) | SE | none (key optional) | Government open data, effectively uncapped |
 | reed | GB | basic-auth key | 2,000 req/hr — effectively unlimited |
-| careerjet | SE+GB | key + declared IP + Referer | 1,000 req/hr |
+| careerjet | SE+GB | key + declared IP (max 8 addresses) + Referer | 1,000 req/hr. Prod egress via `CAREERJET_PROXY_URL` (static-IP proxy) — Render's shared /24s can't be declared |
 | adzuna | (none — module retained) | app_id + key | Demoted from the GB pack (WO-08: Reed carries the UK). Retained for the US/AU expansion backbone |
 | arbeitnow, remotive, jobicy, workingnomads | shared | none | Public feeds |
 
