@@ -1998,6 +1998,52 @@ class TestAlembicUrlPrecedence:
         ) == "sqlite:///./ci.db"
 
 
+class TestAlembicFileconfigPreservesRootLevel:
+    """fileConfig resets the ROOT logger's LEVEL to alembic.ini's
+    [logger_root] WARN. P1-5a's disable_existing_loggers=False keeps
+    NAMED loggers alive, but every levelless app.* logger propagates to
+    root — so after init_db() at boot, BOTH production processes (API
+    lifespan, worker --once) silently dropped every INFO log: hunt
+    summaries, scrape results, the one-shot completion line. Observed
+    live 2026-09-11: the hunt cron's runs logged nothing but alembic's
+    own lines while doing real work. Sentry is off (empty DSN) — INFO
+    IS the production telemetry. env.py now captures and restores the
+    caller's root level around fileConfig."""
+
+    def test_boot_shape_root_info_survives_the_migration_run(self):
+        """The boot shape, minimized: basicConfig(INFO) runs before
+        init_db() in both app.main and worker.main; an alembic command
+        then executes env.py. INFO must still be enabled at root
+        afterwards — the effective gate that decides whether a
+        post-boot app.* INFO record is emitted or dropped."""
+        import logging
+        from pathlib import Path
+
+        from alembic.config import Config
+
+        from alembic import command
+
+        root = logging.getLogger()
+        original = root.level
+        root.setLevel(logging.INFO)
+        try:
+            ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+            cfg = Config(str(ini))
+            # No URL injected — the CLI minimal-env shape; env.py
+            # resolves DATABASE_URL, which conftest owns (TEST_DB).
+            command.stamp(cfg, "head")
+
+            assert root.level == logging.INFO, (
+                "alembic's fileConfig reset root to "
+                f"{logging.getLevelName(root.level)} — every app.* "
+                "INFO log after init_db() (hunt summaries, scrape "
+                "results) dies silently in both production processes"
+            )
+            assert root.isEnabledFor(logging.INFO)
+        finally:
+            root.setLevel(original)
+
+
 class TestMigrationLockTimeout:
     """DATA-6: init_db's advisory-lock connection carries a lock_timeout,
     but the connection ALEMBIC itself opens had none — the first DDL

@@ -1,3 +1,4 @@
+import logging
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, exc, pool
@@ -38,7 +39,20 @@ config.set_main_option("sqlalchemy.url", resolve_url(config))
 # migration run (P1-5a's mandated cleanup warning was one of the swallowed
 # ones; nothing from app.* reached stdout/stderr or caplog).
 if config.config_file_name is not None:
+    # P1-5a fixed the named-logger half (disable_existing_loggers=
+    # False); fileConfig ALSO resets the ROOT logger's LEVEL to
+    # alembic.ini's [logger_root] WARN — and every levelless app.*
+    # logger propagates to root, so post-boot INFO (hunt summaries,
+    # scrape results, the one-shot completion line) still died
+    # silently in BOTH production processes (observed 2026-09-11:
+    # cron runs logged only alembic's own lines while doing real
+    # work). Capture-and-restore keeps the CALLER's policy: app boots
+    # run basicConfig(INFO) before init_db; a bare CLI alembic keeps
+    # its default WARNING.
+    _root = logging.getLogger()
+    _root_level = _root.level
     fileConfig(config.config_file_name, disable_existing_loggers=False)
+    _root.setLevel(_root_level)
 
 # JobFinderOS models — importing the package registers every table
 from app import models  # noqa: E402, F401
