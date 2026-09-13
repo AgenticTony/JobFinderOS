@@ -193,6 +193,13 @@ class Settings(BaseSettings):
     # there too.
     CAREERJET_API_KEY: str = ""
     CAREERJET_REFERER: str = "https://github.com/AgenticTony"
+    # Static-IP egress for Careerjet (2026-09-11). The partner portal's IP
+    # allowlist caps at 8 ADDRESSES (a /24 counts as 256), so Render's shared
+    # outbound ranges can never be declared. Production routes EVERY
+    # Careerjet request — the search, the location retry, and the public-IP
+    # lookup that fills user_ip — through a static-IP HTTP proxy whose
+    # addresses ARE declared. Empty = direct egress (local dev).
+    CAREERJET_PROXY_URL: str = ""
 
     ENABLE_SCHEDULER: bool = False
     SCRAPE_INTERVAL_MINUTES: int = 60

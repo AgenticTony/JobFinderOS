@@ -7,6 +7,9 @@ Serves BOTH packs via locale_code (en_GB / sv_SE) — it aggregates listings fro
 many boards, including ones closed to us directly.
 
 Gated behind CAREERJET_API_KEY; activates the moment the key lands in .env.
+Every request (search, location retry, user_ip lookup) leaves through
+CAREERJET_PROXY_URL when set — the portal's IP allowlist caps at 8
+addresses, so Render's shared outbound ranges can't be declared.
 """
 
 import logging
@@ -36,14 +39,23 @@ USER_AGENT = "JobFinderOS/0.1 (job-search-automation)"
 _cached_public_ip: Optional[str] = None
 
 
+def _egress_proxy() -> Optional[str]:
+    """The static-IP proxy every Careerjet request must leave through, or
+    None for direct egress. Read per call, never cached at import, so a
+    changed env (and the tests) apply without a restart."""
+    return settings.CAREERJET_PROXY_URL or None
+
+
 def _outbound_ip() -> str:
     """The API requires user_ip and validates it against the key's allowlist —
-    must be the PUBLIC IP. Looked up once via an echo service, then cached."""
+    must be the PUBLIC IP. Looked up once via an echo service, then cached.
+    Through CAREERJET_PROXY_URL when set, so the address reported is the
+    proxy's — the one the searches actually arrive from."""
     global _cached_public_ip
     if _cached_public_ip:
         return _cached_public_ip
     try:
-        response = httpx.get("https://api.ipify.org", timeout=10)
+        response = httpx.get("https://api.ipify.org", timeout=10, proxy=_egress_proxy())
         if response.status_code == 200 and response.text.strip():
             _cached_public_ip = response.text.strip()
             return _cached_public_ip
@@ -109,6 +121,7 @@ class CareerjetScraper(BaseScraper):
                     params=params,
                     auth=auth,
                     timeout=settings.SCRAPE_TIMEOUT_SECONDS,
+                    proxy=_egress_proxy(),
                     # Careerjet validates the Referer against the website
                     # declared in the partner portal
                     headers={"Referer": settings.CAREERJET_REFERER},
@@ -134,6 +147,7 @@ class CareerjetScraper(BaseScraper):
                             params=params,
                             auth=auth,
                             timeout=settings.SCRAPE_TIMEOUT_SECONDS,
+                            proxy=_egress_proxy(),
                             headers={"Referer": settings.CAREERJET_REFERER},
                         )
                         response.raise_for_status()

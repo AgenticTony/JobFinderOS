@@ -294,12 +294,14 @@ jobs:
               for v in s.get("envVars", []):
                   if v["key"] in {"DATABASE_URL", "GLM_API_KEY", "SUPABASE_URL",
                                   "SUPABASE_SERVICE_KEY", "AUTH_SECRET",
-                                  "RESEND_API_KEY"}:
+                                  "RESEND_API_KEY", "CAREERJET_API_KEY",
+                                  "CAREERJET_PROXY_URL"}:
                       assert v.get("sync") is False or v.get("generateValue"), (
                           f"{s['name']}/{v['key']} must be sync:false or generateValue")
                   assert "value" not in v or v["key"] not in {
                       "DATABASE_URL", "GLM_API_KEY", "SUPABASE_URL",
-                      "SUPABASE_SERVICE_KEY", "RESEND_API_KEY"}, \
+                      "SUPABASE_SERVICE_KEY", "RESEND_API_KEY",
+                      "CAREERJET_API_KEY", "CAREERJET_PROXY_URL"}, \
                       f"secret {v['key']} has a literal value in render.yaml"
           print("render.yaml invariants OK:", list(services))
           EOF

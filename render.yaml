@@ -99,6 +99,16 @@ services:
         sync: false
       - key: REED_API_KEY
         sync: false
+      # Careerjet (SE+GB): the partner portal allowlists caller IPs — max 8
+      # ADDRESSES (a /24 counts as 256), so Render's shared outbound ranges
+      # can't be declared. Calls leave through CAREERJET_PROXY_URL (a
+      # static-IP proxy whose addresses ARE declared). Empty key = off.
+      - key: CAREERJET_API_KEY
+        sync: false
+      - key: CAREERJET_REFERER   # must match the portal's declared website
+        value: https://www.jobfinderos.com
+      - key: CAREERJET_PROXY_URL # carries proxy credentials
+        sync: false
       - key: SENTRY_DSN     # empty = off (WO-05); EU region project when set
         sync: false
       # Hunts run in the CRON service, never the API (WO-04: two API
@@ -155,6 +165,16 @@ services:
       - key: JOBTECH_API_KEY
         sync: false
       - key: REED_API_KEY
+        sync: false
+      # Careerjet (SE+GB): the partner portal allowlists caller IPs — max 8
+      # ADDRESSES (a /24 counts as 256), so Render's shared outbound ranges
+      # can't be declared. Calls leave through CAREERJET_PROXY_URL (a
+      # static-IP proxy whose addresses ARE declared). Empty key = off.
+      - key: CAREERJET_API_KEY
+        sync: false
+      - key: CAREERJET_REFERER   # must match the portal's declared website
+        value: https://www.jobfinderos.com
+      - key: CAREERJET_PROXY_URL # carries proxy credentials
         sync: false
       - key: SENTRY_DSN
         sync: false

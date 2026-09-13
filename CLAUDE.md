@@ -161,7 +161,7 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 |---|---|---|---|
 | jobtech (Platsbanken) | SE | none (key optional) | Government open data, effectively uncapped |
 | reed | GB | basic-auth key | 2,000 req/hr — effectively unlimited |
-| careerjet | SE+GB | key + declared IP + Referer | 1,000 req/hr |
+| careerjet | SE+GB | key + declared IP (max 8 addresses) + Referer | 1,000 req/hr. Prod egress via `CAREERJET_PROXY_URL` (static-IP proxy) — Render's shared /24s can't be declared |
 | adzuna | (none — module retained) | app_id + key | Demoted from the GB pack (WO-08: Reed carries the UK). Retained for the US/AU expansion backbone |
 | arbeitnow, remotive, jobicy, workingnomads | shared | none | Public feeds |
 
@@ -326,6 +326,16 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
       TRIAL_DAY1_SCORE_CAP high on Render (BOTH services) so testers are
       effectively uncapped on the flat-rate GLM subscription key; remove
       the two env vars after beta to reinstate the 25/10 defaults.
+- [ ] **Egress fix (2026-09-11) needs deploy — backend first, then
+      frontend**: Supabase free-tier egress hit 109% of 5GB in 11 days;
+      pg_stat_statements named get_stats' per-poll full-pool scan
+      (15,515 scans / 9.69M rows, the 60s status poll) and the Sent
+      page's client-side jobs-pool walk (2,081 walks of ~900 rows).
+      perf/egress-poll-slimming: stats are pool-version-cached +
+      FILTER-aggregated, applications embed their job, hidden tabs
+      stop polling. Deploy order is graceful either way (a.job?.title
+      falls back to "Job #id") but backend-first ships the field the
+      new frontend reads.
 
 - [x] **Re-score the legacy-unversioned matches** — done: 241/243 rows are on
       `m2-62c2452b`, 2 stragglers remain (verified 2026-08-31)

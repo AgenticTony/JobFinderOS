@@ -153,7 +153,7 @@ Also `app/crud/__init__.py` (221 ln): `list_matches` (excludes dismissed), `set_
 |---|---|---|
 | `jobtech.py` | Platsbanken — SE primary | Key optional; municipality/radius/occupation-field filters; delta `published-after`; pagination 3/5/10 pages. |
 | `reed.py` | Reed — GB | Basic-auth key; 100/query; per-employer cap 10. |
-| `careerjet.py` | Careerjet — SE+GB | Key + declared public IP + Referer. |
+| `careerjet.py` | Careerjet — SE+GB | Key + declared public IP (max 8 addresses) + Referer. `CAREERJET_PROXY_URL` routes every call — search, retry, user_ip lookup — through a static-IP proxy. |
 | `adzuna.py` | Adzuna — **in no pack** (US/AU expansion backbone, WO-08) | app_id+key; token-bucket pacer 25/min. |
 | `arbeitnow.py`, `remotive.py`, `jobicy.py`, `workingnomads.py` | Shared remote pack | No keys. |
 

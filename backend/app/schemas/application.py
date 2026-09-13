@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
 class DraftSubmitRequest(BaseModel):
@@ -58,8 +58,6 @@ class DraftResponse(BaseModel):
 
 
 class ApplicationResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     job_id: int
     match_id: Optional[int] = None
@@ -73,3 +71,30 @@ class ApplicationResponse(BaseModel):
     sent_at: Optional[datetime] = None
     error: Optional[str] = None
     created_at: datetime
+    # EGRESS 2026-09-11: the Sent page used to join job titles
+    # client-side by WALKING the whole /jobs/ pool 500 rows at a time
+    # per fetch (~900 full rows per refresh; 2,081 walks in two
+    # weeks). The response now embeds the same JobResponse the walk
+    # was reconstructing — same shape DraftResponse already ships.
+    job: Optional[dict] = None
+
+    @classmethod
+    def from_orm_application(cls, a) -> "ApplicationResponse":
+        from app.schemas.job import JobResponse
+
+        return cls(
+            id=a.id,
+            job_id=a.job_id,
+            match_id=a.match_id,
+            draft_id=a.draft_id,
+            method=a.method,
+            status=a.status,
+            subject=a.subject,
+            body=a.body,
+            target_email=a.target_email,
+            apply_url=a.apply_url,
+            sent_at=a.sent_at,
+            error=a.error,
+            created_at=a.created_at,
+            job=JobResponse.from_orm_job(a.job).model_dump() if a.job else None,
+        )

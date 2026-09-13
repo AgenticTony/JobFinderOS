@@ -56,6 +56,9 @@ export interface Application {
   sent_at: string | null;
   error: string | null;
   created_at: string;
+  // Embedded by the backend since the 2026-09-11 egress fix (the Sent
+  // page used to join this client-side by walking the whole jobs pool)
+  job?: Job | null;
 }
 
 export interface ApplicationDraft {
