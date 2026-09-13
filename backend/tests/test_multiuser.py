@@ -2816,6 +2816,166 @@ class TestPersonalFunnelStats:
         assert c_stats["jobs_matched"] == 0
 
 
+class TestStatsPollEgress:
+    """EGRESS (2026-09-11): Supabase free-tier egress hit 109% of 5GB
+    in 11 days. pg_stat_statements named the poll paths: the pipeline-
+    status poll (60s per open console tab) made get_stats run a
+    no-WHERE 4-column scan of the ENTIRE job_postings pool 15,515
+    times (9.69M rows) and hydrate every kept MatchResult entity per
+    call (20,436 x 80 rows). The pool only changes when a hunt writes;
+    the tier counts are four integers. These tests pin the fix: the
+    expensive scan runs once per (scope, pool version, hour) — not
+    once per poll — and the aggregates stay exact."""
+
+    def _scoped_user(self, client, db):
+        # Unique municipality per test: the SQLite scratch file persists
+        # across runs and this module's rows survive between tests, so
+        # "Malmö" would inherit earlier tests' in-scope postings and
+        # break the absolute counts below.
+        city = f"Egstad-{uuid.uuid4().hex[:8]}"
+        email = f"eg-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        profile = db.query(Profile).filter(Profile.user_id == uid).one()
+        profile.country = "SE"
+        profile.municipality = city
+        profile.remote_only = 0
+        profile.include_remote = 0
+        db.flush()
+        return uid, city
+
+    def _job(self, db, *, location="Malmö central", remote=0):
+        from app.core.timeutil import utc_now
+
+        job = JobPosting(
+            source="manual", source_id=uuid.uuid4().hex[:8],
+            title="Dev", url=f"https://x/{uuid.uuid4().hex[:6]}",
+            location=location, remote=remote,
+            scraped_at=utc_now(),
+        )
+        db.add(job)
+        db.flush()
+        return job
+
+    def test_second_poll_does_not_rescan_the_pool(self, client, db):
+        from sqlalchemy import event
+
+        from app.core.database import engine
+        from app.crud import get_stats
+
+        uid, city = self._scoped_user(client, db)
+        self._job(db, location=city)
+        self._job(db, location=city)
+
+        get_stats(db, user_id=uid)  # warm the cache
+
+        captured = []
+
+        def _capture(conn, cursor, statement, parameters, context, executemany):
+            captured.append(statement)
+
+        event.listen(engine, "before_cursor_execute", _capture)
+        try:
+            second = get_stats(db, user_id=uid)
+        finally:
+            event.remove(engine, "before_cursor_execute", _capture)
+
+        scans = [
+            s for s in captured
+            if "job_postings.remote AS job_postings_remote" in s
+        ]
+        assert not scans, (
+            f"get_stats re-scanned the whole pool on an UNCHANGED pool "
+            f"({len(scans)} full scans) — the 60s status poll turns that "
+            f"into GB/month of Supabase egress (incident 2026-09-11)"
+        )
+        assert second["jobs_total"] == 2
+        assert second["jobs_last_24h"] == 2
+
+    def test_pool_change_invalidates_the_cache(self, client, db):
+        from app.crud import get_stats
+
+        uid, city = self._scoped_user(client, db)
+        self._job(db, location=city)
+        first = get_stats(db, user_id=uid)
+        self._job(db, location=city)  # a hunt wrote — the pool version moves
+        second = get_stats(db, user_id=uid)
+        assert first["jobs_total"] == 1
+        assert second["jobs_total"] == 2, "stale cached feed after a pool write"
+
+    def test_match_tier_aggregates_stay_exact(self, client, db):
+        from app.crud import get_stats
+        from app.models import MatchResult
+
+        uid, city = self._scoped_user(client, db)
+        jobs = [self._job(db, location=city) for _ in range(5)]
+        shapes = [
+            ("excellent_match", None),
+            ("excellent_match", "approved"),
+            ("good_match", None),
+            ("stretch", "rejected"),
+        ]
+        for job, (tier, decision) in zip(jobs, shapes):
+            db.add(MatchResult(
+                user_id=uid, job_id=job.id, tier=tier, score=80,
+                decision=decision,
+            ))
+        # Bookkeeping dismissal — excluded from every count
+        db.add(MatchResult(
+            user_id=uid, job_id=jobs[4].id, tier="excellent_match",
+            score=99, decision=None, dismissed_reason="below_threshold",
+        ))
+        db.flush()
+
+        stats = get_stats(db, user_id=uid)
+        assert stats["matches_total"] == 4
+        assert stats["jobs_matched"] == 4
+        assert stats["matches_excellent"] == 2
+        assert stats["matches_good"] == 1
+        assert stats["matches_pending_decision"] == 2
+        assert stats["jobs_approved"] == 1
+        assert stats["jobs_rejected"] == 1
+
+
+class TestApplicationsEmbedJob:
+    """EGRESS (2026-09-11): the Sent page joined job titles client-side
+    by WALKING the whole /jobs/ pool 500 rows at a time per fetch
+    (frontend api.ts getApplications) — ~900 full rows per refresh,
+    2,081 pool walks in two weeks. The response now embeds the same
+    JobResponse the walk was reconstructing, so the walk is gone."""
+
+    def test_list_embeds_job_summary(self, client, db):
+        from app.core.timeutil import utc_now
+        from app.models import Application
+
+        email = f"ae-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        job = JobPosting(
+            source="manual", source_id=uuid.uuid4().hex[:8],
+            title="Backend Dev", company="Acme",
+            url=f"https://x/{uuid.uuid4().hex[:6]}",
+            location="Malmö", remote=0, scraped_at=utc_now(),
+        )
+        db.add(job)
+        db.flush()
+        db.add(Application(
+            user_id=uid, job_id=job.id, method="email", status="sent",
+        ))
+        db.commit()  # the request below runs in its own session — flush alone is invisible
+
+        _auth_client(client, email)  # sets the Bearer header on the shared client
+        resp = client.get("/api/v1/applications/")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 1
+        assert body[0]["job"]["title"] == "Backend Dev", (
+            "applications response must embed the job the Sent page "
+            "renders — without it the frontend re-walks the whole jobs "
+            "pool per fetch (egress incident 2026-09-11)"
+        )
+        assert body[0]["job"]["company"] == "Acme"
+        assert body[0]["job"]["url"].startswith("https://x/")
+
+
 class TestBetaFeedback:
     """The console's one-box feedback page (owner decision 2026-09-01):
     auth-only, account-linked BY DESIGN (disclosed on the page), schema-

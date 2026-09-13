@@ -82,7 +82,7 @@ export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [drafts, setDrafts] = useState<ApplicationDraft[]>([]);
-  const [applications, setApplications] = useState<(Application & { job?: { title: string; company: string | null } })[]>([]);
+  const [applications, setApplications] = useState<Application[]>([]);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [matchPolling, setMatchPolling] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<PipelineRunResponse | null>(null);
@@ -252,27 +252,46 @@ export default function Home() {
   // When the stats signature changes (a scheduled hunt ran in the background),
   // pull the full lists too — otherwise the cards go stale while the counts
   // update, which reads as "new jobs but nothing new".
+  //
+  // EGRESS 2026-09-11: an always-open console tab polled this every 60s
+  // around the clock — with the backend's then-O(pool) stats query that
+  // was the #1 driver of Supabase egress hitting 109% of the free tier.
+  // A hidden tab has no viewer: skip its polls entirely and catch up the
+  // moment it becomes visible again.
   const lastStatsSig = useRef<string | null>(null);
-  useEffect(() => {
-    const id = setInterval(() => {
-      getPipelineStatus()
-        .then((st) => {
-          setPipeStatus(st);
-          const sig = JSON.stringify(st.stats);
-          if (lastStatsSig.current !== null && sig !== lastStatsSig.current) {
-            refresh();
-          }
-          lastStatsSig.current = sig;
-        })
-        .catch(() => {});
-    }, 60_000);
-    return () => clearInterval(id);
+  const pollStatus = useCallback(() => {
+    if (document.hidden) return;
+    getPipelineStatus()
+      .then((st) => {
+        setPipeStatus(st);
+        const sig = JSON.stringify(st.stats);
+        if (lastStatsSig.current !== null && sig !== lastStatsSig.current) {
+          refresh();
+        }
+        lastStatsSig.current = sig;
+      })
+      .catch(() => {});
   }, [refresh]);
 
+  useEffect(() => {
+    const id = setInterval(pollStatus, 60_000);
+    const onVisible = () => {
+      if (!document.hidden) pollStatus();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [pollStatus]);
+
   // While background matching runs, poll status + stream fresh matches in
+  // (same hidden-tab skip as pollStatus — a backgrounded tab doesn't need
+  // the 8s match stream; it catches up on visibility)
   useEffect(() => {
     if (!matchPolling) return;
-    const poll = setInterval(async () => {
+    const poll = async () => {
+      if (document.hidden) return;
       try {
         const [st, ms] = await Promise.all([
           getPipelineStatus(),
@@ -288,8 +307,16 @@ export default function Home() {
       } catch {
         // keep polling; transient errors are fine
       }
-    }, 8000);
-    return () => clearInterval(poll);
+    };
+    const id = setInterval(poll, 8000);
+    const onVisible = () => {
+      if (!document.hidden) void poll();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [matchPolling, refresh]);
 
   const handleRunPipeline = async (backfill = false) => {
@@ -1008,7 +1035,7 @@ function ApplicationsView({
 }: {
   page: 'apps-review' | 'apps-sent';
   drafts: ApplicationDraft[];
-  applications: (Application & { job?: { title: string; company: string | null } })[];
+  applications: (Application)[];
   onChanged: () => Promise<void>;
   onPrepare: (jobId: number) => Promise<void>;
   onSwitch: (v: View) => void;
@@ -1023,7 +1050,7 @@ function ApplicationsView({
     openDrafts.length === 1 ? openDrafts[0].id : null
   );
   const draftById = new Map(drafts.map((d) => [d.id, d]));
-  const draftFor = (a: (Application & { job?: { title: string; company: string | null } })) =>
+  const draftFor = (a: (Application)) =>
     a.draft_id ? draftById.get(a.draft_id) : undefined;
   const subTabs = (
     <SubTabs
@@ -1139,7 +1166,7 @@ function SentApplicationCard({
   draft,
   onChanged,
 }: {
-  application: Application & { job?: { title: string; company: string | null } };
+  application: Application;
   draft?: ApplicationDraft;
   onChanged: () => Promise<void>;
 }) {

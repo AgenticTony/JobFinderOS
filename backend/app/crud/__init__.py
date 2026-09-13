@@ -4,7 +4,7 @@ from datetime import timedelta
 from typing import List, Optional
 
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.timeutil import utc_now
 from app.models import (
@@ -117,7 +117,12 @@ def set_match_decision(db: Session, match: MatchResult, decision: str) -> MatchR
 def list_applications(
     db: Session, limit: int = 100, offset: int = 0, *, user_id
 ) -> List[Application]:
-    query = db.query(Application).filter(Application.user_id == user_id)
+    # joinedload: the list endpoint embeds each application's job
+    # (ApplicationResponse.from_orm_application reads .job) — one
+    # query, not one-per-row.
+    query = db.query(Application).options(
+        joinedload(Application.job)
+    ).filter(Application.user_id == user_id)
     return (
         query
         .order_by(Application.created_at.desc())
@@ -144,6 +149,65 @@ def list_scrape_runs(db: Session, limit: int = 20) -> List[ScrapeRun]:
 
 # ---------------- Stats ----------------
 
+# EGRESS 2026-09-11 (Supabase free tier hit 109% of 5GB in 11 days):
+# get_stats was the poll-path engine — /pipeline/status polls every
+# 60s per open console tab, and every call ran a no-WHERE scan of ALL
+# job_postings gate columns (15,515 scans / 9.69M rows in two weeks
+# of pg_stat_statements) plus hydrated every kept MatchResult entity
+# (20,436 x 80 rows). Both calling endpoints poll, so the expensive
+# shapes must be amortized, not per-call.
+_POOL_FEED_CACHE: dict = {}
+_POOL_FEED_CACHE_MAX_KEYS = 64
+
+
+def _scoped_feed_counts(db: Session, scope_ctx: dict):
+    """(feed_total, feed_last_24h) for one user's scope — the O(pool)
+    part of get_stats, cached.
+
+    job_postings rows are NEVER deleted (the stale sweep flips status,
+    which the gate does not read), so the pool only changes when a
+    hunt writes. Cache key = (scope fingerprint, pool version, hour
+    bucket):
+      - pool version = (row count, max scraped_at) — a one-row probe;
+        any insert moves it (scraped_at carries microseconds).
+      - hour bucket bounds the 24h window's staleness: postings age
+        out of "last 24h" while the pool idles between hunts, so the
+        sliding count is recomputed at most hourly (and immediately on
+        any pool write). feed_total stays exact-on-pool-change.
+    """
+    import json as _json
+
+    from app.services.pipeline import stored_job_in_user_scope
+
+    probe = db.query(
+        func.count(JobPosting.id), func.max(JobPosting.scraped_at)
+    ).one()
+    hour_bucket = utc_now().replace(minute=0, second=0, microsecond=0)
+    key = (
+        _json.dumps(scope_ctx, sort_keys=True, default=str),
+        probe[0], str(probe[1]), hour_bucket,
+    )
+    cached = _POOL_FEED_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    # Attribute access on Row works for the gate (source/remote/
+    # location), so the slim column load is a drop-in for the ORM
+    # objects without loading descriptions.
+    pool_rows = db.query(
+        JobPosting.source, JobPosting.remote,
+        JobPosting.location, JobPosting.scraped_at,
+    ).all()
+    feed = [j for j in pool_rows if stored_job_in_user_scope(j, scope_ctx)]
+    day_ago = utc_now() - timedelta(hours=24)
+    result = (len(feed), sum(1 for j in feed if j.scraped_at >= day_ago))
+    if len(_POOL_FEED_CACHE) >= _POOL_FEED_CACHE_MAX_KEYS:
+        _POOL_FEED_CACHE.clear()
+    _POOL_FEED_CACHE[key] = result
+    return result
+
+
+
 def get_stats(db: Session, *, user_id) -> dict:
     """Dashboard stats for ONE user — the hunt-pulse funnel.
 
@@ -162,12 +226,15 @@ def get_stats(db: Session, *, user_id) -> dict:
     jobs_new/jobs_dismissed were removed with it (they derived from
     the shared status column and moved with other users' activity).
 
-    Perf: only the location gate's columns are loaded (no description
-    Text hydration). job_postings rows are NEVER deleted — the stale
-    sweep flips status to 'dismissed' only — so this scan must stay
-    slim as the pool grows; both calling endpoints poll it.
+    Perf (egress incident 2026-09-11): both calling endpoints are
+    POLLED (pipeline status every 60s per open console tab), so this
+    function must not be O(pool) or O(matches) per call. The gate
+    scan (slim columns, no description hydration) runs once per
+    (scope, pool version, hour) via _scoped_feed_counts, and the
+    match tier counts come from one FILTER-aggregate query instead of
+    hydrating every MatchResult row.
     """
-    from app.services.pipeline import build_scrape_context, stored_job_in_user_scope
+    from app.services.pipeline import build_scrape_context
 
     # Stats describe the user's real queue — pipeline-dismissed rows are
     # bookkeeping, not matches, and would inflate every count
@@ -176,7 +243,22 @@ def get_stats(db: Session, *, user_id) -> dict:
     )
     app_q = db.query(Application).filter(Application.user_id == user_id)
 
-    matches = match_q.all()
+    # EGRESS 2026-09-11: match_q.all() hydrated EVERY kept match row
+    # (score/tier/rationale/skills — ~KB each) per poll just to derive
+    # four integers; one FILTER-aggregate round trip replaces the list.
+    (matches_total, matches_excellent,
+     matches_good, matches_pending) = db.query(
+        func.count(MatchResult.id),
+        func.count(MatchResult.id).filter(
+            MatchResult.tier == "excellent_match"),
+        func.count(MatchResult.id).filter(
+            MatchResult.tier == "good_match"),
+        func.count(MatchResult.id).filter(
+            MatchResult.decision.is_(None)),
+    ).filter(
+        MatchResult.user_id == user_id,
+        MatchResult.dismissed_reason.is_(None),
+    ).one()
 
     def count(query):
         return query.count()
@@ -186,16 +268,7 @@ def get_stats(db: Session, *, user_id) -> dict:
         feed_total = 0
         feed_last_24h = 0
     else:
-        # Attribute access on Row works for the gate (source/remote/
-        # location), so the slim column load is a drop-in for the ORM
-        # objects without loading descriptions.
-        pool_rows = db.query(
-            JobPosting.source, JobPosting.remote, JobPosting.location, JobPosting.scraped_at
-        ).all()
-        feed = [j for j in pool_rows if stored_job_in_user_scope(j, scope_ctx)]
-        feed_total = len(feed)
-        day_ago = utc_now() - timedelta(hours=24)
-        feed_last_24h = sum(1 for j in feed if j.scraped_at >= day_ago)
+        feed_total, feed_last_24h = _scoped_feed_counts(db, scope_ctx)
 
     user_decisions = {
         "approved": match_q.filter(MatchResult.decision == "approved").count(),
@@ -205,14 +278,14 @@ def get_stats(db: Session, *, user_id) -> dict:
     return {
         "jobs_total": feed_total,
         "jobs_last_24h": feed_last_24h,
-        "jobs_matched": len(matches),
+        "jobs_matched": matches_total,
         "jobs_approved": user_decisions["approved"],
         "jobs_rejected": user_decisions["rejected"],
         "jobs_applied": app_q.filter(Application.status.in_(["sent", "manual_pending"])).count(),
-        "matches_total": len(matches),
-        "matches_excellent": sum(1 for m in matches if m.tier == "excellent_match"),
-        "matches_good": sum(1 for m in matches if m.tier == "good_match"),
-        "matches_pending_decision": sum(1 for m in matches if m.decision is None),
+        "matches_total": matches_total,
+        "matches_excellent": matches_excellent,
+        "matches_good": matches_good,
+        "matches_pending_decision": matches_pending,
         "applications_total": count(app_q),
         "applications_sent": count(app_q.filter(Application.status == "sent")),
         "applications_manual_pending": count(

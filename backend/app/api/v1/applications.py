@@ -238,7 +238,7 @@ async def submit(
 
     if application.status == "failed":
         logger.warning("Draft submission %s failed: %s", application.id, application.error)
-    return application
+    return ApplicationResponse.from_orm_application(application)
 
 
 # ------------------------------------------------------------------
@@ -253,7 +253,10 @@ async def get_applications(
     db: Session = Depends(get_db),
     user: User = Depends(get_authenticated_user),
 ):
-    return list_applications(db, limit, offset, user_id=user.id)
+    return [
+        ApplicationResponse.from_orm_application(a)
+        for a in list_applications(db, limit, offset, user_id=user.id)
+    ]
 
 
 @router.get("/{application_id}", response_model=ApplicationResponse)
@@ -264,7 +267,7 @@ async def get_application_detail(
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
     owns_or_404(application.user_id, user, "Application")
-    return application
+    return ApplicationResponse.from_orm_application(application)
 
 
 @router.post("/{application_id}/retry", response_model=ApplicationResponse)
@@ -287,6 +290,7 @@ async def retry(
     if not profile:
         raise HTTPException(status_code=400, detail="No CV on file for this account")
     try:
-        return await run_in_threadpool(retry_application, db, application, profile)
+        retried = await run_in_threadpool(retry_application, db, application, profile)
     except ApplyError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return ApplicationResponse.from_orm_application(retried)
