@@ -297,6 +297,25 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
       connect); run Supabase Security Advisor once (RLS lint).
       users.token_version was DROPPED 2026-09-09 (migration
       a9c2e4f6b8d0) after the verified cutover.
+- [x] **Hunt cron SUPABASE_URL incident — fixed live 2026-09-11**: the
+      MIG-WO2 deploy supplied SUPABASE_URL to the API service but the
+      jobfinderos-hunt cron's dashboard row never carried an effective
+      value — every cron run 09-09→09-11 died at import on the
+      _production_guards fail-fast (the OPS-7 shape it exists to catch;
+      ~5 hunts missed, backlog drained same day via a console-triggered
+      hunt). Row re-entered on the cron service, run verified green,
+      lock clean. Same session found alembic's fileConfig stomping the
+      root logger to WARN after init_db (both processes log-blind at
+      INFO since boot migrations landed) — fixed in env.py with a
+      regression test (red-verified).
+- [ ] **Cron env hygiene (2026-09-11 incident follow-up)**: on
+      jobfinderos-hunt's Environment tab, still to verify/set:
+      TRIAL_DAILY_SCORE_CAP + TRIAL_DAY1_SCORE_CAP (the beta lift was
+      meant for BOTH services), REED_API_KEY (absent = UK hunts
+      silently skip Reed), and delete the stale AUTH_SECRET row (dead
+      config since MIG-WO2). The cron's env also doesn't match its
+      render.yaml declaration (unfilled sync:false vars show no row) —
+      don't trust the dashboard list as the source of truth.
 - [ ] **Restore point-of-collection privacy panels after beta** (owner
       decision 2026-09-01): both PrivacyNotice placements (account box,
       CV upload) removed for the tester phase; /privacy is the disclosure
@@ -375,7 +394,7 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 <!-- gstack-gbrain-search-guidance:start -->
 
 GBrain indexes this repo. Layout (verified 173/173 files vs origin/main 2026-08-30):
-- **Pinned code source** (`.gbrain-source` pin): 133 code pages, symbol-aware. All code
+- **Pinned code source** (`.gbrain-source` pin): 185 code pages, symbol-aware. All code
   queries (`code-def`, `code-refs`, `code-callers`, `code-callees`, bare `search`) scope
   to it automatically from anywhere in this worktree.
 - **default source**: every non-code file as note pages — 24 markdown docs (import slugs
