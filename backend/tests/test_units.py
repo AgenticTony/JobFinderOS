@@ -2643,6 +2643,74 @@ class TestAICostRecording:
             assert abs(row.cost_usd / 1e6 - expected) < 1e-9
 
 
+class TestTailorMalformedRetry:
+    """AI-14: GLM's JSON discipline is bursty — live incident 2026-09-14
+    had three full-length unparseable tailor replies in five minutes fail
+    two user drafts (the identical call hours later returned perfect
+    JSON). One malformed reply must re-ask before failing the draft."""
+
+    def _svc(self, replies):
+        import app.services.ai_service as ai_mod
+
+        svc = ai_mod.AIService.__new__(ai_mod.AIService)
+        calls = {"n": 0}
+
+        def fake_complete(system, user, **kw):
+            i = min(calls["n"], len(replies) - 1)
+            calls["n"] += 1
+            return replies[i]
+
+        svc._complete = fake_complete
+        return svc, calls
+
+    def test_second_attempt_recovers(self, monkeypatch):
+        import app.services.ai_service as ai_mod
+
+        monkeypatch.setattr(ai_mod.time, "sleep", lambda s: None)
+        good = json.dumps({"cover_letter": "Letter text",
+                           "tailored_cv": "CV text", "changes_summary": []})
+        svc, calls = self._svc(["Thanks, here are your documents!", good])
+        out = svc.tailor_application("profile", "cv", "job")
+        assert out["cover_letter"] == "Letter text"
+        assert out["tailored_cv"] == "CV text"
+        assert calls["n"] == 2, "a single malformed reply must trigger exactly one re-ask"
+
+    def test_first_try_valid_costs_no_retry(self, monkeypatch):
+        import app.services.ai_service as ai_mod
+
+        monkeypatch.setattr(ai_mod.time, "sleep", lambda s: None)
+        good = json.dumps({"cover_letter": "L", "tailored_cv": "C"})
+        svc, calls = self._svc([good])
+        out = svc.tailor_application("p", "cv", "job")
+        assert out["cover_letter"] == "L"
+        assert calls["n"] == 1, "a valid reply must not pay the retry cost"
+
+    def test_gives_up_after_configured_retries(self, monkeypatch):
+        import app.services.ai_service as ai_mod
+
+        monkeypatch.setattr(ai_mod.time, "sleep", lambda s: None)
+        svc, calls = self._svc(["not json at all"])
+        with pytest.raises(ValueError, match="Malformed tailoring response"):
+            svc.tailor_application("p", "cv", "job")
+        assert calls["n"] == 1 + ai_mod.TAILOR_FORMAT_RETRIES
+
+    def test_malformed_diagnostic_is_shape_only(self, monkeypatch, caplog):
+        """The warning must fingerprint the reply's STRUCTURE and never
+        its content — the repo rule is no CV/document text in logs."""
+        import logging
+
+        import app.services.ai_service as ai_mod
+
+        monkeypatch.setattr(ai_mod.time, "sleep", lambda s: None)
+        noisy = "Dear sir, here is my cover letter about my CV secret facts"
+        svc, _calls = self._svc([noisy])
+        with caplog.at_level(logging.WARNING, logger="app.services.ai_service"):
+            with pytest.raises(ValueError):
+                svc.tailor_application("p", "cv", "job")
+        assert "len=" in caplog.text and "cover_letter_keys=" in caplog.text
+        assert "Dear sir" not in caplog.text, "response content leaked into logs"
+
+
 class TestSentryPIIScrub:
     """F7: Sentry captures request bodies — on this API that means CV
     text. scrub_pii must drop bodies whole and redact every known

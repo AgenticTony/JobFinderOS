@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import re
+import time
 from typing import Any, Dict, Optional
 
 import httpx
@@ -28,6 +29,13 @@ from openai import OpenAI
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# AI-14: re-asks on a malformed tailor response before failing the draft.
+# 2 retries ≈ worst case ~75s total (each GLM call runs 15-25s) — inside
+# the frontend's 120s prepare timeout. Backoff grows per attempt so a
+# burst of format drift can pass through.
+TAILOR_FORMAT_RETRIES = 2
+TAILOR_RETRY_DELAY_S = 1.0
 
 # WO-04: request-context for per-user cost attribution. The middleware
 # sets this per request; scheduler/worker calls leave it None (system).
@@ -352,15 +360,37 @@ Prepare my tailored application package.
         # IS the fix, exactly like match_job/judge_fabrication: malformed
         # output is a format failure, never a package. draft_service's
         # except marks the draft 'failed' with this error (regenerable).
-        if not self._non_empty_str(parsed.get("cover_letter")) or \
-                not self._non_empty_str(parsed.get("tailored_cv")):
-            truncated = getattr(self, "_last_finish_reason", None) == "length"
-            raise ValueError(
-                "Malformed tailoring response: cover_letter/tailored_cv "
-                "missing or empty"
-                + (" (finish_reason=length — output was truncated)"
-                   if truncated else "")
+        #
+        # AI-14 (live-confirmed 2026-09-14): GLM's format discipline is
+        # bursty — three tailor calls in five minutes returned full-length
+        # but unparseable output (not truncated; the identical call hours
+        # later came back perfect JSON), failing two user-visible drafts.
+        # A single malformed reply is provider weather, not a verdict:
+        # re-ask before failing. The shape diagnostic logs STRUCTURE only
+        # (length, first char, fence/key presence, finish_reason) — the
+        # repo's rule is no CV/document text in logs, and raw responses
+        # are never stored.
+        for attempt in range(1 + TAILOR_FORMAT_RETRIES):
+            if self._non_empty_str(parsed.get("cover_letter")) and \
+                    self._non_empty_str(parsed.get("tailored_cv")):
+                break
+            logger.warning(
+                "tailor attempt %d/%d malformed (%s) — %s",
+                attempt + 1, 1 + TAILOR_FORMAT_RETRIES,
+                self._response_shape(raw),
+                "retrying" if attempt < TAILOR_FORMAT_RETRIES else "giving up",
             )
+            if attempt >= TAILOR_FORMAT_RETRIES:
+                truncated = getattr(self, "_last_finish_reason", None) == "length"
+                raise ValueError(
+                    "Malformed tailoring response: cover_letter/tailored_cv "
+                    "missing or empty"
+                    + (" (finish_reason=length — output was truncated)"
+                       if truncated else "")
+                )
+            time.sleep(TAILOR_RETRY_DELAY_S * (attempt + 1))
+            raw = self._complete(system_prompt, user_message, kind="tailor")
+            parsed = self._parse_json(raw)
 
         return {
             "cover_letter": parsed["cover_letter"],
@@ -778,6 +808,20 @@ An empty list means the document is faithful."""
         """True for a real str with non-whitespace content (AI-9: a
         'cover_letter' of '' or '   ' is a missing document)."""
         return isinstance(value, str) and bool(value.strip())
+
+    def _response_shape(self, text: str) -> str:
+        """STRUCTURE-ONLY fingerprint of a malformed response, for the
+        warning log. Never includes content: the repo's privacy rule is
+        no CV/document text in logs, and this is what lets the NEXT
+        malformed reply be diagnosed from the log alone (fenced? keyed?
+        prose-led? truncated?)."""
+        return (
+            f"len={len(text)} starts={text[:1]!r} "
+            f"json_fence={'```json' in text} "
+            f"cover_letter_keys={text.count('cover_letter')} "
+            f"tailored_cv_keys={text.count('tailored_cv')} "
+            f"finish={getattr(self, '_last_finish_reason', None)!r}"
+        )
 
     @staticmethod
     def _clamp_score(score) -> int:
