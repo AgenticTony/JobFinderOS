@@ -142,3 +142,46 @@ def pytest_collection_modifyitems(session, config, items):
     live = (pathlib.Path(__file__).resolve().parent.parent / "jobfinderos.db").resolve()
     if pathlib.Path("./test_suite.db").resolve() == live:
         raise SystemExit("Refusing to run: the test DB path resolves to the live database.")
+
+    # CI flake (first seen 2026-09-09, ~1-in-3 postgres runs): the suite
+    # reaches test_units' module-scoped boot (TestClient lifespan ->
+    # alembic DDL needs ACCESS EXCLUSIVE locks) and waits FOREVER — the
+    # postgres log shows why: an earlier test's session sits idle-in-
+    # transaction holding locks on profiles/match_results/job_postings
+    # ("skipping vacuum ... lock not available", for hours). SQLite has
+    # no lock waits, which is why only the postgres leg hangs. The leaker
+    # is timing-dependent (2-core CI runners; 4 clean runs on an M-series
+    # Mac could not reproduce it), so this is the honest fix: make every
+    # NEW connection to the throwaway test database fail fast instead of
+    # queueing behind a leaked lock — a 15s red test whose error names
+    # the blocked statement beats a 6-hour hung job cancelled from
+    # outside. statement_timeout is the same medicine for any
+    # non-lock hang, capped far above the slowest legitimate query.
+    # Database-level (not ALTER ROLE) so per-test engines inherit it too;
+    # best-effort — a hosted postgres that refuses ALTER DATABASE just
+    # warns and keeps the old behaviour.
+    if TEST_DB.startswith("postgres"):
+        from sqlalchemy import create_engine, text
+
+        # AUTOCOMMIT: ALTER DATABASE refuses to run inside a transaction
+        # block, and eng.begin()/connect() both open one — the first cut
+        # of this guard silently no-oped behind its own except clause.
+        eng = create_engine(TEST_DB, isolation_level="AUTOCOMMIT")
+        try:
+            dbname = eng.url.database
+            with eng.connect() as conn:
+                # one SET per statement — ALTER DATABASE takes a single
+                # configuration parameter, not a comma list
+                conn.execute(
+                    text(f"ALTER DATABASE {dbname} SET lock_timeout = '15s'")
+                )
+                conn.execute(
+                    text(f"ALTER DATABASE {dbname} SET statement_timeout = '300s'")
+                )
+        except Exception as exc:  # noqa: BLE001 — never block the suite on hardening
+            print(
+                f"conftest: could not set lock/statement timeouts on the "
+                f"test database ({exc}); a leaked lock may still hang CI"
+            )
+        finally:
+            eng.dispose()
