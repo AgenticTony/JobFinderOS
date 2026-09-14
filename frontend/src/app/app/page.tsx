@@ -465,7 +465,14 @@ export default function Home() {
           </div>
           {huntButton(true)}
         </div>
-        <nav className="flex border-t border-line" aria-label="Main">
+        {/* Mobile nav: spread to fill when the labels fit, horizontally
+            scrollable when they don't — seven single-word labels
+            ("Applications", "Beta feedback") don't fit one 360px row, and
+            without basis-auto they crush and bleed into each other. */}
+        <nav
+          className="no-scrollbar flex overflow-x-auto border-t border-line"
+          aria-label="Main"
+        >
           {NAV.map(({ id, label, icon: Icon }) => {
             const active =
               view === id ||
@@ -476,7 +483,7 @@ export default function Home() {
               onClick={() => switchView(id)}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium',
+                'relative flex grow basis-auto shrink-0 flex-col items-center gap-0.5 whitespace-nowrap px-2 py-2 text-[10px] font-medium',
                 active ? 'text-signal' : 'text-low hover:text-mid'
               )}
             >
@@ -721,13 +728,23 @@ function DashboardView({
         onOpenSent={onOpenSent}
       />
 
-      <div className={cn('grid gap-6', hasRailWarnings && 'xl:grid-cols-[minmax(0,1fr)_300px]')}>
+      {/* minmax(0,1fr) at EVERY width: below xl the single implicit
+          auto track let a match card's untruncatable title line size the
+          track to its min-content (610px at a 360px viewport — the whole
+          page scrolled sideways). A zero floor forces the card to shrink
+          and the truncate/ellipsis styles inside to do their job. */}
+      <div
+        className={cn(
+          'grid grid-cols-[minmax(0,1fr)] gap-6',
+          hasRailWarnings && 'xl:grid-cols-[minmax(0,1fr)_300px]'
+        )}
+      >
         {/* Main column — finish what you started, fresh arrivals, then the queue */}
         <div className="space-y-8">
           {finishApplying.length > 0 && (
             <div>
               <div className="mb-3 flex items-baseline justify-between">
-                <h2 className="font-semibold tracking-tight text-hi">
+                <h2 className="text-lg font-semibold tracking-tight text-hi">
                   Finish applying
                   <span className="num ml-2 text-sm font-normal text-signal">{finishApplying.length}</span>
                   <span className="ml-2 text-sm font-normal text-low">approved, not sent yet</span>
@@ -751,7 +768,7 @@ function DashboardView({
           {newMatches.length > 0 && (
             <div>
               <div className="mb-3 flex items-baseline justify-between">
-                <h2 className="font-semibold tracking-tight text-hi">
+                <h2 className="text-lg font-semibold tracking-tight text-hi">
                   New in the last 24h
                   <span className="num ml-2 text-sm font-normal text-low">{newMatches.length}</span>
                 </h2>
@@ -773,7 +790,7 @@ function DashboardView({
           {(decisions.length > 0 || newMatches.length === 0) && (
             <div>
               <div className="mb-3 flex items-baseline justify-between">
-                <h2 className="font-semibold tracking-tight text-hi">
+                <h2 className="text-lg font-semibold tracking-tight text-hi">
                   Next decisions
                   {decisions.length > 0 && (
                     <span className="num ml-2 text-sm font-normal text-low">{decisions.length}</span>

@@ -32,16 +32,15 @@
   --color-paper-line: #dcd9cf;
 }
 
+/* The console is dark by design: every surface token is ink/charcoal.
+   color-scheme dark keeps native scrollbars, inputs and form controls
+   dark too. (The old prefers-color-scheme: light override painted the
+   body white behind dark surfaces — a white flash on mobile
+   overscroll.) */
 :root {
+  color-scheme: dark;
   --background: var(--color-ink);
   --foreground: var(--color-hi);
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --background: #ffffff;
-    --foreground: #17171f;
-  }
 }
 
 body {
@@ -49,6 +48,30 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  /* Mobile: no gray iOS tap flash (the design has its own :active
+     states) and no 300ms double-tap-zoom delay on controls. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Mobile touch latency: kill the double-tap-zoom heuristic on
+   interactive elements without disabling pinch zoom anywhere. */
+button,
+a,
+label,
+summary,
+[role='button'] {
+  touch-action: manipulation;
+}
+
+/* Mobile keyboards: iOS Safari auto-zooms the page when an input
+   smaller than 16px gains focus. Coarse-pointer devices (phones,
+   tablets) get a 16px floor — desktop pointers are untouched. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: max(1rem, 1em);
+  }
 }
 
 /* Numbers everywhere: mono + tabular so digits never jitter */
@@ -156,5 +179,6 @@ body {
 .CookiebotWidget {
   left: auto !important;
   right: 1rem !important;
-  bottom: 1rem !important;
+  /* Clear of the iOS home indicator on notched phones. */
+  bottom: calc(1rem + env(safe-area-inset-bottom)) !important;
 }

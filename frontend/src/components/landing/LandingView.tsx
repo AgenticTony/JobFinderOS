@@ -96,7 +96,11 @@ export default function LandingView({ locale }: { locale: Locale }) {
             titles={t.radar.titles}
           />
 
-          <div className="relative z-10 mx-auto w-full max-w-5xl px-6 pt-[12svh] text-center">
+          {/* pt floor: the fixed h-14 header is 56px tall — 12svh is
+              less than that on short/landscape viewports (e.g. 667px
+              landscape → 44px), which put the badge under the header.
+              max() keeps the fold clear at every height. */}
+          <div className="relative z-10 mx-auto w-full max-w-5xl px-6 pt-[max(12svh,5.5rem)] text-center">
             <p className="landing-rise num flex items-center justify-center gap-2.5 text-[11px] uppercase tracking-[0.18em] text-paper/50">
               <span className="relative flex h-2 w-2" aria-hidden>
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal/60" />

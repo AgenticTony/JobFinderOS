@@ -406,10 +406,10 @@ export default function OnboardingWizard({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="w-full max-w-xl rounded-2xl border border-line bg-surface shadow-2xl outline-none"
+        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col rounded-2xl border border-line bg-surface shadow-2xl outline-none"
       >
         {/* Header */}
-        <div className="flex items-center gap-3 border-b border-line p-5">
+        <div className="flex shrink-0 items-center gap-3 border-b border-line p-5">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-signal/30 bg-signal/10">
             <Radar className="h-5 w-5 text-signal" aria-hidden />
           </div>
@@ -424,8 +424,9 @@ export default function OnboardingWizard({
           )}
         </div>
 
-        {/* Stepper */}
-        <div className="flex gap-1 px-5 pt-4">
+        {/* Stepper — bars only below sm (six 11px labels don't fit one
+            phone row); "Step N of 6" in the footer carries the position. */}
+        <div className="flex shrink-0 gap-1 px-5 pt-4">
           {STEPS.map((label, i) => (
             <div key={label} className="flex-1">
               <div
@@ -434,15 +435,18 @@ export default function OnboardingWizard({
                   i < step ? 'bg-ok' : i === step ? 'bg-signal' : 'bg-line-2'
                 )}
               />
-              <p className={cn('mt-1.5 text-[11px]', i === step ? 'text-mid' : 'text-low')}>
+              <p className={cn('mt-1.5 hidden text-[11px] sm:block', i === step ? 'text-mid' : 'text-low')}>
                 {label}
               </p>
             </div>
           ))}
         </div>
 
-        {/* Body */}
-        <div className="min-h-[300px] p-6">
+        {/* Body — the dialog's only scroll region. The focus trap locks
+            body scroll while open, so on a phone this MUST scroll or the
+            tall steps (municipalities, AI title chips) are unreachable
+            below the fold. min-h keeps short steps from collapsing. */}
+        <div className="min-h-[300px] overscroll-contain p-6 overflow-y-auto">
           <AnimatePresence mode="wait">
             <motion.div
               key={step}
@@ -540,7 +544,7 @@ export default function OnboardingWizard({
                         <div
                           role="group"
                           aria-label="Municipalities"
-                          className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-lg border border-line bg-ink p-2.5"
+                          className="flex max-h-40 flex-wrap gap-2 overflow-y-auto overscroll-contain rounded-lg border border-line bg-ink p-2.5"
                         >
                           {municipalities.map((m) => {
                             const on = municipalityList.includes(m);
@@ -909,13 +913,16 @@ export default function OnboardingWizard({
         </div>
 
         {finishError && (
-          <p className="mx-4 mt-2 rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
+          <p
+            className="mx-4 mt-2 shrink-0 rounded-lg bg-bad/10 p-3 text-sm text-bad"
+            role="alert"
+          >
             Couldn&apos;t save your setup — nothing was lost, try again: {finishError}
           </p>
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-line p-4">
+        <div className="flex shrink-0 items-center justify-between border-t border-line p-4">
           <button
             onClick={() => setStep((s) => Math.max(0, s - 1))}
             disabled={step === 0}
@@ -979,9 +986,11 @@ function QueryChip({ query, on, onToggle }: { query: string; on: boolean; onTogg
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between">
-      <span className="text-low">{label}</span>
-      <span className="text-hi">{value}</span>
+    <div className="flex items-baseline justify-between gap-4">
+      <span className="shrink-0 text-low">{label}</span>
+      {/* Values like "Stockholm, Solna, Täby" can run long — wrap them
+          right-aligned instead of pushing the row past the dialog. */}
+      <span className="min-w-0 text-right text-hi">{value}</span>
     </div>
   );
 }
