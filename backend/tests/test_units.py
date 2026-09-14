@@ -2571,10 +2571,19 @@ class TestAICostRecording:
         svc.client = _Client()
 
         from app.core.database import SessionLocal
-        before = SessionLocal().query(AIUsage).count()
+        # Deliberately FRESH sessions (not the db fixture) so each read
+        # sees rows committed by _complete's own session — but they MUST
+        # be closed: an abandoned Session holds its connection open in a
+        # transaction until the cyclic GC collects it, and on CI's
+        # slower runners that window let the locks outlive the test and
+        # block a later schema rebuild forever (the postgres-leg hang;
+        # caught red-handed in pg_stat_activity 2026-09-14).
+        with SessionLocal() as check:
+            before = check.query(AIUsage).count()
         svc._complete("sys", "user", kind="match")
-        after = SessionLocal().query(AIUsage).count()
-        row = SessionLocal().query(AIUsage).order_by(AIUsage.id.desc()).first()
+        with SessionLocal() as check:
+            after = check.query(AIUsage).count()
+            row = check.query(AIUsage).order_by(AIUsage.id.desc()).first()
         assert after == before + 1, "no usage row recorded per call"
         assert row.kind == "match" and row.model == "glm-5.1"
         assert row.prompt_tokens == 1000 and row.completion_tokens == 200
@@ -2624,10 +2633,14 @@ class TestAICostRecording:
         svc._complete("s", "u", kind="judge")
         from app.core.database import SessionLocal
         from app.models import AIUsage
-        row = SessionLocal().query(AIUsage).order_by(AIUsage.id.desc()).first()
-        assert row.cached_tokens == 800
-        expected = (800 * 0.26e-6) + (200 * 1.40e-6)  # cached + uncached input
-        assert abs(row.cost_usd / 1e6 - expected) < 1e-9
+        # Closed on exit, same as TestAICostRecording above — an
+        # abandoned session's open transaction is what hung CI's
+        # postgres leg.
+        with SessionLocal() as check:
+            row = check.query(AIUsage).order_by(AIUsage.id.desc()).first()
+            assert row.cached_tokens == 800
+            expected = (800 * 0.26e-6) + (200 * 1.40e-6)  # cached + uncached input
+            assert abs(row.cost_usd / 1e6 - expected) < 1e-9
 
 
 class TestSentryPIIScrub:
