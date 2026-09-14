@@ -223,7 +223,10 @@ function HuntPulseBase({
           lastHuntAt={lastHuntAt}
         />
       </div>
-      <div className="flex flex-wrap items-stretch py-1">
+      {/* Phones: five stages cannot fit one 360px row (the uppercase
+          labels + icons alone need ~85px each) — wrap the funnel into a
+          3-column grid. sm+: the single flex strip with flow arrows. */}
+      <div className="grid grid-cols-3 py-1 sm:flex sm:flex-wrap sm:items-stretch">
         {stages.map((stage, i) => (
           <div key={stage.id} className="contents">
             {i > 0 && <FlowDivider />}

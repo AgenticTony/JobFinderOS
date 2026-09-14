@@ -41,7 +41,13 @@ export default function GuardReceipt({
 
       <ul className="mt-5 divide-y divide-line">
         {strings.rows.map((r) => (
-          <li key={r.claim} className="flex items-center justify-between gap-5 py-3.5">
+          // flex-wrap: on phones the claim + the right-hand verdict note
+          // don't fit one line — the note drops below instead of poking
+          // past the card (measured 13px of page overflow at 360px).
+          <li
+            key={r.claim}
+            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3.5"
+          >
             <span className="flex items-center gap-3 text-sm text-hi">
               {r.ok ? (
                 <Check className="h-4 w-4 shrink-0 text-ok" aria-hidden />

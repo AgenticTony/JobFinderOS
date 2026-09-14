@@ -86,7 +86,12 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate font-semibold text-hi">{match.job?.title ?? 'Unknown job'}</h3>
+            {/* min-w-0: without it the nowrap truncate title cannot shrink
+                inside this flex-wrap row, and it sizes whole ancestor
+                grids to its full one-line width (sideways page scroll). */}
+            <h3 className="min-w-0 truncate font-semibold text-hi">
+              {match.job?.title ?? 'Unknown job'}
+            </h3>
             <TierBadge tier={match.tier} />
             {match.recommendation === 'apply' && (
               <span className="inline-flex items-center gap-1 rounded-full bg-signal/15 px-2 py-0.5 text-xs font-medium text-signal">
@@ -131,7 +136,14 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
             )}
           </p>
         </div>
-        <ScoreRing score={match.score} />
+        {/* The 64px ring eats a third of a phone-width row; 48px below sm
+            leaves the title the room it needs. Same ring, one size down. */}
+        <span className="inline-flex sm:hidden">
+          <ScoreRing score={match.score} size={48} />
+        </span>
+        <span className="hidden sm:inline-flex">
+          <ScoreRing score={match.score} />
+        </span>
         <ChevronDown
           className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
         />

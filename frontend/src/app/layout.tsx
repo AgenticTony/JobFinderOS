@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Familjen_Grotesk, Geist, Geist_Mono } from 'next/font/google';
 import AnalyticsGate from '@/components/AnalyticsGate';
 import './globals.css';
@@ -22,6 +22,15 @@ export const metadata: Metadata = {
   title: 'JobFinderOS',
   description:
     "Twice-daily hunts across Sweden's and the UK's job markets, every ad scored against your CV. Applications you approve, drafts that never invent facts.",
+};
+
+// Mobile browser chrome: the app is ink-dark everywhere, so the address
+// bar / keyboard area should be too. colorScheme also emits the
+// color-scheme meta so native controls render dark. User zoom stays
+// enabled (Next's viewport default: width=device-width, initial-scale=1).
+export const viewport: Viewport = {
+  themeColor: '#0c0e12',
+  colorScheme: 'dark',
 };
 
 export default function RootLayout({
