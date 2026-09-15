@@ -508,7 +508,8 @@ def _resolves_finding(attested_entry: dict, finding: dict) -> bool:
 
 
 def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
-                 save_to_profile: bool, *, profile: Profile) -> ApplicationDraft:
+                 save_to_profile: bool, *, profile: Profile,
+                 profile_fact: Optional[str] = None) -> ApplicationDraft:
     """WO-23: record the user's 'This is true — keep it' for ONE flagged
     claim. Per-claim resolution — never a whole-draft override.
 
@@ -516,23 +517,34 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
     - R3: only status 'failed' drafts accept attestations — a submitted
       draft must never be confirmable back to 'ready' (second send).
     - R2: the claim must EXACTLY match a currently-flagged value
-      (casefolded, <= 200 chars). Variants resolve via the shared
-      extraction sentence, not global containment.
+      (casefolded). Variants resolve via the shared extraction sentence,
+      not global containment.
     - R1: when the last unresolved claim is confirmed, the guard runs
       AGAIN on the current text before 'ready'. A draft blocked by
       Layer A was never judged (the judge only runs on a Layer-A-clean
       document), and text edited after the block was never re-checked —
       attest-ready without a final check shipped exactly that.
-    - R5: save_to_profile stores the finding's CONTEXT SENTENCE for
-      Layer A kinds, not the bare atom — a vouched '40%' would bless
-      every future 40% claim via substring. Per-draft attestations stay
-      value-based: they die with this text (regeneration clears them)
-      and only suppress flags on THIS draft.
+    - R5 (round-2 N1): the profile save takes ONLY the explicit
+      profile_fact the client sends (the UI displays it in full next to
+      the opt-in), bounded by the SAME 200-char bound as the profile
+      editor (N2 — an attest-saved fact must never block a later
+      preferences save). The backend derives nothing: confirming one
+      atom of a sentence ("40%") must not vouch the sentence's other
+      claims ("team of 12") into guard truth.
+    - N3: no blanket claim length cap — judge claim values are free
+      text; EXACT match to a stored flagged value is the override gate,
+      and rejecting what the guard itself listed recreates WO-23's
+      original dead end.
 
+    Per-draft attestations stay value-based: they die with this text
+    (regeneration clears them) and only suppress flags on THIS draft.
     fabrication_blocked is never cleared on any recovery path.
     """
     from app.schemas.common import dump_json_list, parse_json_list
-    from app.services.cv_service import VOUCHED_FACTS_MAX_ITEMS
+    from app.services.cv_service import (
+        VOUCHED_FACTS_MAX_CHARS,
+        VOUCHED_FACTS_MAX_ITEMS,
+    )
 
     if not draft.fabrication_blocked:
         raise DraftError(
@@ -555,10 +567,6 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
     claim = (claim or "").strip()
     if not claim:
         raise DraftError("Empty claim")
-    if len(claim) > 200:
-        raise DraftError(
-            "Confirm the flagged claim as the guard listed it"
-        )
 
     findings = parse_json_list(draft.fabrication_findings)
     unresolved_high = [f for f in findings
@@ -574,12 +582,11 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
 
     saved = False
     if save_to_profile:
-        # R5: the sentence is the human-meaningful unit — the fact the
-        # user is actually vouching for. Judge findings carry the claim
-        # itself (their context is the 'why', not a sentence).
-        fact = claim if matched.get("kind") == "judge" else (
-            matched.get("context") or claim)
-        if len(fact) <= 300:  # lenient: the attestation lands regardless
+        fact = (profile_fact or "").strip()
+        # ONE bound with the profile editor (N2): the Profile form
+        # resends the whole vouched list on every save — anything this
+        # path writes must survive normalize_vouched_facts verbatim.
+        if 0 < len(fact) <= VOUCHED_FACTS_MAX_CHARS:
             vouched = [str(v).strip() for v in parse_json_list(
                 getattr(profile, "vouched_facts", None))]
             if (fact not in vouched

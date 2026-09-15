@@ -19,6 +19,12 @@ class DraftAttestRequest(BaseModel):
     """WO-23: per-claim 'This is true — keep it' on a blocked draft."""
     claim: str
     save_to_profile: bool = True  # default on per the WO flow
+    # Round-2 N1: the EXPLICIT fact text to save to the profile (the UI
+    # displays it in full next to the opt-in). Absent -> nothing is
+    # saved: the backend never derives guard truth the user didn't see
+    # and confirm — a sentence's unconfirmed claims ("team of 12") must
+    # not ride in on one confirmed atom ("40%").
+    profile_fact: Optional[str] = None
 
 
 class DraftResponse(BaseModel):

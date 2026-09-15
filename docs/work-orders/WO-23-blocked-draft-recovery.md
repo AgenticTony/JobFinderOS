@@ -279,3 +279,34 @@ it (the full pre-fix red run + flip-based red-proofs for R1/R2 — never
   beside TestGDPRExportCompleteness.
 
 Suite: 495 passed / 14 skipped; ruff, tsc, `next build` clean.
+
+## Review round 2 (2026-09-15 — 3 findings, all fixed)
+
+R5's sentence save over-corrected: it vouched MORE than the user
+confirmed. All three findings verified real and fixed red-first:
+
+- **N1 (safety)**: confirming one flagged atom saved its whole context
+  sentence to `vouched_facts` — every other claim in that AI-written
+  sentence ("team of 12" beside a confirmed "40%") became permanent
+  guard truth, the R1 final check inherited it as user-confirmed, and
+  the panel's 120-char truncation meant the user could vouch text they
+  never saw. Fix: the profile save takes ONLY the explicit
+  `profile_fact` the client sends (the UI shows the FULL sentence and
+  "Will add to profile: …" before the opt-in; checkbox disabled with a
+  note past 200 chars); the backend derives nothing — `save_to_profile`
+  alone saves nothing. Tested both ways: no explicit fact → vouched
+  stays empty and the judge can still flag the sentence's other claims
+  on the same draft; explicit fact → exactly that text saves.
+- **N2**: attest accepted facts to 300 chars while the profile editor
+  rejects >200 — one long sentence blocked every later preferences
+  save (the form resends the whole list). Fix: ONE bound
+  (`VOUCHED_FACTS_MAX_CHARS`) at both write sites; round-trip test
+  (attest → PUT /profile/me → 200).
+- **N3**: R2's blanket 200-char claim cap rejected judge findings,
+  whose values are free text — "This is true — keep it" 400'd on
+  exactly what the guard listed (the original dead end, back for long
+  claims). Fix: cap removed; EXACT match to a stored flagged value is
+  the override gate (the "e"/pasted-letter attacks needed containment,
+  which is gone). Tested with a 230-char judge claim → confirm → ready.
+
+Suite: 498 passed / 14 skipped; ruff, tsc, `next build` clean.

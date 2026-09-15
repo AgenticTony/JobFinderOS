@@ -255,7 +255,7 @@ async def attest(
     try:
         draft = await run_in_threadpool(
             attest_claim, db, draft, payload.claim, payload.save_to_profile,
-            profile=profile,
+            profile=profile, profile_fact=payload.profile_fact,
         )
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))

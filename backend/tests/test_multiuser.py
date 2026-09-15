@@ -2284,18 +2284,16 @@ class TestWO23BlockedDraftRecovery:
         d, p, uid = self._blocked(client, db, monkeypatch)
         claim = "AWS Certified Solutions Architect"
         d2 = attest_claim(db, d, claim, save_to_profile=True,
-                          profile=p)
+                          profile_fact=claim, profile=p)
         # A double click replays the same claim — no error, no duplicate.
         d3 = attest_claim(db, d2, claim, save_to_profile=True,
-                          profile=p)
+                          profile_fact=claim, profile=p)
         attested = json.loads(d3.fabrication_attested or "[]")
         assert sum(1 for a in attested if a["claim"] == claim) == 1, (
             f"double-click attestation duplicated the record: {attested}"
         )
         vouched = json.loads(p.vouched_facts or "[]")
-        # R5: the profile stores the finding's CONTEXT SENTENCE — count
-        # entries carrying the claim, not exact-value equality.
-        assert sum(1 for v in vouched if claim in v) == 1, (
+        assert vouched.count(claim) == 1, (
             f"vouched facts duplicated: {vouched}"
         )
 
@@ -2601,12 +2599,18 @@ class TestWO23BlockedDraftRecovery:
     # R5: "Also add to my profile" saves the finding's CONTEXT SENTENCE,
     # not the bare atom — a vouched "40%" blesses every future 40% claim
     def test_attest_saves_sentence_not_bare_token(self, client, db, monkeypatch):
+        """N1 (round 2): NEVER save more than the user confirmed. The
+        sentence reaches the profile only when the client sends it as an
+        EXPLICIT profile_fact (the UI displays it in full next to the
+        opt-in); save_to_profile alone saves nothing — a sentence the
+        user confirmed one atom of ("40%") must not vouch its other
+        claims ("team of 12") into guard truth."""
         import json
 
         from app.services.draft_service import attest_claim, create_draft_for_job
 
         p, job, uid = self._seed(client, db)
-        sentence = "I cut the ticket backlog by 40%."
+        sentence = "Led a team of 12 at Svenska Spel cutting costs 40%."
         metric_out = {
             "cover_letter": sentence,
             "tailored_cv": "Erik. Python developer at Svenska Spel.",
@@ -2619,16 +2623,129 @@ class TestWO23BlockedDraftRecovery:
         findings = json.loads(d.fabrication_findings or "[]")
         assert any(f["value"] == "40%" for f in findings), findings
 
-        # Judge off (conftest): the attest-triggered check passes Layer A
-        # via the per-draft attested claim; only the PROFILE save is under
-        # test here.
+        # No explicit fact: the attestation resolves the claim on THIS
+        # draft, but NOTHING reaches the profile.
         d2 = attest_claim(db, d, "40%", save_to_profile=True, profile=p)
         vouched = json.loads(p.vouched_facts or "[]")
-        assert vouched == [sentence], (
-            f"the vouched fact must be the sentence, not the bare atom: "
-            f"{vouched}"
+        assert vouched == [], (
+            f"save_to_profile without an explicit profile_fact invented "
+            f"guard truth the user never confirmed: {vouched}"
+        )
+        assert "team of 12" not in json.dumps(vouched), (
+            "confirming '40%' vouched the sentence's other claims"
         )
         assert d2.status == "ready", d2.error
+
+        # The informed path: the client sends the sentence the user saw
+        # in full — exactly that text is saved, nothing derived.
+        p2, job2, uid2 = self._seed(client, db)
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d3 = create_draft_for_job(db, job2, profile=p2, user_id=uid2)
+        d4 = attest_claim(db, d3, "40%", save_to_profile=True,
+                          profile_fact=sentence, profile=p2)
+        assert json.loads(p2.vouched_facts or "[]") == [sentence]
+        assert d4.status == "ready", d4.error
+
+    def test_attest_final_check_does_not_inherit_unconfirmed_sentence(self, client, db, monkeypatch):
+        """N1 corollary: without an explicit profile_fact, the R1 final
+        check's source must not carry the sentence as user-confirmed —
+        the judge can still flag its other claims on THIS draft."""
+        import json
+
+        from app.services import draft_service as ds
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "Led a team of 12 at Svenska Spel cutting costs 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+
+        catch = [{"claim": "Led a team of 12", "why": "not in the CV"}]
+        self._script_judge(monkeypatch, ds, [catch])
+        d2 = attest_claim(db, d, "40%", save_to_profile=True, profile=p)
+        assert d2.status == "failed", (
+            "the unconfirmed 'team of 12' rode through the final check as "
+            "user-confirmed truth"
+        )
+        findings = json.loads(d2.fabrication_findings or "[]")
+        assert any("team of 12" in f["value"] for f in findings), findings
+
+    # N2: ONE bound at both write sites — an attest-saved fact must never
+    # block a later profile preferences save (the form resends the list)
+    def test_attest_fact_survives_profile_round_trip(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "Led a team of 12 at Svenska Spel cutting costs 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        attest_claim(db, d, "40%", save_to_profile=True,
+                     profile_fact=sentence, profile=p)
+        vouched = json.loads(p.vouched_facts or "[]")
+        assert vouched, "setup: the fact must save for the round-trip"
+
+        # The Profile form resends the whole list on every save — the
+        # editor's 200-char bound must accept everything attest writes.
+        r = client.put("/api/v1/profile/me", json={
+            "preferred_roles": ["Python Developer"],
+            "vouched_facts": vouched,
+        })
+        assert r.status_code == 200, (
+            f"a vouched fact attest saved now blocks every profile save: "
+            f"{r.text}"
+        )
+        assert r.json()["vouched_facts"] == vouched
+
+    # N3: judge claim values are free text and can exceed 200 chars —
+    # exact match (R2) already closes the override hole, so the blanket
+    # length cap only recreates WO-23's dead end for true long claims
+    def test_long_judge_claim_can_be_confirmed(self, client, db, monkeypatch):
+        import json
+
+        from app.services import draft_service as ds
+        from app.services.draft_service import (
+            attest_claim,
+            create_draft_for_job,
+        )
+
+        p, job, uid = self._seed(client, db)
+        long_claim = (
+            "Cover letter: 'Jag är fullstack-utvecklare' and profile "
+            "header 'Fullstack-utvecklare' imply senior fullstack "
+            "competence across the whole stack, which the CV does not "
+            "support anywhere in its experience section."
+        )
+        assert len(long_claim) > 200
+        catch = [{"claim": long_claim, "why": "not in the CV"}]
+        t_calls, _ = self._script_tailor(monkeypatch, [self.CLEAN_OUT])
+        self._script_judge(monkeypatch, ds, [catch, catch, catch])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed" and d.fabrication_blocked, d.error
+        findings = json.loads(d.fabrication_findings or "[]")
+        assert any(f["value"] == long_claim for f in findings), findings
+
+        self._script_judge(monkeypatch, ds, [[]])
+        d2 = attest_claim(db, d, long_claim, save_to_profile=False,
+                          profile=p)
+        assert d2.status == "ready", (
+            f"confirming a >200-char flagged claim as listed must work — "
+            f"{d2.error}"
+        )
 
     # R6: regeneration never clears fabrication_blocked (constraint 4 —
     # raw fabrication-rate data) and drops attestations that belonged to
@@ -2716,7 +2833,9 @@ class TestWO23BlockedDraftRecovery:
         from app.services.draft_service import attest_claim
 
         d = attest_claim(db, d, "AWS Certified Solutions Architect",
-                         save_to_profile=True, profile=p)
+                         save_to_profile=True,
+                         profile_fact="AWS Certified Solutions Architect",
+                         profile=p)
         assert d.status == "ready"
 
         r = client.get("/api/v1/account/export")

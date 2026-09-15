@@ -324,11 +324,15 @@ export const recheckDraft = async (draftId: number): Promise<ApplicationDraft> =
 export const attestDraft = async (
   draftId: number,
   claim: string,
-  saveToProfile = true
+  saveToProfile = true,
+  // Round-2 N1: the EXPLICIT fact text the user saw in full and opted
+  // in to. Without it the backend saves nothing — it never derives
+  // guard truth the user didn't confirm.
+  profileFact?: string
 ): Promise<ApplicationDraft> => {
   const response = await slowApi.post<ApplicationDraft>(
     `/api/v1/applications/draft/${draftId}/attest`,
-    { claim, save_to_profile: saveToProfile }
+    { claim, save_to_profile: saveToProfile, profile_fact: profileFact }
   );
   return response.data;
 };

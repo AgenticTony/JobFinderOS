@@ -1510,11 +1510,11 @@ function DraftCard({
 
   // WO-23: per-claim "This is true — keep it". When no unresolved claim
   // remains the backend flips the draft to ready — no further AI call.
-  const attest = async (claim: string, saveToProfile: boolean) => {
+  const attest = async (claim: string, saveToProfile: boolean, profileFact?: string) => {
     setSubmitError(null);
     setBusy(`attest:${claim}`);
     try {
-      await attestDraft(draft.id, claim, saveToProfile);
+      await attestDraft(draft.id, claim, saveToProfile, profileFact);
       await onChanged();
     } catch (err) {
       setSubmitError(apiErrorMessage(err));
@@ -1633,16 +1633,24 @@ function DraftCard({
                     <ShieldAlert className="h-3.5 w-3.5" /> Why this was blocked
                   </p>
                   <ul className="space-y-2.5">
-                    {unresolvedHigh.map((f, i) => (
+                    {unresolvedHigh.map((f, i) => {
+                      // N1: the fact this claim can save is its full
+                      // sentence, shown untruncated above — never more
+                      // than the user has seen. N2: bounded like the
+                      // profile editor, or the save is skipped.
+                      const fact = f.context || f.value;
+                      const factTooLong = fact.length > 200;
+                      const addToProfile = (alsoProfile[f.value] ?? true) && !factTooLong;
+                      return (
                       <li key={i} className="text-sm text-mid">
                         • <span className="font-medium text-hi">{f.value}</span>
                         {f.context ? (
-                          <span className="text-low"> — “{f.context.slice(0, 120)}”</span>
+                          <span className="text-low"> — “{f.context}”</span>
                         ) : null}
                         <div className="mt-1.5 flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => attest(f.value, alsoProfile[f.value] ?? true)}
+                            onClick={() => attest(f.value, addToProfile, addToProfile ? fact : undefined)}
                             disabled={busy !== null}
                             className="inline-flex items-center gap-1 rounded-lg border border-bad/40 px-2.5 py-1 text-xs text-mid transition-colors hover:border-bad hover:text-hi disabled:opacity-40"
                           >
@@ -1652,16 +1660,23 @@ function DraftCard({
                           <label className="flex items-center gap-1.5 text-xs text-low">
                             <input
                               type="checkbox"
-                              checked={alsoProfile[f.value] ?? true}
+                              disabled={factTooLong}
+                              checked={addToProfile}
                               onChange={(e) =>
                                 setAlsoProfile((m) => ({ ...m, [f.value]: e.target.checked }))
                               }
                             />
-                            Also add to my profile
+                            {factTooLong ? 'Sentence too long for your profile' : 'Also add to my profile'}
                           </label>
                         </div>
+                        {addToProfile && (
+                          <p className="mt-1 text-xs text-low">
+                            Will add to profile: “{fact}”
+                          </p>
+                        )}
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </div>
               )}
