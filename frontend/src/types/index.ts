@@ -29,6 +29,10 @@ export interface Match {
   id: number;
   job_id: number;
   score: number;
+  // WO-19 part B: 'verified' | 'unverified' (ineligible never reaches a
+  // card); note carries why, null = silent-plain (no chip rendered)
+  eligibility?: string | null;
+  eligibility_note?: string | null;
   tier: Tier;
   reasoning: string | null;
   matched_skills: string[];
@@ -107,6 +111,8 @@ export interface Profile {
   // WO-23: true-but-not-on-the-CV facts — rendered into the generator's
   // prompt AND the guard's source by build_profile_context.
   vouched_facts: string[];
+  // WO-19 part B: citizen_or_pr | eu_right | needs_sponsorship | prefer_not_say…
+  work_rights?: string | null;
   onboarded: boolean;
   country: string | null;
   region: string | null;
@@ -138,6 +144,8 @@ export interface OnboardingPayload {
   search_queries: string[];
   occupation_codes?: string[];  // taxonomy concept codes (SE) — validated server-side
   languages: string[];
+  // WO-19 part B: enum-validated server-side; prefer_not_say = unverified-everywhere
+  work_rights?: string;
 }
 
 export interface OccupationSuggestion {

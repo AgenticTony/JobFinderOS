@@ -25,6 +25,9 @@ class OnboardingRequest(BaseModel):
     # validated server-side; labels rehydrated from the taxonomy.
     occupation_codes: Optional[List[str]] = None
     languages: List[str] = []
+    # WO-19 part B: one onboarding question on the country step, no AI.
+    # Values validated server-side; prefer_not_say = unverified-everywhere.
+    work_rights: Optional[str] = None
 
 
 class ProfilePreferencesUpdate(BaseModel):
@@ -42,6 +45,7 @@ class ProfilePreferencesUpdate(BaseModel):
     # facts the generator may use and the guard accepts. Bounded
     # 30 x 200 (strict — a 400 back to the user, not a silent trim).
     vouched_facts: Optional[List[str]] = None
+    work_rights: Optional[str] = None
 
 
 class ProfileResponse(BaseModel):
@@ -76,6 +80,7 @@ class ProfileResponse(BaseModel):
     # WO-23: user-confirmed facts rendered into the generator's prompt
     # AND the guard's source by build_profile_context.
     vouched_facts: List[str] = []
+    work_rights: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -118,6 +123,7 @@ class ProfileResponse(BaseModel):
             languages=parse_json_list(profile.languages),
             vouched_facts=parse_json_list(
                 getattr(profile, "vouched_facts", None)),
+            work_rights=getattr(profile, "work_rights", None),
             created_at=profile.created_at,
             updated_at=profile.updated_at,
             skills=parse_json_list(profile.skills),

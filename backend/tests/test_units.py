@@ -4637,7 +4637,7 @@ class TestTailorPromptLanguageRule:
 #: If the prompt text changes, AIService.tailoring_prompt_version()
 #: changes and the pinned test fails — bump DELIBERATELY and re-run
 #: RUN_FABRICATION before/after (WO-02).
-TAILORED_PROMPT_VERSION = "t2-2f8f4e86"  # WO-23: input-composition v2 (vouched facts)
+TAILORED_PROMPT_VERSION = "t2-e399d106"  # WO-19 B: input-composition v3 (work-rights line)
 
 
 class TestTailorPromptCraft:
@@ -4831,3 +4831,66 @@ class TestFabricationBlockMessage:
         assert out[0] == "Kompetenser: Microsoft Office, daglig användning", (
             f"the 3-token line must outrank the 1-token one: {out}"
         )
+
+
+class TestWO19EligibilityLexicon:
+    """WO-19 part B: the deterministic eligibility verdict — needs no AI,
+    no DB; pure posting text + the user's work-rights answer."""
+
+    def _ev(self, text, work_rights):
+        from app.services.eligibility_lexicon import evaluate_eligibility
+
+        return evaluate_eligibility(text, work_rights)
+
+    def test_citizenship_requirement_hard_stops_sponsorship_user(self):
+        verdict, note = self._ev(
+            "This role requires Swedish citizenship and a completed "
+            "security clearance.", "needs_sponsorship")
+        assert verdict == "ineligible", (verdict, note)
+        assert note
+
+    def test_sponsorship_welcoming_wording_verifies(self):
+        verdict, note = self._ev(
+            "We sponsor work visas and welcome international applicants.",
+            "needs_sponsorship")
+        assert verdict == "verified", (verdict, note)
+        assert note
+
+    def test_high_risk_sector_silent_is_unverified_with_note(self):
+        verdict, note = self._ev(
+            "Defence systems engineer for a government agency.",
+            "eu_right")
+        assert verdict == "unverified"
+        assert note, "the flag must say WHY it is unverified"
+
+    def test_silent_plain_posting_is_unverified_without_note(self):
+        verdict, note = self._ev(
+            "Backend developer in Malmö, Python and FastAPI.", "citizen_or_pr")
+        assert verdict == "unverified"
+        assert note is None, "silent-plain is stored, never rendered as noise"
+
+    def test_prefer_not_say_is_unverified_everywhere(self):
+        verdict, _ = self._ev(
+            "We sponsor work visas and welcome international applicants.",
+            "prefer_not_say")
+        assert verdict == "unverified", (
+            "prefer_not_say must not count as verification"
+        )
+
+    def test_swedish_citizenship_phrasing_recognised(self):
+        verdict, note = self._ev(
+            "Krav: svenskt medborgarskap samt godkänd säkerhetsprövning.",
+            "needs_sponsorship")
+        assert verdict == "ineligible", (verdict, note)
+
+    def test_uk_phrasing_recognised(self):
+        verdict, _ = self._ev(
+            "Applicants must have the right to work in the UK and be "
+            "eligible for security clearance (SC).", "needs_sponsorship")
+        assert verdict == "ineligible", "UK clearance wording must hard-stop"
+
+    def test_unknown_work_rights_value_fails_closed(self):
+        from app.services.eligibility_lexicon import evaluate_eligibility
+
+        verdict, _ = evaluate_eligibility("We sponsor visas.", "")
+        assert verdict == "unverified"

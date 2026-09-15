@@ -41,6 +41,46 @@ declared → FAIL; declared but the stated bar plausibly higher
 below → pass. The FLAG principle is the borrow: the human is the
 tiebreaker, not the gate.
 
+## Execution record — part B (2026-09-15, session 1)
+
+Branch `feat/wo19b-work-rights-eligibility`. Red-first: 8 lexicon unit
+tests + 6 integration tests, all seen red; hard-stop gate and the
+work-rights context line flip-red-proven. 516 passed / 14 skipped;
+ruff, tsc, `next build` clean; migration d94f2a6c8e1b verified up/down.
+
+Shipped as designed, with the session-review decisions baked in:
+
+- **Matching never sees work rights** (`include_work_rights=False` at
+  the matcher call site, the WO-23 R4 pattern): eligibility is not
+  skill fit, and a work-rights answer must not shift scores for
+  unrelated jobs under one MATCHING_INPUT_COMPOSITION_VERSION — **no
+  re-score is owed for part B**. The tailor and the GUARD both get the
+  line (guard source >= generator input — else the truthful statement
+  the tailor is now licensed to write gets flagged, WO-01's invention
+  vector). `TAILOR_INPUT_COMPOSITION_VERSION` 2 → 3; pin
+  `t2-e399d106`.
+- **Existing users are NOT prompted**: column default
+  `prefer_not_say` behaves as unverified-everywhere — the card chip
+  and the Profile select are the surface, no forced interruption (the
+  WO's own rule: silence is not permission, but it is also not a
+  rejection). New users answer once at onboarding (country step).
+- **Hard stop = the scope gate's treatment**: citizenship/clearance
+  postings for sponsorship seekers are trimmed pre-AI with NO row
+  written — deterministic and free, re-evaluated each run, so a
+  changed answer resurfaces the jobs.
+- **Chip discipline**: `verified` (ok-token green, welcoming wording
+  quoted in the tooltip), `unverified` with a note (amber, high-risk
+  sector + silent), `unverified` silent-plain = stored for stats,
+  rendered nowhere (a chip on every card is noise). `ineligible`
+  never reaches a card.
+- The lexicon is country-agnostic v1 (SE+GB phrasings; a Swedish
+  citizenship phrase in a GB posting is rare and flagging it is right
+  anyway); word-boundary lookarounds per the country-lexicon lesson.
+
+Parts A (posting trust boundary) and C (language-requirement flag)
+remain open — part A needs the re-score + t3 measurement discipline
+the session review flagged.
+
 ## Source pattern (what we are adapting)
 
 From the repo's `04-job-evaluation.md` (framework v1.2.6):

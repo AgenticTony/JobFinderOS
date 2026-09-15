@@ -789,7 +789,9 @@ An empty list means the document is faithful."""
     #: confirmed-facts block (vouched facts + attestations) — identical
     #: input for profiles without them, but compositions must stay
     #: distinguishable for WO-02 measurement discipline (AI-13 pattern).
-    TAILOR_INPUT_COMPOSITION_VERSION = 2
+    #: 3 = WO-19 part B: the context can carry a work-rights line (the
+    #: tailor is licensed to state it; the guard sees the same line).
+    TAILOR_INPUT_COMPOSITION_VERSION = 3
 
     @classmethod
     def tailoring_prompt_version(cls) -> str:

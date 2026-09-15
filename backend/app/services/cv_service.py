@@ -109,6 +109,7 @@ def confirmed_facts_block(lines) -> str:
 def build_profile_context(
     profile: Profile, include_derived: bool = True,
     include_vouched: bool = True,
+    include_work_rights: bool = True,
 ) -> str:
     """Compact text summary of the profile + preferences fed to the matcher."""
     skills = parse_json_list(profile.skills)
@@ -173,6 +174,19 @@ def build_profile_context(
     if include_vouched:
         context += confirmed_facts_block(parse_json_list(
             getattr(profile, "vouched_facts", None)))
+    # WO-19 part B: the tailor is licensed to state the user's real work
+    # rights (closing the WO-01 "EU citizen" invention vector) — and the
+    # guard MUST see the same line (guard source >= generator input) or
+    # the truthful statement gets flagged. User-entered, so it renders
+    # OUTSIDE the include_derived gate; matching opts out (input
+    # composition frozen for score comparability). TAILOR composition v3.
+    if include_work_rights:
+        from app.services.eligibility_lexicon import WORK_RIGHTS_LINES
+
+        value = (getattr(profile, "work_rights", None)
+                 or "prefer_not_say").strip() or "prefer_not_say"
+        if value in WORK_RIGHTS_LINES:
+            context += f"\nWork rights: {WORK_RIGHTS_LINES[value]}."
     return context
 
 

@@ -27,6 +27,10 @@ class MatchResponse(BaseModel):
     confidence: Optional[str] = None
     decision: Optional[str] = None
     decided_at: Optional[datetime] = None
+    # WO-19 part B: deterministic eligibility verdict + why-note
+    # ('verified' | 'unverified'; 'ineligible' never reaches a row).
+    eligibility: Optional[str] = None
+    eligibility_note: Optional[str] = None
     created_at: datetime
 
     @classmethod
@@ -45,6 +49,8 @@ class MatchResponse(BaseModel):
             confidence=m.confidence,
             decision=m.decision,
             decided_at=m.decided_at,
+            eligibility=getattr(m, "eligibility", None),
+            eligibility_note=getattr(m, "eligibility_note", None),
             created_at=m.created_at,
         )
 

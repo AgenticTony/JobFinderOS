@@ -101,6 +101,18 @@ async def update_preferences(
     for field, value in data.items():
         if field in ("preferred_roles", "exclude_keywords"):
             setattr(profile, field, dump_json_list(value))
+        elif field == "work_rights":
+            from app.services.eligibility_lexicon import WORK_RIGHTS_VALUES
+
+            if value is not None and value not in WORK_RIGHTS_VALUES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"work_rights must be one of "
+                        f"{list(WORK_RIGHTS_VALUES)}"
+                    ),
+                )
+            setattr(profile, field, value)
         elif field == "vouched_facts":
             # WO-23: strict 30x200 bound — a 400 the user can act on,
             # not a silent trim of facts they believe are saved.
@@ -160,6 +172,17 @@ async def save_onboarding(
     profile.remote_only = 1 if payload.remote_only else 0
     profile.include_remote = 1 if (payload.include_remote or payload.remote_only) else 0
     profile.search_queries = dump_json_list(payload.search_queries)
+    # WO-19 part B: the eligibility gate's answer — enum-validated, and
+    # prefer_not_say (or omitted) keeps unverified-everywhere behaviour.
+    from app.services.eligibility_lexicon import WORK_RIGHTS_VALUES
+
+    if payload.work_rights is not None:
+        if payload.work_rights not in WORK_RIGHTS_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"work_rights must be one of {list(WORK_RIGHTS_VALUES)}",
+            )
+        profile.work_rights = payload.work_rights
     # Occupation taxonomy codes: the server is the authority — client
     # codes are validated against the official concepts feed, unknown
     # codes dropped (logged), labels rehydrated. ENFORCED SE-only
