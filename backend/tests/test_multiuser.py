@@ -4336,19 +4336,23 @@ class TestWO19EligibilityGate:
     and GUARD channels only — never match scoring (no re-score owed)."""
 
     @staticmethod
-    def _seed(client, db, work_rights=None, description="A Python role in Malmö."):
+    def _seed(client, db, work_rights=None, description="A Python role.",
+              location="Malmö", country=None):
         email = f"wo19-{uuid.uuid4().hex[:6]}@test.example"
         uid = uuid.UUID(_register(client, email))
         _auth_client(client, email)
         p = db.query(Profile).filter(Profile.user_id == uid).first()
         p.cv_text = "Erik. Python developer at Svenska Spel."
+        if country is not None:
+            p.country = country
         if work_rights is not None:
             p.work_rights = work_rights
         db.commit()
         job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
                          title="Dev", company="Acme",
                          url=f"https://x/{uuid.uuid4().hex[:6]}",
-                         status="new", description=description)
+                         status="new", description=description,
+                         location=location)
         db.add(job)
         db.commit()
         return p, job, uid
@@ -4383,8 +4387,8 @@ class TestWO19EligibilityGate:
     def test_hard_stop_never_scored_never_shown(self, client, db, monkeypatch):
         p, job, uid = self._seed(
             client, db, work_rights="needs_sponsorship",
-            description="This role requires Swedish citizenship and a "
-                        "completed security clearance.")
+            description="Candidates must be Swedish citizens. Security "
+                        "clearance is required.")
         calls = self._script_match(monkeypatch)
         summary = self._run(db, p, uid)
         assert summary["status"] == "completed", summary
@@ -4454,11 +4458,20 @@ class TestWO19EligibilityGate:
         # guard source >= generator input, or the truthful statement the
         # tailor is now licensed to write gets flagged (WO-01's invention
         # vector closes only if the guard knows the answer too).
+        p.country = "SE"
+        db.commit()
         ctx_tailor = build_profile_context(p)
         ctx_guard = build_profile_context(p, include_derived=False)
         for ctx in (ctx_tailor, ctx_guard):
-            assert "eu/eea work right" in ctx.lower() or "work rights" in ctx.lower(), (
-                "the work-rights line must reach the tailor AND the guard"
+            # Round-1 finding 2: the line must be COUNTRY-SCOPED with the
+            # never-elsewhere instruction — an unscoped "of the work
+            # country" claim let a UK letter assert a right the user's
+            # Swedish answer doesn't give, sanctioned by the guard.
+            assert "Work rights (answered for Sweden)" in ctx, (
+                "the scoped work-rights line must reach the tailor AND the guard"
+            )
+            assert "never claim work rights" in ctx.lower(), (
+                "the never-elsewhere instruction is missing"
             )
 
     def test_onboarding_and_settings_edit_work_rights(self, client, db):
@@ -4484,3 +4497,101 @@ class TestWO19EligibilityGate:
 
         r = client.put("/api/v1/profile/me", json={"work_rights": "not_a_value"})
         assert r.status_code == 400, "invalid enum values must be rejected"
+
+
+class TestWO19EligibilityR1Fixes:
+    """Round-1 review on part B: per-jurisdiction gating and the
+    work-rights re-evaluation of EXISTING matches (finding 5)."""
+
+    @staticmethod
+    def _seed(client, db, description="A Python role.", location="Malmö"):
+        email = f"wo19r1-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik. Python developer at Svenska Spel."
+        db.commit()
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}",
+                         status="new", description=description,
+                         location=location)
+        db.add(job)
+        db.commit()
+        return p, job, uid
+
+    @staticmethod
+    def _script_match(monkeypatch):
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        def fake_match(self, profile_context, cv_text, job_description):
+            return {"score": 80, "reasoning": "ok", "recommendation": "apply",
+                    "confidence": "high", "matched_skills": ["Python"],
+                    "missing_skills": [], "transferable_skills": []}
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "match_job", fake_match)
+
+    def test_eu_right_user_gated_on_gb_citizenship_job(self, client, db, monkeypatch):
+        from app.services import matcher_service
+
+        p, job, uid = self._seed(
+            client, db,
+            description="Candidates must be British citizens.",
+            location="London")
+        p.work_rights = "eu_right"
+        p.country = "SE"
+        db.commit()
+        self._script_match(monkeypatch)
+        matcher_service.run_matching(db, profile=p, user_id=uid)
+        rows = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == job.id).all()
+        assert not rows, (
+            "an EU work right does not establish GB rights — the posting "
+            "must hard-stop, not score"
+        )
+
+    def test_changing_work_rights_revises_existing_matches(self, client, db, monkeypatch):
+        from app.services import matcher_service
+
+        # Matched while the answer was prefer_not_say (today's default)
+        p, job, uid = self._seed(
+            client, db,
+            description="Candidates must be British citizens.",
+            location="London")
+        self._script_match(monkeypatch)
+        matcher_service.run_matching(db, profile=p, user_id=uid)
+        m = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == job.id).first()
+        assert m and m.eligibility == "unverified", (
+            "pre-migration/unknown rows surface as unverified until revised"
+        )
+        r = client.get("/api/v1/matches/")
+        assert any(x["id"] == m.id for x in r.json())
+
+        # The answer changes — the existing card must follow it
+        r = client.put("/api/v1/profile/me",
+                       json={"work_rights": "needs_sponsorship"})
+        assert r.status_code == 200, r.text
+        db.refresh(m)
+        assert m.eligibility == "ineligible", (
+            "the citizenship card stayed visible to a sponsorship seeker"
+        )
+        r = client.get("/api/v1/matches/")
+        assert not any(x["id"] == m.id for x in r.json()), (
+            "ineligible rows must be hidden from the queue"
+        )
+
+        # Flipping the answer back resurfaces it — the row was hidden,
+        # never deleted, and an eligibility verdict is not a decision
+        client.put("/api/v1/profile/me", json={"work_rights": "prefer_not_say"})
+        db.refresh(m)
+        assert m.eligibility == "unverified"
+        r = client.get("/api/v1/matches/")
+        assert any(x["id"] == m.id for x in r.json()), (
+            "the row did not come back after the answer changed"
+        )

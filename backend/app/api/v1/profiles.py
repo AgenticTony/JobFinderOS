@@ -131,6 +131,12 @@ async def update_preferences(
     db.add(profile)
     db.commit()
     db.refresh(profile)
+    if "work_rights" in data:
+        # Round-1 finding 5: the answer decides which postings are hidden
+        # — existing undecided matches must follow it immediately.
+        from app.services.matcher_service import reevaluate_eligibility
+
+        reevaluate_eligibility(db, user_id=user.id, profile=profile)
     return ProfileResponse.from_orm_profile(profile)
 
 
@@ -212,6 +218,11 @@ async def save_onboarding(
     profile.occupation_codes = dump_json_list(valid_picks)
     profile.languages = dump_json_list(payload.languages or ["English"])
     profile.onboarded = 1
+    # WO-19 B: the onboarding answer (and edit-setup reflows) revise
+    # existing undecided matches the same way the Profile editor does.
+    from app.services.matcher_service import reevaluate_eligibility
+
+    reevaluate_eligibility(db, user_id=user.id, profile=profile)
     db.add(profile)
     db.commit()
     db.refresh(profile)

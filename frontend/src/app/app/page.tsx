@@ -2139,7 +2139,7 @@ function ProfileView({
                 Work rights
               </span>
               <select
-                value={profile.work_rights ?? 'prefer_not_say'}
+                value={workRights}
                 onChange={(e) => { prefsDirty.current = true; setWorkRights(e.target.value); }}
                 className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors focus:border-signal"
               >

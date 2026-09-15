@@ -1,33 +1,35 @@
 r"""WO-19 part B: the deterministic work-rights eligibility lexicon.
 
 Verdicts over posting text + the user's work-rights answer, BEFORE any
-AI spend. Adapted from the source repo's Eligibility Gate (v1.2.6):
+AI spend. Adapted from the source repo's Eligibility Gate (v1.2.6),
+hardened by the round-1 review (2026-09-15):
 
-- citizenship / PR / security-clearance requirement AND the user needs
-  sponsorship → INELIGIBLE (hard stop: never scored, never shown).
-  Re-evaluated each run at zero cost, like the PIPE-16 scope gate —
-  the user's answer can change.
-- sponsorship-welcoming wording ("we sponsor", "international
-  applicants welcome") → VERIFIED, note recorded.
-- high-risk sector (government/defence, banking, telcos, professional
-  services, critical infrastructure) + silent text → UNVERIFIED + note
-  ("silence is not permission" — shown, flagged, never dropped).
-- otherwise silent → UNVERIFIED without a note (stored for stats; the
-  card renders no chip — silent-plain on every card is noise).
-- prefer_not_say / unknown → UNVERIFIED everywhere: not having answered
-  must never read as verification.
-
-Deliberately country-agnostic v1: SE and GB phrasings both match. A
-Swedish citizenship phrase in a GB posting is rare and flagging it is
-correct anyway. Coverage is intentionally partial — an unmatched
-foreign requirement is simply not caught yet, same failure mode as the
-location lexicon, never worse.
+- Round-1 rule: a job is hidden ONLY on an explicit, affirmative
+  requirement ("must hold", "…required", "kräver") of citizenship /
+  PR / security clearance, in a sentence with NO negation, AND only
+  when the user's rights for THAT JOB'S COUNTRIES are not established
+  (per-jurisdiction: work rights are answered for the user's onboarded
+  country; eu_right covers the EEA bloc; post-Brexit GB is outside it).
+  Everything short of that is flagged, never dropped — the WO's own
+  "ambiguous cases FLAG" rule. Bare keywords ("citizenship", "cleared")
+  match nothing: "corporate citizenship" and "we cleared a backlog"
+  are not requirements.
+- Welcome wording (sponsorship ONLY — "we sponsor", "visa sponsorship
+  available", "international applicants welcome") verifies, and only
+  for a user who needs sponsorship. Relocation packages are NOT visa
+  sponsorship — they routinely assume an existing right to work.
+- High-risk sector (framed: "a leading bank", "banking sector",
+  defence, government agency…) + silent text flags unverified with a
+  note, only for sponsorship seekers. "bank holidays" is UK benefits
+  boilerplate, not a sector.
+- prefer_not_say / unknown / unresolvable job country → UNVERIFIED,
+  never verification, never a drop.
 
 Pure functions, no DB, no AI — testable in isolation (test_units.py).
 """
 
 import re
-from typing import Optional, Tuple
+from typing import Optional, Set, Tuple
 
 WORK_RIGHTS_VALUES = (
     "citizen_or_pr",
@@ -37,110 +39,208 @@ WORK_RIGHTS_VALUES = (
     "prefer_not_say",
 )
 
-#: Human phrasing per value — the line the tailor prompt, the guard
-#: source, and the UI labels all share (one rendering, three consumers;
-#: the guard source must state what the generator sees).
-WORK_RIGHTS_LINES = {
-    "citizen_or_pr": "citizen or permanent resident of the work country — "
-                     "works without sponsorship",
-    "permanent_resident": "permanent resident — works without sponsorship",
-    "eu_right": "EU/EEA work right — works in the EU without sponsorship",
-    "needs_sponsorship": "needs visa sponsorship to work",
-    "prefer_not_say": "work rights not stated",
-}
+# The EEA free-movement bloc (mirrors country_lexicon._EEA — import
+# avoided to keep this module dependency-free for prompt-side use).
+_EEA = frozenset({
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
+    "DE", "GR", "HU", "IS", "IE", "IT", "LV", "LI", "LT", "LU",
+    "MT", "NL", "NO", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+})
 
-# Hard requirements: wording that makes a role categorically
-# unavailable to someone needing sponsorship. Word-boundary lookarounds
-# per the country-lexicon lesson (terms ending in non-word chars).
-_CITIZENSHIP_RES = [
+_COUNTRY_NAMES = {"SE": "Sweden", "GB": "the United Kingdom"}
+
+# Affirmative REQUIREMENT framing — the only shapes that may hide a
+# job. Anchored phrases, not keywords.
+_REQUIREMENT_RES = [
     re.compile(p, re.I) for p in (
-        r"(?<!\w)citizenship(?!\w)",
-        r"(?<!\w)medborgarskap(?!\w)",
-        r"(?<!\w)security\s+clearance(?!\w)",
-        r"(?<!\w)säkerhetsprövning(?!\w)",
-        r"(?<!\w)sakerhetsprovning(?!\w)",
-        r"(?<!\w)cleared(?!\w)",
-        r"(?<!\w)[^.\n]{0,40}right\s+to\s+work[^.\n]{0,40}required",
-        r"(?<!\w)must\s+(?:be\s+)?(?:a\s+)?(?:citizen| british)",
-        r"(?<!\w)kräver\s+(?:svenskt\s+)?medborgarskap",
-        r"(?<!\w)eligible\s+for\s+\w*\s*clearance",
+        r"must\s+(?:hold|have|possess)[^.]{0,50}citizenship",
+        r"must\s+be\s+(?:a\s+)?(?:british|swedish|danish|norwegian"
+        r"|finnish|citizen)",
+        r"citizenship\s+(?:of\s+[a-z\s]+?\s+)?(?:is\s+)?required",
+        r"citizenship\s+required",
+        r"security\s+clearance[^.]{0,40}(?:is\s+)?required",
+        r"(?:must\s+(?:hold|have)|required|eligible\s+for|eligibility"
+        r"\s+for)[^.]{0,50}security\s+clearance",
+        r"(?:svenskt|danskt|norskt|finskt|brittiskt)\s+medborgarskap",
+        r"kräver\s+(?:svenskt\s+)?medborgarskap",
+        r"(?:krav|kräver|krävs)[^.]{0,40}säkerhetsprövning",
+        r"säkerhetsprövning\s+(?:krävs|godkänd)",
+        r"right\s+to\s+work[^.]{0,30}(?:is\s+)?required",
     )
 ]
 
+# A sentence carrying one of these does NOT state a requirement.
+_NEGATION_RE = re.compile(
+    r"(?i)\b(?:not|no|without|inte|ej|utan)\b[^.\n]{0,40}"
+    r"(?:required|needed|necessary|citizenship|clearance|medborgarskap"
+    r"|säkerhetsprövning)"
+    r"|required[^.\n]{0,20}\bnot\b"
+    r"|kräver\s+inte|krävs\s+inte",
+)
+
+# Sponsorship-welcoming wording — the ONLY verification path.
 _SPONSORSHIP_WELCOME_RES = [
     re.compile(p, re.I) for p in (
         r"(?<!\w)we\s+sponsor(?!\w)",
-        r"(?<!\w)visa\s+sponsorship\s+(?:available|offered|provided)",
-        r"(?<!\w)international\s+applicants\s+welcome",
-        r"(?<!\w)relocation(?:\s+support|\s+package)?\s+(?:offered|available)",
-        r"(?<!\w)vi\s+(?:erbjuder\s+)?arbetstillstånd",
+        r"visa\s+sponsorship\s+(?:available|offered|provided|provided)",
+        r"(?<!\w)sponsor(?:ship)?\s+(?:is\s+)?available",
+        r"international\s+applicants\s+welcome",
+        r"vi\s+(?:erbjuder\s+)?arbetstillstånd",
     )
 ]
 
-# The source framework's named high-risk sectors: postings here carry a
-# raised prior of citizenship/clearance requirements, so silence flags.
+# High-risk sectors, FRAMED — "a leading bank", "banking sector". Bare
+# "bank" is UK benefits boilerplate ("plus bank holidays").
 _HIGH_RISK_RES = [
     re.compile(p, re.I) for p in (
+        r"(?<!\w)(?:a|the|an)\s+(?:leading\s+|major\s+|top\s+)?"
+        r"(?:investment\s+|retail\s+|commercial\s+|private\s+)?bank(?!\s+holiday)",
+        r"(?<!\w)banking\s+(?:sector|industry|background)(?!\w)",
         r"(?<!\w)(?:ministry|government\s+agency|public\s+sector|myndighet)"
         r"(?!\w)",
         r"(?<!\w)(?:defence|defense|military|armed\s+forces|totalförsvaret)"
         r"(?!\w)",
         r"(?<!\w)(?:försvar|krigsmakt)(?!\w)",
-        r"(?<!\w)(?:bank|banking|nordic\s+bank)(?!\w)",
         r"(?<!\w)(?:telecom|telco|telekom)(?!\w)",
-        r"(?<!\w)(?:critical\s+infrastructure|kritical\s+infrastruktur)"
-        r"(?!\w)",
+        r"(?<!\w)critical\s+infrastructure(?!\w)",
     )
 ]
 
-
-def _matches(patterns, text: str) -> Optional[re.Match]:
-    for pattern in patterns:
-        m = pattern.search(text or "")
-        if m:
-            return m
-    return None
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
-def evaluate_eligibility(text: str, work_rights: Optional[str]) -> Tuple[str, Optional[str]]:
+def effective_rights(work_rights: Optional[str], home_country: Optional[str],
+                     job_countries: Set[str]) -> str:
+    """Is the user's right to hold THIS job established?
+
+    'established' | 'not_established' | 'unknown'. Work rights are
+    answered for the user's ONBOARDED country (round-1 finding 2: one
+    profile-wide claim must never license a tailor statement or a gate
+    pass for another jurisdiction — post-Brexit GB is outside the EEA).
+    Unresolvable job countries (remote/global) are 'unknown' — flag,
+    never drop.
+    """
+    work_rights = (work_rights or "").strip() or "prefer_not_say"
+    if work_rights == "prefer_not_say":
+        return "unknown"
+    if not job_countries:
+        return "unknown"
+    home = (home_country or "").upper()
+    if work_rights in ("citizen_or_pr", "permanent_resident"):
+        return "established" if home in job_countries else "not_established"
+    if work_rights == "eu_right":
+        return ("established" if all(c in _EEA for c in job_countries)
+                else "not_established")
+    return "not_established"  # needs_sponsorship
+
+
+def work_rights_line(work_rights: Optional[str],
+                     home_country: Optional[str]) -> str:
+    """The scoped prompt line for the tailor AND the guard source.
+
+    Scoped to the answered country with an explicit never-elsewhere
+    instruction: a UK letter must not claim a right the user's Swedish
+    answer doesn't give (round-1 finding 2 — the guard sees this same
+    line, so an out-of-scope claim is unsupported by the source).
+    """
+    work_rights = (work_rights or "").strip() or "prefer_not_say"
+    home = (home_country or "").upper()
+    where = _COUNTRY_NAMES.get(home, home or "your country")
+    if work_rights == "prefer_not_say":
+        return ("Work rights: not stated. Never assert citizenship, work "
+                "rights, or visa status for any country.")
+    bodies = {
+        "citizen_or_pr": f"citizen or permanent resident of {where} — can "
+                         f"work in {where} without sponsorship",
+        "permanent_resident": f"permanent resident of {where} — can work "
+                              f"in {where} without sponsorship",
+        "eu_right": "EU/EEA work right — can work in any EU/EEA country "
+                    "without sponsorship",
+        "needs_sponsorship": f"needs visa sponsorship to work (including "
+                             f"in {where})",
+    }
+    body = bodies.get(work_rights, "not stated")
+    return (
+        f"Work rights (answered for {where}): {body}. "
+        "This answer covers ONLY the countries stated — never claim work "
+        "rights, citizenship or visa status for any other country."
+    )
+
+
+def evaluate_eligibility(text: str, work_rights: Optional[str],
+                         home_country: Optional[str] = None,
+                         job_countries: Optional[Set[str]] = None
+                         ) -> Tuple[str, Optional[str]]:
     """(verdict, note) for one posting against one user's work rights.
 
-    verdict: 'ineligible' (hard stop), 'verified', or 'unverified'.
-    Fails closed: prefer_not_say and unknown values never verify.
+    verdict: 'ineligible' (hard stop — explicit affirmative requirement
+    + rights not established for the job's countries), 'verified'
+    (sponsorship-welcoming wording, sponsorship seeker), or
+    'unverified'. Fails closed: prefer_not_say and unknown values never
+    verify; unresolvable countries never drop.
     """
     work_rights = (work_rights or "").strip() or "prefer_not_say"
     text = text or ""
+    job_countries = job_countries or set()
 
+    sentences = [s for s in _SENTENCE_SPLIT.split(text) if s and s.strip()]
+
+    def _first(patterns):
+        for sentence in sentences:
+            if _NEGATION_RE.search(sentence):
+                continue
+            for pattern in patterns:
+                m = pattern.search(sentence)
+                if m:
+                    return m, sentence
+        return None, None
+
+    def _first_welcome(patterns):
+        # Welcome wording is checked per CLAUSE: "Citizenship is not
+        # required - we sponsor visas" must verify — the negation kills
+        # the requirement reading, not the welcome clause beside it.
+        for sentence in sentences:
+            for clause in re.split(r"[;–—]| - ", sentence):
+                if _NEGATION_RE.search(clause):
+                    continue
+                for pattern in patterns:
+                    m = pattern.search(clause)
+                    if m:
+                        return m, clause
+        return None, None
+
+    rights = effective_rights(work_rights, home_country, job_countries)
+
+    # Hard stop: explicit affirmative requirement, rights not
+    # established for THIS job. Unknown rights / unknown country flag.
+    m, _sentence = _first(_REQUIREMENT_RES)
+    if m and rights == "not_established":
+        return (
+            "ineligible",
+            f"Posting requires citizenship/clearance "
+            f"(“{m.group(0).strip()[:60]}”) — your work-rights answer "
+            f"does not cover this job's country.",
+        )
+
+    # Verification: sponsorship wording only, and only for the user who
+    # needs it. (Relocation packages are NOT visa sponsorship.)
     if work_rights == "needs_sponsorship":
-        m = _matches(_CITIZENSHIP_RES, text)
+        m, _sentence = _first_welcome(_SPONSORSHIP_WELCOME_RES)
         if m:
             return (
-                "ineligible",
-                f"Posting appears to require citizenship/clearance "
-                f"(“{m.group(0).strip()[:60]}”) — unavailable without "
-                f"sponsorship.",
+                "verified",
+                f"Posting welcomes international applicants "
+                f"(“{m.group(0).strip()[:60]}”).",
             )
 
-    # prefer_not_say never counts as verification — even welcoming
-    # wording only verifies a stated answer.
-    if work_rights in ("prefer_not_say",):
-        return ("unverified", None)
-
-    m = _matches(_SPONSORSHIP_WELCOME_RES, text)
-    if m:
-        return (
-            "verified",
-            f"Posting welcomes international applicants "
-            f"(“{m.group(0).strip()[:60]}”).",
-        )
-
-    m = _matches(_HIGH_RISK_RES, text)
-    if m:
-        return (
-            "unverified",
-            f"High-risk sector for work-rights requirements "
-            f"(“{m.group(0).strip()[:60]}”) and the posting is silent — "
-            f"check before applying.",
-        )
+    if work_rights == "needs_sponsorship":
+        m, _sentence = _first(_HIGH_RISK_RES)
+        if m:
+            return (
+                "unverified",
+                f"High-risk sector for work-rights requirements "
+                f"(“{m.group(0).strip()[:60]}”) and the posting is silent — "
+                f"check before applying.",
+            )
 
     return ("unverified", None)

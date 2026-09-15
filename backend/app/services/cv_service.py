@@ -181,12 +181,16 @@ def build_profile_context(
     # OUTSIDE the include_derived gate; matching opts out (input
     # composition frozen for score comparability). TAILOR composition v3.
     if include_work_rights:
-        from app.services.eligibility_lexicon import WORK_RIGHTS_LINES
+        # Round-1 finding 2: the line is SCOPED to the answered country
+        # with an explicit never-elsewhere instruction — one profile-wide
+        # answer must never license (nor let the guard sanction) a claim
+        # for another jurisdiction. post-Brexit GB is outside the EEA.
+        from app.services.eligibility_lexicon import work_rights_line
 
-        value = (getattr(profile, "work_rights", None)
-                 or "prefer_not_say").strip() or "prefer_not_say"
-        if value in WORK_RIGHTS_LINES:
-            context += f"\nWork rights: {WORK_RIGHTS_LINES[value]}."
+        context += "\n" + work_rights_line(
+            getattr(profile, "work_rights", None),
+            getattr(profile, "country", None),
+        )
     return context
 
 

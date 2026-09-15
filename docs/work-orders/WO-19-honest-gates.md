@@ -77,6 +77,51 @@ Shipped as designed, with the session-review decisions baked in:
   citizenship phrase in a GB posting is rare and flagging it is right
   anyway); word-boundary lookarounds per the country-lexicon lesson.
 
+### Part B review round 1 (2026-09-15 — 6 findings, all fixed red-first)
+
+The keyword list decided eligibility wrongly in both directions, and
+work rights were one jurisdiction-wide claim. Fixes:
+
+- **F1 (false hides/false passes)**: the hard stop now requires an
+  explicit AFFIRMATIVE requirement ("must hold/be", "…required",
+  "kräver/krav på") in a negation-free sentence; welcome wording is
+  checked per-clause first ("Citizenship is not required - we sponsor
+  visas" verifies); bare `citizenship`/`cleared` match nothing
+  ("corporate citizenship", "we cleared a backlog" are not
+  requirements); "must be British (citizens)" is caught. Every
+  reviewer sentence is a unit test.
+- **F2 (per-jurisdiction, the fabrication-safety one)**: `effective_
+  rights(work_rights, home_country, job_countries)` resolves the
+  answer against the JOB's countries — citizen/PR covers the onboarded
+  country only; eu_right covers the EEA bloc; post-Brexit GB is
+  outside it (an EU right on a GB citizenship posting hard-stops).
+  Unresolvable countries flag, never drop. The tailor/guard line is
+  `work_rights_line()`: scoped "Work rights (answered for Sweden): …"
+  with an explicit "never claim work rights … for any other country"
+  instruction — the guard sees the same line, so an out-of-scope claim
+  is unsupported by the source (the WO-01 vector stays closed).
+- **F3**: relocation wording no longer verifies (relocation packages
+  routinely assume an existing right to work); welcome verifies only
+  sponsorship wording and only for sponsorship seekers.
+- **F4**: high-risk sectors need framing ("a leading investment
+  bank", "banking sector"); "bank holidays" is UK benefits boilerplate;
+  the high-risk note only fires for sponsorship seekers.
+- **F5 (stale matches)**: `reevaluate_eligibility` runs on every
+  work-rights change (Profile edit AND onboarding/edit-setup reflow):
+  undecided matches are re-verdicted in place; `ineligible` rows are
+  HIDDEN by list_matches, never deleted — flipping the answer back
+  resurfaces them (an eligibility verdict is not a decision; decided
+  rows stay frozen per WO-18).
+- **F6**: the Profile select was controlled by the saved prop while
+  onChange wrote state — the choice visually snapped back. Now
+  `value={workRights}` like every other input in the form.
+
+Also caught by the suite: the loop read `profile.country` per job —
+a GDPR erase mid-run expired the ORM object and crashed the run
+(TestDeletedUserAbortsMatching); the country is now read once,
+pre-loop. Suite 533 passed / 14 skipped; ruff, tsc, `next build`
+clean. Negation guard and re-evaluation flip-red-proven.
+
 Parts A (posting trust boundary) and C (language-requirement flag)
 remain open — part A needs the re-score + t3 measurement discipline
 the session review flagged.
