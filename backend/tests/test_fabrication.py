@@ -138,19 +138,35 @@ def test_real_tailoring_produces_zero_unsupported_claims():
         )
         if high or unsupported:
             fabricated_docs += 1
+            # Fixtures are APPEND-ONLY (2026-09-15 round-2 review): the
+            # snapshot NAME carries the tailoring prompt version, so a new
+            # run never clobbers a recorded catch from another era. The
+            # 2026-09-15 measurements silently overwrote the 2026-08-28
+            # fixtures by job id — 580's 'LLM AI-baserade' Layer-A catch
+            # survived only in git, and the fixture test (which checks
+            # filenames, not content) stayed green the whole time. An
+            # existing same-version snapshot is kept as-is: a re-measurement
+            # within one version replaces nothing, the file already holds
+            # that era's catch.
             snapshot = (Path(__file__).parent / "fixtures" / "fabrication"
-                        / f"live_catch_{job['id']}.json")
-            snapshot.write_text(json.dumps({
-                "source_cv": cv_text,
-                "tailored": tailored,
-                "layer_a": findings_as_json(findings),
-                "judge": unsupported,
-                # Which tailoring prompt produced this catch — WO-02 rate
-                # runs are only comparable within one prompt version
-                # (t1-… since 2026-09-15; pre-t1 files are unversioned).
-                "tailoring_prompt_version": AIService.tailoring_prompt_version(),
-            }, ensure_ascii=False, indent=2))
-            print(f"      snapshot saved: {snapshot.name}")
+                        / f"live_catch_{job['id']}_"
+                        f"{AIService.tailoring_prompt_version()}.json")
+            if snapshot.exists():
+                print(f"      snapshot exists, keeping first: {snapshot.name}")
+            else:
+                snapshot.write_text(json.dumps({
+                    "source_cv": cv_text,
+                    "tailored": tailored,
+                    "layer_a": findings_as_json(findings),
+                    "judge": unsupported,
+                    # Which tailoring prompt produced this catch — WO-02
+                    # rate runs are only comparable within one prompt
+                    # version (t1-… since 2026-09-15; pre-t1 files are
+                    # labelled by era, not hash).
+                    "tailoring_prompt_version":
+                        AIService.tailoring_prompt_version(),
+                }, ensure_ascii=False, indent=2))
+                print(f"      snapshot saved: {snapshot.name}")
 
     rate = fabricated_docs / len(job_rows)
     print(f"\n  fabrication rate (docs with any finding): {rate:.0%} "

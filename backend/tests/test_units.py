@@ -2506,8 +2506,19 @@ class TestLiveCatchFixturesLoadBearing:
         assert snapshots, "no live_catch fixtures on disk — the catches are gone"
         # EACH catch is individually load-bearing: deleting one snapshot
         # (as happened during the baseline rerun) must fail here, not just
-        # emptying the directory. New catches append to this set.
-        expected = {"live_catch_580.json", "live_catch_583.json"}
+        # emptying the directory. New catches append to this set —
+        # version-suffixed since 2026-09-15 (a run overwrote the 2026-08-28
+        # fixtures by job id and this test stayed green because it checks
+        # filenames, not content; the harness now names snapshots
+        # live_catch_<id>_<prompt-version>.json and refuses to overwrite).
+        expected = {
+            "live_catch_580.json", "live_catch_583.json",  # 2026-08-28 era
+            "live_catch_583_pre-t1.json",                  # 2026-09-15 pre-t1
+            "live_catch_300_t2-95af0d8b.json",             # 2026-09-15 t2
+            "live_catch_316_t2-95af0d8b.json",
+            "live_catch_342_t2-95af0d8b.json",
+            "live_catch_580_t2-95af0d8b.json",
+        }
         present = {s_.name for s_ in snapshots}
         assert expected <= present, (
             f"recorded catches missing from disk: {expected - present} — "

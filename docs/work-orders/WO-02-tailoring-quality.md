@@ -166,7 +166,14 @@ pool ceiling this WO already recorded):
   frontends"). Candidate t3 rule: frequency and intensity claims
   must quote the CV's own wording — the same shape as the
   language-proficiency rule.
-- **On-disk fixtures**: live_catch_{300,316,342,580} are t2 catches
-  (pv field = t2-95af0d8b); live_catch_583 is retained from the
-  pre-t1 run (clean under t1 and t2; the pre-t1 catches stay
-  load-bearing for the checker per TestLiveCatchFixturesLoadBearing).
+- **On-disk fixtures** (append-only since the round-2 review — the
+  2026-09-15 runs initially OVERWROTE the 2026-08-28 fixtures by job
+  id, and the fixture test stayed green because it checks filenames,
+  not content; 580's 'LLM AI-baserade' Layer-A catch survived only in
+  git): live_catch_{580,583}.json are the restored 2026-08-28
+  fixtures; live_catch_583_pre-t1.json holds that job's pre-t1
+  catches (clean under t1 and t2); live_catch_{300,316,342,580}_
+  t2-95af0d8b.json are the t2 catches. The harness now names
+  snapshots live_catch_\<id\>_\<prompt-version\>.json and refuses to
+  overwrite an existing file; TestLiveCatchFixturesLoadBearing pins
+  every recorded catch by name.
