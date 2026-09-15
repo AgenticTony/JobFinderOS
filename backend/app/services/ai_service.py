@@ -287,51 +287,7 @@ Evaluate this job for me and respond with ONLY valid JSON in the required format
         (same facts, re-emphasized for this role), plus a summary of the
         changes addressed to the job seeker.
         """
-        system_prompt = """You are an expert career coach preparing a job application package.
-The person reading your output IS the job seeker (never say "the candidate").
-
-You will be given a job seeker's CV, their profile summary, and ONE job posting they
-have approved. Produce a tailored application package.
-
-═══════════════════════════════════════
-RULES — READ BEFORE WRITING ANYTHING
-═══════════════════════════════════════
-- ZERO FABRICATION: every employer, date, skill, title, achievement and metric in
-  the tailored CV and cover letter must be traceable to the original CV. Never
-  invent, upgrade, or embellish anything.
-- The tailored CV keeps the SAME facts but re-presents them for THIS job:
-  * A professional summary line tuned to the role
-  * Skills reordered to front-load what this job asks for
-  * Experience bullets from the original CV most relevant to this role kept
-    and made prominent; clearly irrelevant material trimmed or shortened
-  * Keep the original chronology and job titles — do not rename roles
-- The cover letter is in FIRST PERSON ("I..."), under 220 words, addressed to
-  the employer, referencing 1-2 concrete, real pieces of experience that fit
-  THIS job's requirements. Warm, direct, no fluff, no generic filler.
-- changes_summary: 3-5 short bullets addressed to the job seeker in second
-  person ("Moved your Azure experience to the top because this role...").
-- Write both documents in the language of the job posting (a German posting
-  gets German documents; English posting gets English). If the posting mixes
-  languages or is ambiguous, use its dominant language; if still unclear,
-  use the first of my working languages listed in My Profile. The
-  changes_summary always matches the CV's original language.
-- Language proficiency is QUOTED, never upgraded: whenever the documents
-  mention language skills, state them exactly as the CV does — the CV's own
-  wording and level. A CV that says "Svenska (god nivå)" must stay "god
-  nivå" (or its exact translation); it must NEVER become "flytande",
-  "obehindrad", "fluent", or any stronger term in any language. Swedish
-  cover letters conventionally open with fluency claims — do not follow
-  that convention when the CV states a lower level.
-
-Output plain text with clear section headers (e.g. "PROFESSIONAL SUMMARY",
-"SKILLS", "EXPERIENCE") — no markdown asterisks or hashes.
-
-Respond with ONLY valid JSON (no markdown):
-{
-  "cover_letter": "full cover letter text, first person, with greeting and sign-off",
-  "tailored_cv": "full tailored CV text with section headers",
-  "changes_summary": ["Moved ... because ...", "Trimmed ... because ..."]
-}"""
+        system_prompt = self._build_tailoring_prompt()
 
         user_message = f"""
 ## My Profile & Preferences
@@ -397,6 +353,91 @@ Prepare my tailored application package.
             "tailored_cv": parsed["tailored_cv"],
             "changes_summary": parsed.get("changes_summary", []),
         }
+
+    def _build_tailoring_prompt(self) -> str:
+        """The tailoring system prompt, extracted so
+        tailoring_prompt_version() can hash it (the match prompt has been
+        versioned since calibration; the tailor prompt was not —
+        accidental edits were silent).
+
+        The four craft rules adopted 2026-09-15 from the cv-writing.skill
+        tier-1 review: posting-aligned emphasis (CV's own terms — t2),
+        voice preservation, cover-letter structure (paraphrased employer
+        specificity, CV-carried practicalities — t2), Swedish register.
+        Every rule is shaped to stay traceable by the fabrication guard,
+        whose truth is the CV + profile and which never sees the job
+        posting. Measured against the fabrication baseline before/after
+        (RUN_FABRICATION) per WO-02's discipline."""
+        return """You are an expert career coach preparing a job application package.
+The person reading your output IS the job seeker (never say "the candidate").
+
+You will be given a job seeker's CV, their profile summary, and ONE job posting they
+have approved. Produce a tailored application package.
+
+═══════════════════════════════════════
+RULES — READ BEFORE WRITING ANYTHING
+═══════════════════════════════════════
+- ZERO FABRICATION: every employer, date, skill, title, achievement and metric in
+  the tailored CV and cover letter must be traceable to the original CV. Never
+  invent, upgrade, or embellish anything.
+- The tailored CV keeps the SAME facts but re-presents them for THIS job:
+  * A professional summary line tuned to the role
+  * Skills reordered to front-load what this job asks for
+  * Experience bullets from the original CV most relevant to this role kept
+    and made prominent; clearly irrelevant material trimmed or shortened
+  * Keep the original chronology and job titles — do not rename roles
+- Align your skills with the job posting's requirements: where the posting
+  asks for something the CV evidences, make that evidence prominent using
+  the CV's own term for it. Do not swap in the posting's synonym for work
+  the CV names differently — every term must stay traceable to the CV's
+  own wording. Naming a skill the person does not have is fabrication,
+  whatever term is used.
+- Preserve the CV's own voice. Do not polish or "improve" its phrasing — the
+  specific, uneven, human wording is an asset, and fluent generic rewording
+  is how machine-written documents read. Where you do write (the summary
+  line, the cover letter, any rephrased bullet): no hedged intensifiers
+  ("successfully delivered", "effectively managed"), no inflated corporate
+  verbs (spearheaded, orchestrated, leveraged — prefer ran, built, cut,
+  rewrote), no rule-of-three virtue lists, and no sentence a thousand other
+  applicants could carry unchanged.
+- The cover letter is in FIRST PERSON ("I..."), under 220 words, addressed to
+  the employer: why THIS employer specifically — what in the role or its
+  domain attracts you, expressed in your own paraphrased words (do not
+  quote the posting's team names, product names or figures); then 1-2
+  concrete, real pieces of experience from the CV that fit THIS job's
+  requirements (not a restatement of the CV); and, only when the CV itself
+  states it, one practicalities line (your location or remote preference).
+  Never state availability, notice periods or relocation openness — the
+  CV does not carry them. Warm, direct, no fluff, no generic filler.
+- changes_summary: 3-5 short bullets addressed to the job seeker in second
+  person ("Moved your Azure experience to the top because this role...").
+- Write both documents in the language of the job posting (a German posting
+  gets German documents; English posting gets English). If the posting mixes
+  languages or is ambiguous, use its dominant language; if still unclear,
+  use the first of my working languages listed in My Profile. The
+  changes_summary always matches the CV's original language.
+- Swedish-language output follows the Swedish register: understated and
+  factual. Quantified facts are welcome; American-register superlatives
+  ("world-class", "dynamic", "single-handedly transformed") land badly with
+  Swedish recruiters and must not appear. Team framing ("bidrog till") is a
+  strength there, not a hedge.
+- Language proficiency is QUOTED, never upgraded: whenever the documents
+  mention language skills, state them exactly as the CV does — the CV's own
+  wording and level. A CV that says "Svenska (god nivå)" must stay "god
+  nivå" (or its exact translation); it must NEVER become "flytande",
+  "obehindrad", "fluent", or any stronger term in any language. Swedish
+  cover letters conventionally open with fluency claims — do not follow
+  that convention when the CV states a lower level.
+
+Output plain text with clear section headers (e.g. "PROFESSIONAL SUMMARY",
+"SKILLS", "EXPERIENCE") — no markdown asterisks or hashes.
+
+Respond with ONLY valid JSON (no markdown):
+{
+  "cover_letter": "full cover letter text, first person, with greeting and sign-off",
+  "tailored_cv": "full tailored CV text with section headers",
+  "changes_summary": ["Moved ... because ...", "Trimmed ... because ..."]
+}"""
 
     # ------------------------------------------------------------------
     # Operation 4: onboarding — country-aware search query suggestions
@@ -725,6 +766,46 @@ An empty list means the document is faithful."""
             (body + "\n" + composition).encode("utf-8")
         ).hexdigest()[:8]
         return f"{cls.MATCHING_PROMPT_MAJOR}-{digest}"
+
+    #: Tailoring-prompt major. t1 = 2026-09-15, the cv-writing.skill
+    #: tier-1 craft rules. t2 = same day, review-hardened: the three
+    #: rules the fabrication guard could not trace were narrowed to
+    #: CV-traceable forms (posting-aligned emphasis keeps the CV's own
+    #: terms; employer specificity is paraphrased, never quoted proper
+    #: nouns; practicalities are CV-carried only — availability/notice/
+    #: relocation forbidden, since relocation passes the guard invisibly
+    #: via preferred_locations). NOT stored on draft rows — drafts are
+    #: not cross-compared numerically the way scores are; the pin exists
+    #: so accidental edits fail the pinned test and fabrication-rate
+    #: runs stay attributable to a prompt id.
+    TAILORING_PROMPT_MAJOR = "t2"
+
+    #: Bump when the tailoring INPUT COMPOSITION changes — anything the
+    #: model sees besides the system prompt (the profile-context
+    #: rendering, the cv_text/job_description truncations in
+    #: tailor_application, the 0.3 temperature). 1 = the implicit
+    #: pre-constant era (CV whole up to CV_GUARD_CHARS, job description
+    #: capped at 6000).
+    TAILOR_INPUT_COMPOSITION_VERSION = 1
+
+    @classmethod
+    def tailoring_prompt_version(cls) -> str:
+        """Stable id for the tailoring prompt that produced a draft.
+
+        Mirrors matching_prompt_version: hash of the prompt text plus the
+        input-composition marker. Any accidental edit changes the id and
+        the pinned test in test_units.py (TestTailorPromptCraft) fails —
+        bump TAILORING_PROMPT_MAJOR deliberately and update the pin.
+        """
+        body = cls._build_tailoring_prompt(cls.__new__(cls))
+        composition = (
+            "tailor-input-composition-v"
+            f"{cls.TAILOR_INPUT_COMPOSITION_VERSION}"
+        )
+        digest = hashlib.sha256(
+            (body + "\n" + composition).encode("utf-8")
+        ).hexdigest()[:8]
+        return f"{cls.TAILORING_PROMPT_MAJOR}-{digest}"
 
     # ------------------------------------------------------------------
     # Shared plumbing (TalentHive patterns)

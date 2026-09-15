@@ -2506,8 +2506,19 @@ class TestLiveCatchFixturesLoadBearing:
         assert snapshots, "no live_catch fixtures on disk — the catches are gone"
         # EACH catch is individually load-bearing: deleting one snapshot
         # (as happened during the baseline rerun) must fail here, not just
-        # emptying the directory. New catches append to this set.
-        expected = {"live_catch_580.json", "live_catch_583.json"}
+        # emptying the directory. New catches append to this set —
+        # version-suffixed since 2026-09-15 (a run overwrote the 2026-08-28
+        # fixtures by job id and this test stayed green because it checks
+        # filenames, not content; the harness now names snapshots
+        # live_catch_<id>_<prompt-version>.json and refuses to overwrite).
+        expected = {
+            "live_catch_580.json", "live_catch_583.json",  # 2026-08-28 era
+            "live_catch_583_pre-t1.json",                  # 2026-09-15 pre-t1
+            "live_catch_300_t2-95af0d8b.json",             # 2026-09-15 t2
+            "live_catch_316_t2-95af0d8b.json",
+            "live_catch_342_t2-95af0d8b.json",
+            "live_catch_580_t2-95af0d8b.json",
+        }
         present = {s_.name for s_ in snapshots}
         assert expected <= present, (
             f"recorded catches missing from disk: {expected - present} — "
@@ -4618,6 +4629,125 @@ class TestTailorPromptLanguageRule:
         prompt = captured["system"]
         assert "never upgraded" in prompt
         assert "god nivå" in prompt and "obehindrad" in prompt
+
+
+#: The tailoring prompt in force since the cv-writing.skill craft
+#: adoption (t1, 2026-09-15) and its same-day review hardening (t2:
+#: the three guard-untraceable rules narrowed to CV-traceable forms).
+#: If the prompt text changes, AIService.tailoring_prompt_version()
+#: changes and the pinned test fails — bump DELIBERATELY and re-run
+#: RUN_FABRICATION before/after (WO-02).
+TAILORED_PROMPT_VERSION = "t2-95af0d8b"
+
+
+class TestTailorPromptCraft:
+    """2026-09-15, cv-writing.skill tier 1: four craft rules mined from the
+    packaged cv-writing skill (posting-aligned emphasis, anti-AI-tell
+    register, cover-letter structure, Swedish register), plus a
+    prompt-version pin — the match prompt has had one since calibration;
+    the tailor prompt had none, so accidental edits were silent. The
+    alignment and structure rules are t2-hardened: every rule must be
+    traceable by the fabrication guard (CV + profile lexicon), which
+    never sees the job posting."""
+
+    def _captured_prompt(self, monkeypatch):
+        import json as _json
+
+        from app.services.ai_service import AIService
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        captured = {}
+
+        def fake_complete(system_prompt, user_message, kind="tailor"):
+            captured["system"] = system_prompt
+            return _json.dumps({
+                "cover_letter": "Hej, jag söker rollen. Med vänlig hälsning",
+                "tailored_cv": "Tony Foran — Fullstack Developer",
+                "changes_summary": [],
+            })
+
+        monkeypatch.setattr(svc, "_complete", fake_complete)
+        svc.tailor_application(
+            profile_context="p", cv_text="c", job_description="j"
+        )
+        return captured["system"]
+
+    def test_prompt_aligns_skills_using_the_cvs_own_terms(self, monkeypatch):
+        # Gate-2 lever, guard-compatible (2026-09-15 review): make the
+        # CV's own evidence for the posting's requirements prominent —
+        # never swap in posting synonyms, which the fabrication guard
+        # (CV+profile lexicon) cannot trace and the judge flags
+        prompt = self._captured_prompt(monkeypatch)
+        assert "CV's own term" in prompt
+        assert "Do not swap in the posting's synonym" in prompt
+
+    def test_prompt_preserves_the_cvs_voice(self, monkeypatch):
+        # The tailor's AI-tell failure mode is polishing the human's real
+        # phrasing into fluent generic prose, and writing cover letters in
+        # the corporate register recruiters now read as machine-written
+        prompt = self._captured_prompt(monkeypatch)
+        assert "Do not polish" in prompt
+        assert "spearheaded" in prompt, "banned-verb list is named in the prompt"
+
+    def test_prompt_structures_the_cover_letter(self, monkeypatch):
+        # Why THIS employer + one practicalities line — the parts that
+        # survive the recruiter's verification read. Review-hardened:
+        # employer specificity must be PARAPHRASED (posting proper nouns
+        # and figures trip the guard as org/metric claims — the 342
+        # fixture's "Operations Engineering Team" false positive), and
+        # practicalities are CV-carried only (availability/notice/
+        # relocation never are; relocation passes the guard invisibly
+        # because preferred_locations is guard-truth)
+        prompt = self._captured_prompt(monkeypatch)
+        assert "why THIS employer" in prompt
+        assert "practicalities" in prompt
+        assert "own paraphrased words" in prompt
+        assert "quote the posting's team names" in prompt, (
+            "posting proper nouns trip the guard as org claims"
+        )
+        assert "Never state availability" in prompt, (
+            "notice/availability/relocation are never CV-carried"
+        )
+
+    def test_prompt_sets_the_swedish_register(self, monkeypatch):
+        # Understated and factual for Swedish output; American-register
+        # superlatives land badly with Swedish recruiters
+        prompt = self._captured_prompt(monkeypatch)
+        assert "understated" in prompt
+        assert "superlatives" in prompt
+
+    def test_tailoring_prompt_version_is_pinned(self):
+        # The pin: any edit to the tailoring prompt text changes the hash
+        # and this test fails, forcing a deliberate version bump. The match
+        # prompt has had this since calibration (m2-62c2452b era); the
+        # tailor prompt had none — edits were silent.
+        from app.services.ai_service import AIService
+
+        assert AIService.tailoring_prompt_version() == TAILORED_PROMPT_VERSION, (
+            f"The tailoring prompt changed: {TAILORED_PROMPT_VERSION} -> "
+            f"{AIService.tailoring_prompt_version()}.\n"
+            "If deliberate: bump AIService.TAILORING_PROMPT_MAJOR when the "
+            "prompt's MEANING changed, and update this pin — then re-run "
+            "RUN_FABRICATION (WO-02 discipline) before trusting the rate."
+        )
+
+    def test_tailoring_version_moves_on_silent_edit(self):
+        # Prove the pin catches the bug it exists for: a silent prompt edit
+        # must change the id (revert-check for the pin itself).
+        from app.services.ai_service import AIService
+
+        original = AIService._build_tailoring_prompt
+
+        def tampered(self):
+            return original(self) + "\nAlways mention fluency in Swedish."
+
+        AIService._build_tailoring_prompt = tampered
+        try:
+            assert AIService.tailoring_prompt_version() != TAILORED_PROMPT_VERSION
+        finally:
+            AIService._build_tailoring_prompt = original
+        assert AIService.tailoring_prompt_version() == TAILORED_PROMPT_VERSION
 
 
 class TestFabricationBlockMessage:
