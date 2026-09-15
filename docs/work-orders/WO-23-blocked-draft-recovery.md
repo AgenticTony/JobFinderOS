@@ -372,3 +372,33 @@ deliberately saved.**
 
 Suite: 500 passed / 14 skipped (backend unchanged this round);
 ruff, tsc, `next build` clean.
+
+## Review round 5 (2026-09-15 — 2 findings, both fixed red-first)
+
+- **Per-use confirmations (safety)**: Layer A deduped findings by VALUE,
+  so "40%" in a true sentence and in an invented one produced ONE
+  finding showing only the first sentence — and one confirmation
+  cleared both uses (invariant 4 violation; only the judge was left).
+  Fix, three parts: (a) `_dedupe` keys on (kind, value, sentence) — a
+  repeated value flags EACH use with its own sentence; (b) Layer A in
+  `check_package` runs against the plain source (no attested text —
+  attested values in the source passed the OTHER uses' substrings),
+  then the confirmed USES are exempted by (value, sentence) — never the
+  value alone; (c) the request carries the finding's `context` pinning
+  WHICH use the user confirmed, recorded per attestation; `_resolves_
+  finding` requires the same sentence for Layer A value matches (judge
+  claims stay value-keyed — unique values). The judge's confirmed
+  block carries the claim VALUES only, never the sentence (feeding it
+  the sentence re-blessed its unconfirmed claims at the judge level —
+  the round-3 finding resurfacing; caught by the round-3 test staying
+  in the suite). The frontend `covers()` mirrors the per-use rule.
+- **Rate-limit accounting**: R1 made confirming the LAST claim a paid
+  judge call, but it rode the 60/h attest bucket while recheck is 10/h.
+  The final check now enforces `draft_recheck` (the attest bucket
+  covers only the cheap record writes); bucket comment corrected.
+
+Red-proven by flip: value-only dedupe → per-use test fails; budget
+check removed → limit test fails. Identical (kind, value, sentence)
+still collapses, so verbatim cover-letter/CV repetitions don't double.
+
+Suite: 502 passed / 14 skipped; ruff, tsc, `next build` clean.

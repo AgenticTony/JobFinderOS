@@ -2457,6 +2457,75 @@ class TestWO23BlockedDraftRecovery:
         assert r.json()["fabrication_blocked"] is True
 
     # 10. Both new rate-limit buckets are enforced
+    # Round 5, finding 1: Layer A deduped findings by VALUE, so one
+    # confirmation cleared every use of that value — including uses in
+    # sentences the user never saw. Invariant 4 violation.
+    def test_confirming_one_use_does_not_clear_its_other_uses(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        true_sentence = "I cut the ticket backlog by 40% at Svenska Spel."
+        false_sentence = "I also grew revenue by 40% year over year."
+        out = {
+            "cover_letter": f"{true_sentence} {false_sentence}",
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(monkeypatch, [out, out, out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed" and d.fabrication_blocked, d.error
+
+        findings = json.loads(d.fabrication_findings or "[]")
+        uses = [f for f in findings if f["value"] == "40%"]
+        assert len(uses) == 2, (
+            f"a repeated value must flag EACH use with its own sentence, "
+            f"got {uses}"
+        )
+        contexts = {f["context"] for f in uses}
+        assert contexts == {true_sentence, false_sentence}, contexts
+
+        # The user confirms the use they saw as true (its sentence)…
+        d2 = attest_claim(db, d, "40%", save_to_profile=False,
+                          context=true_sentence, profile=p)
+        # …and the made-up revenue use must STILL block (judge off: this
+        # is Layer A alone; the confirmed use is exempt, the other is not)
+        assert d2.status == "failed", (
+            "confirming one use of a value cleared uses the user never saw"
+        )
+        remaining = [f for f in json.loads(d2.fabrication_findings or "[]")
+                     if f["value"] == "40%"]
+        assert any(f["context"] == false_sentence for f in remaining), (
+            f"the unconfirmed use vanished from the panel: {remaining}"
+        )
+
+        # Confirming the second use too resolves the draft
+        d3 = attest_claim(db, d2, "40%", save_to_profile=False,
+                          context=false_sentence, profile=p)
+        assert d3.status == "ready", d3.error
+
+    # Round 5, finding 2: R1 made the confirm path a paid judge call —
+    # the final check must count against the recheck limit, not ride the
+    # 60/h attest bucket.
+    def test_attest_final_check_counts_against_recheck_limit(self, client, db, monkeypatch):
+        from app.core.ratelimit import BUCKETS
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        for _ in range(BUCKETS["draft_recheck"][0]):
+            r = client.post(f"/api/v1/applications/draft/{d.id}/recheck")
+            assert r.status_code == 200, r.text
+        # recheck bucket exhausted; the confirm's final check is a recheck
+        r = client.post(
+            f"/api/v1/applications/draft/{d.id}/attest",
+            json={"claim": "AWS Certified Solutions Architect",
+                  "save_to_profile": False},
+        )
+        assert r.status_code == 429, (
+            f"the confirm-triggered final check dodged the recheck budget: "
+            f"{r.status_code}"
+        )
+
     def test_recheck_and_attest_rate_limits(self, client, db, monkeypatch):
         from app.core.ratelimit import BUCKETS
 

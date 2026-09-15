@@ -1421,22 +1421,24 @@ function DraftCard({
   const hasDocs = Boolean(draft.cover_letter || draft.tailored_cv);
   const guardBlocked = draft.status === 'failed' && draft.fabrication_blocked && hasDocs;
   const showEditor = draft.status === 'ready' || guardBlocked;
-  // Mirrors the backend's _claims_match: a confirmation covers the
-  // extraction variants of the same credential sentence.
-  // Mirrors the backend's _resolves_finding (review fix R2): exact
-  // casefolded match, or the SAME extraction sentence with containment —
-  // containment alone let one attestation clear every claim.
-  const covers = (value: string, context: string) => {
+  // Mirrors the backend's _resolves_finding (round 5): a Layer A value
+  // resolves only the SAME use (value AND sentence) — the value's other
+  // uses, in sentences the user never saw, stay flagged. Judge findings
+  // resolve by value (unique). Variants resolve within their shared
+  // sentence by containment — containment alone was the whole-draft
+  // override (R2).
+  const covers = (kind: string, value: string, context: string) => {
     const v = value.trim().toLowerCase();
     return (draft.fabrication_attested ?? []).some((a) => {
       const c = a.claim.trim().toLowerCase();
       if (!c || !v) return false;
-      if (c === v) return true;
+      if (kind === 'judge') return c === v;
+      if (c === v) return (a.context ?? '') === context;
       return Boolean(a.context) && a.context === context && (c.includes(v) || v.includes(c));
     });
   };
   const unresolvedHigh = (draft.fabrication_findings ?? []).filter(
-    (f) => f.tier === 'high' && !covers(f.value, f.context)
+    (f) => f.tier === 'high' && !covers(f.kind, f.value, f.context)
   );
   const advisoryFindings = (draft.fabrication_findings ?? []).filter(
     (f) => f.tier === 'advisory'
@@ -1513,11 +1515,11 @@ function DraftCard({
   // (bare atom: any future "40%" passes Layer A; whole sentence: its
   // unconfirmed claims ride along). Permanent vouching goes through the
   // profile editor — typed, or the explicit whole-sentence action below.
-  const attest = async (claim: string) => {
+  const attest = async (claim: string, context?: string) => {
     setSubmitError(null);
     setBusy(`attest:${claim}`);
     try {
-      await attestDraft(draft.id, claim, false);
+      await attestDraft(draft.id, claim, false, undefined, context);
       await onChanged();
     } catch (err) {
       setSubmitError(apiErrorMessage(err));
@@ -1686,7 +1688,7 @@ function DraftCard({
                         <div className="mt-1.5 flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => attest(f.value)}
+                            onClick={() => attest(f.value, f.context)}
                             disabled={busy !== null}
                             className="inline-flex items-center gap-1 rounded-lg border border-bad/40 px-2.5 py-1 text-xs text-mid transition-colors hover:border-bad hover:text-hi disabled:opacity-40"
                           >

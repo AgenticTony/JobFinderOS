@@ -329,11 +329,15 @@ export const attestDraft = async (
   // (per-claim profile saving had no safe form; permanent vouching goes
   // through the profile editor). The backend additionally only saves a
   // fact that exactly equals the confirmed claim.
-  profileFact?: string
+  profileFact?: string,
+  // Round 5: the finding's sentence — pins WHICH flagged use of a
+  // repeated value the user confirmed. The value's other uses stay
+  // flagged.
+  context?: string
 ): Promise<ApplicationDraft> => {
   const response = await slowApi.post<ApplicationDraft>(
     `/api/v1/applications/draft/${draftId}/attest`,
-    { claim, save_to_profile: saveToProfile, profile_fact: profileFact }
+    { claim, save_to_profile: saveToProfile, profile_fact: profileFact, context }
   );
   return response.data;
 };

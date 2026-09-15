@@ -25,6 +25,10 @@ class DraftAttestRequest(BaseModel):
     # and confirm — a sentence's unconfirmed claims ("team of 12") must
     # not ride in on one confirmed atom ("40%").
     profile_fact: Optional[str] = None
+    # Round 5: the finding's sentence — pins WHICH flagged use of a
+    # repeated value the user confirmed. Absent: the first matching use
+    # (the value's other uses stay flagged).
+    context: Optional[str] = None
 
 
 class DraftResponse(BaseModel):
