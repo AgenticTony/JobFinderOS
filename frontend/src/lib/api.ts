@@ -205,6 +205,7 @@ export const updateProfile = async (prefs: Partial<{
   remote_ok: boolean;
   min_salary: string;
   exclude_keywords: string[];
+  vouched_facts: string[];
 }>): Promise<Profile> => {
   const response = await api.put<Profile>('/api/v1/profile/me', prefs);
   return response.data;
@@ -305,6 +306,38 @@ export const updateDraft = async (
   const response = await api.put<ApplicationDraft>(
     `/api/v1/applications/draft/${draftId}`,
     edits
+  );
+  return response.data;
+};
+
+// WO-23 blocked-draft recovery: run the fabrication guard over the
+// draft's CURRENT text (clean -> ready), and per-claim "This is true —
+// keep it". Confirming the LAST claim re-runs the guard on the current
+// text before ready (review fix R1) — it can take a few seconds.
+export const recheckDraft = async (draftId: number): Promise<ApplicationDraft> => {
+  const response = await slowApi.post<ApplicationDraft>(
+    `/api/v1/applications/draft/${draftId}/recheck`
+  );
+  return response.data;
+};
+
+export const attestDraft = async (
+  draftId: number,
+  claim: string,
+  saveToProfile = false,
+  // Round 4: saveToProfile defaults FALSE — our UI never sets it true
+  // (per-claim profile saving had no safe form; permanent vouching goes
+  // through the profile editor). The backend additionally only saves a
+  // fact that exactly equals the confirmed claim.
+  profileFact?: string,
+  // Round 5: the finding's sentence — pins WHICH flagged use of a
+  // repeated value the user confirmed. The value's other uses stay
+  // flagged.
+  context?: string
+): Promise<ApplicationDraft> => {
+  const response = await slowApi.post<ApplicationDraft>(
+    `/api/v1/applications/draft/${draftId}/attest`,
+    { claim, save_to_profile: saveToProfile, profile_fact: profileFact, context }
   );
   return response.data;
 };

@@ -61,6 +61,18 @@ class ApplicationDraft(Base):
     fabrication_retries = Column(Integer, default=0, nullable=False)
     fabrication_blocked = Column(Boolean, default=False, nullable=False)
 
+    # WO-23 blocked-draft recovery. fabrication_blocked is NEVER cleared
+    # on recovery — it is the raw fabrication-rate data; recovery is
+    # recorded separately, on these columns:
+    #   fabrication_attested: JSON list of {claim, at, saved_to_profile} —
+    #       claims the user personally confirmed as true ("This is true —
+    #       keep it"). Per-claim resolution, never a whole-draft override.
+    #   fabrication_resolved_at: set when the draft recovers to 'ready'
+    #       via re-check (text clean) or attestation (all high claims
+    #       confirmed). The block itself stays truthfully recorded.
+    fabrication_attested = Column(Text, nullable=True)  # JSON list
+    fabrication_resolved_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 

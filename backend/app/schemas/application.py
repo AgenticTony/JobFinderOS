@@ -15,6 +15,22 @@ class DraftUpdateRequest(BaseModel):
     tailored_cv: Optional[str] = None
 
 
+class DraftAttestRequest(BaseModel):
+    """WO-23: per-claim 'This is true — keep it' on a blocked draft."""
+    claim: str
+    save_to_profile: bool = True  # default on per the WO flow
+    # Round-2 N1: the EXPLICIT fact text to save to the profile (the UI
+    # displays it in full next to the opt-in). Absent -> nothing is
+    # saved: the backend never derives guard truth the user didn't see
+    # and confirm — a sentence's unconfirmed claims ("team of 12") must
+    # not ride in on one confirmed atom ("40%").
+    profile_fact: Optional[str] = None
+    # Round 5: the finding's sentence — pins WHICH flagged use of a
+    # repeated value the user confirmed. Absent: the first matching use
+    # (the value's other uses stay flagged).
+    context: Optional[str] = None
+
+
 class DraftResponse(BaseModel):
     id: int
     job_id: int
@@ -24,12 +40,19 @@ class DraftResponse(BaseModel):
     changes_summary: List[str] = []
     status: str  # drafting | ready | sending (transient submit claim) | submitted | failed
     error: Optional[str] = None
-    # WO-01 fabrication guard: ADVISORY findings for the review UI
-    # (technology-class; high-confidence ones never reach here — they
-    # drove regeneration or a block before the draft went ready)
+    # WO-01 fabrication guard findings. Since WO-23 the column carries
+    # tier, and a BLOCKED draft persists its high findings too (the
+    # recovery UI's content). Consumers showing the advisory panel must
+    # filter tier == 'advisory' — high items are resolved via
+    # fix-in-text, attestation, or regeneration, never shown as advisory.
     fabrication_findings: List[dict] = []
     fabrication_retries: int = 0
     fabrication_blocked: bool = False
+    # WO-23 recovery record: attested claims (never cleared) + when the
+    # draft recovered to ready. fabrication_blocked stays true through
+    # recovery — it is the raw fabrication-rate data.
+    fabrication_attested: List[dict] = []
+    fabrication_resolved_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     job: Optional[dict] = None
@@ -51,6 +74,8 @@ class DraftResponse(BaseModel):
             fabrication_findings=parse_json_list(getattr(d, "fabrication_findings", None), default=[]) or [],
             fabrication_retries=getattr(d, "fabrication_retries", 0) or 0,
             fabrication_blocked=bool(getattr(d, "fabrication_blocked", False)),
+            fabrication_attested=parse_json_list(getattr(d, "fabrication_attested", None), default=[]) or [],
+            fabrication_resolved_at=getattr(d, "fabrication_resolved_at", None),
             created_at=d.created_at,
             updated_at=d.updated_at,
             job=JobResponse.from_orm_job(d.job).model_dump() if d.job else None,

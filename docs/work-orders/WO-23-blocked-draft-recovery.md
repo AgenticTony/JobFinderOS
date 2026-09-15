@@ -1,7 +1,7 @@
 # WO-23 — Blocked-draft recovery: edit, re-check, vouch
 
 > Priority: P1 · Depends on: WO-01 (fabrication guard) ✅, WO-02 (judge) ✅
-> Status: not started · Owner decision 2026-09-11 (options A + B)
+> Status: **executed 2026-09-15** (options A + B, owner decision 2026-09-11)
 > **Touches the fabrication guard — treat as a SAFETY change.**
 
 ## Why
@@ -185,3 +185,220 @@ fail, restore) — per CLAUDE.md standard 2.
   stands (owner decision 2026-09-11: the re-check is for drafts that
   failed first time round).
 - Editing the original CV — immutable by invariant #1.
+
+## Execution record (2026-09-15)
+
+All acceptance criteria verified; 14 red-first tests in
+`TestWO23BlockedDraftRecovery` + 2 in `TestFabricationBlockMessage`
+(evidence-quoting fix), revert-checked per CLAUDE.md standard 2.
+Full suite 488 green / 14 skipped; ruff, tsc, `next build` clean.
+
+Landed as designed, plus what implementation surfaced:
+
+- **`check_package`** (draft_service) is the one implementation of
+  "check a package": Layer A + judge over given text, guard source =
+  CV + user-entered context + this draft's attestations. Generation
+  and re-check call it; the block path persists
+  `findings_as_json(high + advisory)` instead of discarding them.
+- **Attestation matching is containment, not equality** (`_claims_match`):
+  Layer A extracts up to three variant findings from one credential
+  sentence ("AWS Certified Solutions Architect" also yields "aws
+  certified" + "certified solutions architect") — a human confirms the
+  claim ONCE; the confirmation covers its variants. The UI mirrors the
+  same rule client-side.
+- **`confirmed_facts_block`** (cv_service) is the single rendering of
+  user-confirmed facts — the header sentence ("each line supports only
+  what it states") is the constraint-6 guard against blanket vouches.
+  `build_profile_context` renders vouched facts through it OUTSIDE the
+  include_derived gate; the guard source appends attestations through
+  the same function.
+- **`TAILOR_INPUT_COMPOSITION_VERSION` 1 → 2** (AI-13 discipline): the
+  vouched-facts block changes what the model can see; compositions stay
+  distinguishable for WO-02 measurement. Pin now `t2-2f8f4e86`.
+- **Evidence-quoting fix**: Swedish function words added to
+  `_CLAIM_STOPWORDS` (the Experis "under"-only matches);
+  `_cv_lines_near_claims` ranks by shared-token count (stable by CV
+  order) instead of first-two-top-down.
+- **Bounds**: strict 30×200 at the profile editor (400 back to the
+  user); LENIENT at attest — the attestation always lands, the profile
+  save is skipped past the bound (a draft must never stay blocked over
+  a list bound).
+- **Lifecycle**: vouched facts die with the profile row and attestations
+  with the draft row in the GDPR cascade; both new rate-limit buckets
+  are user-keyed so `clear_user` purges them with no code.
+- The outbound-artifact test asserts the attested claim in the email
+  body AND the exact text the employer-facing PDF was rendered from
+  (renderer-input spy — fpdf2's Unicode streams are not byte-greppable,
+  and that fragility belongs in no test).
+
+## Review round (2026-09-15, fix.md — 7 findings, all fixed)
+
+The recovery paths as first built gave ways AROUND the guard. All seven
+findings verified real and fixed; each fix's test was seen red before
+it (the full pre-fix red run + flip-based red-proofs for R1/R2 — never
+`git checkout`, per lesson #7):
+
+- **R1 (must-fix)**: attest-ready shipped text the guard never fully
+  checked — a Layer-A-blocked draft was never judged (the judge only
+  runs on a Layer-A-clean document), and edits after the block were
+  never re-checked. Fix: confirming the LAST unresolved claim re-runs
+  `check_package` on the current text (attested claims ride in the
+  source); ready only if clean, new findings surface for the same
+  resolve loop. This supersedes the WO's "no further AI call" line —
+  the final check costs one Layer A (+judge when enabled) call.
+- **R2 (must-fix)**: `_claims_match` containment let one API call
+  (`claim="e"`, or the whole pasted letter) resolve every finding — a
+  whole-draft override, exactly what the WO forbids. Fix: acceptance is
+  EXACT casefolded match to a flagged value (≤200 chars); variants
+  resolve only within the SAME extraction sentence
+  (`_resolves_finding`, attested entries record the finding's context).
+  The frontend `covers()` mirrors the same rule.
+- **R3 (must-fix)**: recheck/attest gated only on `fabrication_blocked`
+  (never cleared) — a SUBMITTED draft could be rechecked back to
+  'ready' and emailed twice. Fix: both require `status == 'failed'`;
+  a replayed attest click still no-ops idempotently before the gate.
+- **R4**: vouched facts reached the MATCH-scoring prompt via
+  `build_profile_context` default — score comparability under one
+  `MATCHING_INPUT_COMPOSITION_VERSION` broken, one job's attestation
+  shifting unrelated jobs' scores. Fix: `include_vouched=False` at the
+  matcher call site; vouched facts serve tailoring + guard only.
+- **R5**: save-to-profile stored the bare flagged atom — a vouched
+  "40%" blessed every future 40% claim via substring. Fix: the profile
+  stores the finding's CONTEXT SENTENCE (the human-meaningful unit);
+  judge-kind findings store the claim (their context is the "why").
+  Per-draft attestations stay value-based — they die with this text
+  (R6) and only scope THIS draft.
+- **R6**: the regeneration ready-path still reset
+  `fabrication_blocked = False` — constraint 4 violated, the block
+  vanished from the fabrication-rate data. Fix: never written on any
+  recovery path; regeneration also clears the replaced text's
+  attestations (their durable channel is profile.vouched_facts).
+- **R7**: the Article 20 export omitted `vouched_facts` and
+  `fabrication_attested`. Fix: both in the export payload (raw JSON
+  strings, same convention as `languages`/`search_queries`), tested
+  beside TestGDPRExportCompleteness.
+
+Suite: 495 passed / 14 skipped; ruff, tsc, `next build` clean.
+
+## Review round 2 (2026-09-15 — 3 findings, all fixed)
+
+R5's sentence save over-corrected: it vouched MORE than the user
+confirmed. All three findings verified real and fixed red-first:
+
+- **N1 (safety)**: confirming one flagged atom saved its whole context
+  sentence to `vouched_facts` — every other claim in that AI-written
+  sentence ("team of 12" beside a confirmed "40%") became permanent
+  guard truth, the R1 final check inherited it as user-confirmed, and
+  the panel's 120-char truncation meant the user could vouch text they
+  never saw. Fix: the profile save takes ONLY the explicit
+  `profile_fact` the client sends (the UI shows the FULL sentence and
+  "Will add to profile: …" before the opt-in; checkbox disabled with a
+  note past 200 chars); the backend derives nothing — `save_to_profile`
+  alone saves nothing. Tested both ways: no explicit fact → vouched
+  stays empty and the judge can still flag the sentence's other claims
+  on the same draft; explicit fact → exactly that text saves.
+- **N2**: attest accepted facts to 300 chars while the profile editor
+  rejects >200 — one long sentence blocked every later preferences
+  save (the form resends the whole list). Fix: ONE bound
+  (`VOUCHED_FACTS_MAX_CHARS`) at both write sites; round-trip test
+  (attest → PUT /profile/me → 200).
+- **N3**: R2's blanket 200-char claim cap rejected judge findings,
+  whose values are free text — "This is true — keep it" 400'd on
+  exactly what the guard listed (the original dead end, back for long
+  claims). Fix: cap removed; EXACT match to a stored flagged value is
+  the override gate (the "e"/pasted-letter attacks needed containment,
+  which is gone). Tested with a 230-char judge claim → confirm → ready.
+
+Suite: 498 passed / 14 skipped; ruff, tsc, `next build` clean.
+
+## Review round 3 (2026-09-15 — 1 finding, fixed)
+
+**N1 residual**: the round-2 backend gate was right, but the UI still
+sent the finding's full sentence as `profile_fact` by default — a plain
+"This is true — keep it" click on "40%" posted "Led a team of 12 … 40%"
+and the backend saved it before the final check, exactly what N1 was
+meant to stop. The round-2 tests only covered the raw-API path without
+a fact, missing the payload the product actually sends.
+
+Fix (all three of the reviewer's asks):
+
+- The per-claim checkbox now saves ONLY the claim itself — enforced in
+  the BACKEND: `profile_fact` is saved iff it casefold-equals the
+  confirmed claim. A sentence-shaped fact (the old UI's payload) saves
+  nothing, whatever a client sends.
+- Saving the full sentence is its own explicit action: a separate link
+  under the claim opens a confirm dialog showing the whole sentence,
+  then saves through the profile-editor channel (`PUT /profile/me`) —
+  the user-entered-facts surface, never the attest opt-in.
+- The frontend-shaped test (`test_sentence_shaped_fact_is_not_saved_
+  by_attest`) posts `profile_fact = context` exactly as the old UI did
+  and asserts: nothing lands in `vouched_facts`, the confirmed-facts
+  block in the FINAL CHECK's captured judge source lacks the sentence,
+  and the judge can still flag "team of 12". Red-proven by flipping the
+  equality gate out.
+
+Checkbox label now shows exactly what it saves ("Also add '40%' to my
+profile"); the sentence link only appears when the sentence differs
+from the claim and fits the 200-char bound.
+
+Suite: 500 passed / 14 skipped; ruff, tsc, `next build` clean.
+
+## Review round 4 (2026-09-15 — 2 findings + the design call)
+
+Round 3's claim-only checkbox recreated R5 as the product default
+(a vouched bare "40%" passes Layer A for any future 40% claim), and
+"Save … instead…" left the claim unresolved. Four rounds of per-claim
+profile saving had alternated between the two bad forms — the atom is
+too broad, the sentence carries unconfirmed claims — so the reviewer's
+stable design was adopted outright (their words: a product decision
+rather than a bug fix):
+
+**Confirming a claim resolves THIS draft only. Permanent vouching goes
+through the profile editor, as text the user typed or fully saw and
+deliberately saved.**
+
+- The per-claim checkbox is GONE. "This is true — keep it" sends
+  `save_to_profile=false` — a per-draft attestation that dies with the
+  text and never touches guard truth for other drafts. The API keeps
+  the fields (backend-gated: a fact saves only when it casefold-equals
+  the confirmed claim), but the client default is now false.
+- The whole-sentence action completes the flow: the confirm dialog
+  shows the full sentence and what it means ("used in future
+  applications and won't be flagged"), saves through `PUT /profile/me`,
+  flushes pending edits, then RE-CHECKS — the sentence is in the
+  guard's source, so a true claim resolves and the draft recovers
+  instead of dangling. Label no longer says "instead": "This whole
+  sentence is true — save it and re-check".
+
+Suite: 500 passed / 14 skipped (backend unchanged this round);
+ruff, tsc, `next build` clean.
+
+## Review round 5 (2026-09-15 — 2 findings, both fixed red-first)
+
+- **Per-use confirmations (safety)**: Layer A deduped findings by VALUE,
+  so "40%" in a true sentence and in an invented one produced ONE
+  finding showing only the first sentence — and one confirmation
+  cleared both uses (invariant 4 violation; only the judge was left).
+  Fix, three parts: (a) `_dedupe` keys on (kind, value, sentence) — a
+  repeated value flags EACH use with its own sentence; (b) Layer A in
+  `check_package` runs against the plain source (no attested text —
+  attested values in the source passed the OTHER uses' substrings),
+  then the confirmed USES are exempted by (value, sentence) — never the
+  value alone; (c) the request carries the finding's `context` pinning
+  WHICH use the user confirmed, recorded per attestation; `_resolves_
+  finding` requires the same sentence for Layer A value matches (judge
+  claims stay value-keyed — unique values). The judge's confirmed
+  block carries the claim VALUES only, never the sentence (feeding it
+  the sentence re-blessed its unconfirmed claims at the judge level —
+  the round-3 finding resurfacing; caught by the round-3 test staying
+  in the suite). The frontend `covers()` mirrors the per-use rule.
+- **Rate-limit accounting**: R1 made confirming the LAST claim a paid
+  judge call, but it rode the 60/h attest bucket while recheck is 10/h.
+  The final check now enforces `draft_recheck` (the attest bucket
+  covers only the cheap record writes); bucket comment corrected.
+
+Red-proven by flip: value-only dedupe → per-use test fails; budget
+check removed → limit test fails. Identical (kind, value, sentence)
+still collapses, so verbatim cover-letter/CV repetitions don't double.
+
+Suite: 502 passed / 14 skipped; ruff, tsc, `next build` clean.

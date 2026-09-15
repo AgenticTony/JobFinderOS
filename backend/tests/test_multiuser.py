@@ -1767,6 +1767,9 @@ class TestFabricationGuardLayerC:
             f"got {calls['n']} — the retry loop is not running"
         )
         assert d.fabrication_retries == 2
+        # Never BLOCKED: both fabrications regenerated within the retry
+        # budget. R6's never-cleared rule is about the block PATH —
+        # covered by test_regeneration_preserves_block_and_clears_attestations.
         assert d.fabrication_blocked is False
 
     def test_surviving_fabrication_blocks_and_names_the_claim(self, client, db, monkeypatch):
@@ -2106,6 +2109,906 @@ class TestJudgeWrongTypeFailsClosed:
             AIService, "_complete", staticmethod(
                 lambda s, u, temperature=0.0, kind=None: '{"unsupported": []}'))
         assert AIService.judge_fabrication(svc, "cv", "doc") == []
+
+
+class TestWO23BlockedDraftRecovery:
+    """WO-23: a guard-blocked draft is a dead end no more. The blocked
+    text and the flagged claims persist; the user edits and re-checks, or
+    attests a claim as true; vouched facts feed BOTH the generator and
+    the guard. fabrication_blocked is NEVER cleared on recovery — it is
+    the raw fabrication-rate data; recovery is recorded separately."""
+
+    # One deterministic Layer-A high finding (credential class), so
+    # attest-ready needs exactly one attestation. No judge involvement.
+    BLOCKED_OUT = {
+        "cover_letter": "AWS Certified Solutions Architect.",
+        "tailored_cv": "Erik. Python developer at Svenska Spel. "
+                       "AWS Certified Solutions Architect.",
+        "changes_summary": [],
+    }
+    CLEAN_OUT = {
+        "cover_letter": "I develop in Python at Svenska Spel.",
+        "tailored_cv": "Erik. Python developer at Svenska Spel.",
+        "changes_summary": [],
+    }
+
+    @staticmethod
+    def _seed(client, db):
+        email = f"wo23-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik. Python developer at Svenska Spel."
+        db.commit()
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                         description="A Python role.",
+                         application_email="jobs@acme.example")
+        db.add(job); db.flush()
+        db.add(MatchResult(user_id=uid, job_id=job.id, score=61,
+                           tier="good_match", decision="approved"))
+        db.commit()
+        return p, job, uid
+
+    @staticmethod
+    def _script_tailor(monkeypatch, outputs):
+        """Scripted tailor; judge stays off (conftest default)."""
+        from app.services import draft_service
+        from app.services.ai_service import AIService
+
+        calls = {"n": 0}
+        captured = []
+
+        def fake_tailor(self, profile_context, cv_text, job_description,
+                        correction=None):
+            i = min(calls["n"], len(outputs) - 1)
+            calls["n"] += 1
+            captured.append(profile_context)
+            return dict(outputs[i])
+
+        fake = AIService.__new__(AIService); fake.model = "glm-test"
+        monkeypatch.setattr(draft_service, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "tailor_application", fake_tailor)
+        monkeypatch.setattr(draft_service.settings, "FABRICATION_JUDGE",
+                            "off", raising=False)
+        return calls, captured
+
+    def _blocked(self, client, db, monkeypatch):
+        """A draft that blocked after MAX retries — documents written,
+        findings discarded (the pre-WO-23 behavior under repair)."""
+        from app.services.draft_service import create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        self._script_tailor(
+            monkeypatch, [self.BLOCKED_OUT, self.BLOCKED_OUT, self.BLOCKED_OUT])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed" and d.fabrication_blocked
+        return d, p, uid
+
+    # 1. The block persists structured tier:high findings, not None
+    def test_block_persists_structured_high_findings(self, client, db, monkeypatch):
+        import json
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        findings = json.loads(d.fabrication_findings or "[]")
+        assert any(f["tier"] == "high" and "AWS Certified" in f["value"]
+                   for f in findings), (
+            f"blocked drafts must persist their findings for the recovery "
+            f"UI — got {d.fabrication_findings!r}"
+        )
+
+    # 2. Re-check on edited-clean text -> ready; blocked stays True
+    def test_recheck_clean_text_goes_ready(self, client, db, monkeypatch):
+        from app.services.draft_service import (
+            recheck_draft,
+            save_draft_edits,
+        )
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        save_draft_edits(db, d, cover_letter=self.CLEAN_OUT["cover_letter"],
+                         tailored_cv=self.CLEAN_OUT["tailored_cv"])
+        d2 = recheck_draft(db, d, profile=p)
+        assert d2.status == "ready", (
+            f"clean text must re-check to ready, got {d2.status}: {d2.error}"
+        )
+        assert d2.fabrication_resolved_at is not None, "recovery not recorded"
+        assert d2.fabrication_blocked is True, (
+            "constraint 4: fabrication_blocked is never cleared on recovery"
+        )
+
+    def test_recheck_refuses_non_blocked_drafts(self, client, db, monkeypatch):
+        from app.services.draft_service import (
+            DraftError,
+            create_draft_for_job,
+            recheck_draft,
+        )
+
+        p, job, uid = self._seed(client, db)
+        self._script_tailor(monkeypatch, [self.CLEAN_OUT])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        try:
+            recheck_draft(db, d, profile=p)
+            raise AssertionError(
+                "recheck on a draft that never failed the guard must refuse "
+                "(WO-23 out-of-scope: today's trust model stands)"
+            )
+        except DraftError:
+            pass
+
+    # 3. Kept claim -> still failed and listed; attest -> ready
+    def test_kept_claim_stays_failed_then_attest_ready(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim, recheck_draft
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        d2 = recheck_draft(db, d, profile=p)  # claim kept in the text
+        assert d2.status == "failed", "a kept untraceable claim must keep blocking"
+        findings = json.loads(d2.fabrication_findings or "[]")
+        assert any(f["tier"] == "high" and "AWS Certified" in f["value"]
+                   for f in findings), "the panel must list what remains"
+
+        d3 = attest_claim(db, d2, "AWS Certified Solutions Architect",
+                          save_to_profile=False, profile=p)
+        assert d3.status == "ready", (
+            f"attesting the last unresolved claim must go ready, got "
+            f"{d3.status}: {d3.error}"
+        )
+        attested = json.loads(d3.fabrication_attested or "[]")
+        assert any(a["claim"] == "AWS Certified Solutions Architect"
+                   for a in attested), "the attestation is recorded"
+        assert d3.fabrication_blocked is True, "constraint 4: blocked stays"
+        assert d3.fabrication_resolved_at is not None
+
+    def test_attest_rejects_unflagged_claim(self, client, db, monkeypatch):
+        from app.services.draft_service import DraftError, attest_claim
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        try:
+            attest_claim(db, d, "Kubernetes Administrator",
+                         save_to_profile=False, profile=p)
+            raise AssertionError(
+                "attesting a claim the guard never flagged must refuse — "
+                "per-claim resolution, not a whole-draft override"
+            )
+        except DraftError:
+            pass
+
+    def test_attest_is_idempotent(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        claim = "AWS Certified Solutions Architect"
+        d2 = attest_claim(db, d, claim, save_to_profile=True,
+                          profile_fact=claim, profile=p)
+        # A double click replays the same claim — no error, no duplicate.
+        d3 = attest_claim(db, d2, claim, save_to_profile=True,
+                          profile_fact=claim, profile=p)
+        attested = json.loads(d3.fabrication_attested or "[]")
+        assert sum(1 for a in attested if a["claim"] == claim) == 1, (
+            f"double-click attestation duplicated the record: {attested}"
+        )
+        vouched = json.loads(p.vouched_facts or "[]")
+        assert vouched.count(claim) == 1, (
+            f"vouched facts duplicated: {vouched}"
+        )
+
+    # 4. An attested claim reaches the outbound artifacts (email payload
+    #    text + the cover-letter PDF rendered for the employer)
+    def test_attested_claim_reaches_outbound_artifacts(self, client, db, monkeypatch):
+        from app.core.config import settings
+        from app.services import draft_service as _ds
+        from app.services import pdf_service
+        from app.services.draft_service import attest_claim, submit_draft
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        claim = "AWS Certified Solutions Architect"
+        d = attest_claim(db, d, claim, save_to_profile=False,
+                         profile=p)
+        assert d.status == "ready"
+
+        monkeypatch.setattr(settings, "RESEND_API_KEY", "test-key")
+        monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "apply@jobfinderos.test")
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)
+        sent = {}
+        pdf_inputs = []
+        real_pdf = pdf_service.cover_letter_pdf
+
+        def spy_pdf(cover_letter, applicant_name):
+            pdf_inputs.append(cover_letter)
+            return real_pdf(cover_letter, applicant_name)
+
+        monkeypatch.setattr(_ds.pdf_service, "cover_letter_pdf", spy_pdf)
+
+        class _Emails:
+            @staticmethod
+            def send(params):
+                sent.update(params)
+                return {"id": "msg_test"}
+
+        monkeypatch.setitem(__import__("sys").modules, "resend",
+                            type("R", (), {"Emails": _Emails, "api_key": None}))
+        application = submit_draft(db, d, "email", p, user_id=uid)
+        assert application.status == "sent", application.error
+        assert claim in (sent.get("text") or ""), (
+            "the attested (user-confirmed) claim must reach the email body"
+        )
+        assert pdf_inputs and claim in pdf_inputs[0], (
+            "the employer-facing cover-letter PDF must be RENDERED from the "
+            "claim-bearing text — an attestation that vanishes from the "
+            "shipped document defeats the whole flow"
+        )
+        assert any("Cover Letter" in a["filename"]
+                   for a in sent.get("attachments", [])), (
+            "the cover letter attachment is missing from the payload"
+        )
+
+    # 5. An unresolved claim -> submit 400
+    def test_unresolved_claim_submit_400(self, client, db, monkeypatch):
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        r = client.post(f"/api/v1/applications/draft/{d.id}/submit",
+                        json={"method": "browser"})
+        assert r.status_code == 400, (
+            f"submit on a still-blocked draft must 400, got {r.status_code}"
+        )
+
+    # 6. A vouched fact reaches the tailoring prompt AND the guard's
+    #    source — asserted on one run (the producer->consumer boundary)
+    def test_vouched_fact_reaches_prompt_and_guard(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        p.vouched_facts = json.dumps(["Microsoft Office, daily use for 20 years"])
+        db.commit()
+        with_office = dict(
+            self.CLEAN_OUT,
+            cover_letter=(self.CLEAN_OUT["cover_letter"]
+                          + " I use Microsoft Office, daily use for 20 years."),
+            tailored_cv=(self.CLEAN_OUT["tailored_cv"]
+                         + " Microsoft Office, daily use for 20 years."),
+        )
+        calls, captured = self._script_tailor(monkeypatch, [with_office])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "ready", (
+            f"a vouched fact the guard still flags makes recovery a lie: "
+            f"{d.error}"
+        )
+        assert any("Microsoft Office" in c for c in captured), (
+            "the vouched fact never reached the tailoring prompt — the AI "
+            "can never use it (guard-only feed)"
+        )
+
+    # 7. A blanket vouched fact does not clear an unrelated invented claim
+    def test_blanket_vouch_does_not_clear_unrelated_claim(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        p.vouched_facts = json.dumps(
+            ["Everything in my applications is true"])
+        db.commit()
+        self._script_tailor(
+            monkeypatch, [self.BLOCKED_OUT, self.BLOCKED_OUT, self.BLOCKED_OUT])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed" and d.fabrication_blocked, (
+            "a blanket vouched fact silently disabled the guard for the "
+            "AI's own fabrications — a fact is a fact, not a verdict"
+        )
+
+    # 8. Tenancy: re-check / attest on another user's draft -> 404;
+    #    attest never writes another user's profile
+    def test_tenancy_recheck_attest(self, client, db, monkeypatch):
+        d, p, a_uid = self._blocked(client, db, monkeypatch)
+        email_b = f"wo23b-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email_b)
+        _auth_client(client, email_b)
+        r = client.post(f"/api/v1/applications/draft/{d.id}/recheck")
+        assert r.status_code == 404, f"cross-tenant recheck leaked: {r.status_code}"
+        r = client.post(f"/api/v1/applications/draft/{d.id}/attest",
+                        json={"claim": "AWS Certified Solutions Architect",
+                              "save_to_profile": True})
+        assert r.status_code == 404, f"cross-tenant attest leaked: {r.status_code}"
+        # B's profile must stay empty of A's claims
+        from app.models import User as UserModel
+
+        b_row = db.query(UserModel).filter(UserModel.email == email_b).first()
+        b_profile = db.query(Profile).filter(
+            Profile.user_id == b_row.id).first()
+        import json as _json
+        assert _json.loads(b_profile.vouched_facts or "[]") == [], (
+            "attest wrote the claim into ANOTHER user's profile"
+        )
+
+    # 9. A recovered draft's API response separates advisory findings
+    #    from attested claims (the ready-card panel filters on this)
+    def test_recovered_response_separates_advisory_and_attested(self, client, db, monkeypatch):
+
+        from app.services.draft_service import attest_claim
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        claim = "AWS Certified Solutions Architect"
+        d = attest_claim(db, d, claim, save_to_profile=False,
+                         profile=p)
+        r = client.get(f"/api/v1/applications/draft/{d.id}")
+        assert r.status_code == 200
+        body = r.json()
+        assert any(a["claim"] == claim
+                   for a in body["fabrication_attested"]), (
+            "the attested list is how the UI tells confirmed from advisory"
+        )
+        assert body["fabrication_resolved_at"] is not None
+
+    def test_recheck_route_happy_path(self, client, db, monkeypatch):
+        from app.services.draft_service import save_draft_edits
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        save_draft_edits(db, d, cover_letter=self.CLEAN_OUT["cover_letter"],
+                         tailored_cv=self.CLEAN_OUT["tailored_cv"])
+        r = client.post(f"/api/v1/applications/draft/{d.id}/recheck")
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "ready"
+        assert r.json()["fabrication_blocked"] is True
+
+    # 10. Both new rate-limit buckets are enforced
+    # Round 5, finding 1: Layer A deduped findings by VALUE, so one
+    # confirmation cleared every use of that value — including uses in
+    # sentences the user never saw. Invariant 4 violation.
+    def test_confirming_one_use_does_not_clear_its_other_uses(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        true_sentence = "I cut the ticket backlog by 40% at Svenska Spel."
+        false_sentence = "I also grew revenue by 40% year over year."
+        out = {
+            "cover_letter": f"{true_sentence} {false_sentence}",
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(monkeypatch, [out, out, out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed" and d.fabrication_blocked, d.error
+
+        findings = json.loads(d.fabrication_findings or "[]")
+        uses = [f for f in findings if f["value"] == "40%"]
+        assert len(uses) == 2, (
+            f"a repeated value must flag EACH use with its own sentence, "
+            f"got {uses}"
+        )
+        contexts = {f["context"] for f in uses}
+        assert contexts == {true_sentence, false_sentence}, contexts
+
+        # The user confirms the use they saw as true (its sentence)…
+        d2 = attest_claim(db, d, "40%", save_to_profile=False,
+                          context=true_sentence, profile=p)
+        # …and the made-up revenue use must STILL block (judge off: this
+        # is Layer A alone; the confirmed use is exempt, the other is not)
+        assert d2.status == "failed", (
+            "confirming one use of a value cleared uses the user never saw"
+        )
+        remaining = [f for f in json.loads(d2.fabrication_findings or "[]")
+                     if f["value"] == "40%"]
+        assert any(f["context"] == false_sentence for f in remaining), (
+            f"the unconfirmed use vanished from the panel: {remaining}"
+        )
+
+        # Confirming the second use too resolves the draft
+        d3 = attest_claim(db, d2, "40%", save_to_profile=False,
+                          context=false_sentence, profile=p)
+        assert d3.status == "ready", d3.error
+
+    # Round 5, finding 2: R1 made the confirm path a paid judge call —
+    # the final check must count against the recheck limit, not ride the
+    # 60/h attest bucket.
+    def test_attest_final_check_counts_against_recheck_limit(self, client, db, monkeypatch):
+        from app.core.ratelimit import BUCKETS
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        for _ in range(BUCKETS["draft_recheck"][0]):
+            r = client.post(f"/api/v1/applications/draft/{d.id}/recheck")
+            assert r.status_code == 200, r.text
+        # recheck bucket exhausted; the confirm's final check is a recheck
+        r = client.post(
+            f"/api/v1/applications/draft/{d.id}/attest",
+            json={"claim": "AWS Certified Solutions Architect",
+                  "save_to_profile": False},
+        )
+        assert r.status_code == 429, (
+            f"the confirm-triggered final check dodged the recheck budget: "
+            f"{r.status_code}"
+        )
+
+    def test_recheck_and_attest_rate_limits(self, client, db, monkeypatch):
+        from app.core.ratelimit import BUCKETS
+
+        assert BUCKETS["draft_recheck"][0] == 10
+        assert BUCKETS["draft_attest"][0] == 60
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        # recheck: hammer past 10 (handler 400s — not blocked — but the
+        # bucket counts every attempt BEFORE the handler runs)
+        codes = set()
+        for _ in range(BUCKETS["draft_recheck"][0] + 1):
+            codes.add(client.post(
+                f"/api/v1/applications/draft/{d.id}/recheck").status_code)
+        assert 429 in codes, f"draft_recheck bucket never fired: {codes}"
+        # attest: bogus claim 400s each time; the 61st attempt must 429
+        codes = set()
+        for _ in range(BUCKETS["draft_attest"][0] + 1):
+            codes.add(client.post(
+                f"/api/v1/applications/draft/{d.id}/attest",
+                json={"claim": "never flagged", "save_to_profile": False},
+            ).status_code)
+        assert 429 in codes, f"draft_attest bucket never fired: {codes}"
+
+    # ----------------------------------------------------------------
+    # Review fixes (2026-09-15, fix.md) — the recovery paths gave ways
+    # AROUND the guard. Each test below was written before its fix and
+    # seen red.
+    # ----------------------------------------------------------------
+
+    def _script_judge(self, monkeypatch, ds, outputs):
+        """Judge scripted ON (opt-in), outputs consumed in order — the
+        attest-triggered final check must actually judge."""
+        from app.services.ai_service import AIService
+
+        calls = {"n": 0}
+
+        def fake_judge(self_, source_of_truth, tailored_text):
+            i = min(calls["n"], len(outputs) - 1)
+            calls["n"] += 1
+            return [dict(x) for x in outputs[i]]
+
+        fake = AIService.__new__(AIService); fake.model = "glm-test"
+        monkeypatch.setattr(ds, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(AIService, "judge_fabrication", fake_judge)
+        monkeypatch.setattr(ds.settings, "FABRICATION_JUDGE", "on",
+                            raising=False)
+        return calls
+
+    # R1: attest-ready must run the guard on the CURRENT text — a draft
+    # blocked by Layer A was never judged, and text edited after the
+    # block was never re-checked either.
+    def test_attest_final_check_blocks_unjudged_fabrication(self, client, db, monkeypatch):
+        import json
+
+        from app.services import draft_service as ds
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        blocked_plus = dict(
+            self.BLOCKED_OUT,
+            cover_letter=(self.BLOCKED_OUT["cover_letter"]
+                          + " I use AI tools every day."),
+        )
+        self._script_tailor(
+            monkeypatch, [blocked_plus, blocked_plus, blocked_plus])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed" and d.fabrication_blocked
+
+        # The user confirms the flagged Layer A claim. The judge (now on)
+        # catches the semantic claim Layer A blocked BEFORE it ever ran.
+        catch = [{"claim": "I use AI tools every day", "why": "not in the CV"}]
+        j_calls = self._script_judge(monkeypatch, ds, [catch])
+        d2 = attest_claim(db, d, "AWS Certified Solutions Architect",
+                          save_to_profile=False, profile=p)
+        assert d2.status == "failed", (
+            "attest-ready shipped text the judge never saw — the final "
+            "attestation must run the guard on the current text"
+        )
+        assert j_calls["n"] >= 1, "the attest-triggered check never judged"
+        findings = json.loads(d2.fabrication_findings or "[]")
+        assert any("AI tools" in f["value"] for f in findings), (
+            f"the judge's catch must surface for resolution: {findings}"
+        )
+        # Confirming THAT claim too re-checks clean -> ready. The loop
+        # terminates: each confirmation feeds the guard's source.
+        self._script_judge(monkeypatch, ds, [[]])
+        d3 = attest_claim(db, d2, "I use AI tools every day",
+                          save_to_profile=False, profile=p)
+        assert d3.status == "ready", (
+            f"all claims confirmed + clean re-check must go ready: {d3.error}"
+        )
+        assert d3.fabrication_blocked is True
+
+    # R2: exact-match acceptance — "e" or the whole cover letter must not
+    # clear every claim (whole-draft override through the API)
+    def test_attest_rejects_short_and_document_length_claims(self, client, db, monkeypatch):
+        from app.services.draft_service import DraftError, attest_claim
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        for attack in ("e", (d.cover_letter or "")):
+            try:
+                out = attest_claim(db, d, attack, save_to_profile=False,
+                                   profile=p)
+                raise AssertionError(
+                    f"claim {attack[:30]!r}… resolved the draft "
+                    f"({out.status}) — containment matching is a "
+                    "whole-draft override"
+                )
+            except DraftError:
+                pass
+        assert d.status == "failed", "an attack claim must not go ready"
+
+    # R3: recheck/attest only on status 'failed' — a submitted draft
+    # rechecked back to 'ready' is a second employer email
+    def test_recheck_and_attest_refuse_non_failed_status(self, client, db, monkeypatch):
+        from app.services.draft_service import (
+            DraftError,
+            attest_claim,
+            recheck_draft,
+        )
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        d.status = "submitted"
+        db.add(d); db.commit()
+        try:
+            recheck_draft(db, d, profile=p)
+            raise AssertionError("a submitted draft was rechecked to ready")
+        except DraftError:
+            pass
+        try:
+            attest_claim(db, d, "AWS Certified Solutions Architect",
+                         save_to_profile=False, profile=p)
+            raise AssertionError("a submitted draft accepted an attestation")
+        except DraftError:
+            pass
+        r = client.post(f"/api/v1/applications/draft/{d.id}/recheck")
+        assert r.status_code == 400, (
+            f"API recheck on a submitted draft must 400, got {r.status_code}"
+        )
+
+    # R5: "Also add to my profile" saves the finding's CONTEXT SENTENCE,
+    # not the bare atom — a vouched "40%" blesses every future 40% claim
+    def test_attest_saves_sentence_not_bare_token(self, client, db, monkeypatch):
+        """N1 (round 2): NEVER save more than the user confirmed. The
+        sentence reaches the profile only when the client sends it as an
+        EXPLICIT profile_fact (the UI displays it in full next to the
+        opt-in); save_to_profile alone saves nothing — a sentence the
+        user confirmed one atom of ("40%") must not vouch its other
+        claims ("team of 12") into guard truth."""
+        import json
+
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "Led a team of 12 at Svenska Spel cutting costs 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed" and d.fabrication_blocked, d.error
+        findings = json.loads(d.fabrication_findings or "[]")
+        assert any(f["value"] == "40%" for f in findings), findings
+
+        # No explicit fact: the attestation resolves the claim on THIS
+        # draft, but NOTHING reaches the profile.
+        d2 = attest_claim(db, d, "40%", save_to_profile=True, profile=p)
+        vouched = json.loads(p.vouched_facts or "[]")
+        assert vouched == [], (
+            f"save_to_profile without an explicit profile_fact invented "
+            f"guard truth the user never confirmed: {vouched}"
+        )
+        assert "team of 12" not in json.dumps(vouched), (
+            "confirming '40%' vouched the sentence's other claims"
+        )
+        assert d2.status == "ready", d2.error
+
+        # The informed path (round 3): the per-claim opt-in saves the
+        # CLAIM itself — exactly what the user confirmed. The full
+        # sentence is a separate action through the profile editor
+        # (covered by test_sentence_shaped_fact_is_not_saved_by_attest).
+        p2, job2, uid2 = self._seed(client, db)
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d3 = create_draft_for_job(db, job2, profile=p2, user_id=uid2)
+        d4 = attest_claim(db, d3, "40%", save_to_profile=True,
+                          profile_fact="40%", profile=p2)
+        assert json.loads(p2.vouched_facts or "[]") == ["40%"]
+        assert d4.status == "ready", d4.error
+
+    def test_attest_final_check_does_not_inherit_unconfirmed_sentence(self, client, db, monkeypatch):
+        """N1 corollary: without an explicit profile_fact, the R1 final
+        check's source must not carry the sentence as user-confirmed —
+        the judge can still flag its other claims on THIS draft."""
+        import json
+
+        from app.services import draft_service as ds
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "Led a team of 12 at Svenska Spel cutting costs 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+
+        catch = [{"claim": "Led a team of 12", "why": "not in the CV"}]
+        self._script_judge(monkeypatch, ds, [catch])
+        d2 = attest_claim(db, d, "40%", save_to_profile=True, profile=p)
+        assert d2.status == "failed", (
+            "the unconfirmed 'team of 12' rode through the final check as "
+            "user-confirmed truth"
+        )
+        findings = json.loads(d2.fabrication_findings or "[]")
+        assert any("team of 12" in f["value"] for f in findings), findings
+
+    # N3-round-3: the FRONTEND-shaped payload — profile_fact set to the
+    # finding's context sentence (what the old UI sent by default on a
+    # plain confirm click). The per-claim opt-in may save only the claim
+    # itself; a longer text the user did not separately opt into must
+    # not reach the profile OR the final check's source.
+    def test_sentence_shaped_fact_is_not_saved_by_attest(self, client, db, monkeypatch):
+        import json
+
+        from app.services import draft_service as ds
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "Led a team of 12 at Svenska Spel cutting costs 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+
+        # Capture the judge's source on the attest-triggered final check
+        sources = []
+        from app.services.ai_service import AIService
+
+        def fake_judge(self_, source_of_truth, tailored_text):
+            sources.append(source_of_truth)
+            return [{"claim": "Led a team of 12", "why": "not in the CV"}]
+
+        fake = AIService.__new__(AIService); fake.model = "glm-test"
+        monkeypatch.setattr(ds, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(AIService, "judge_fabrication", fake_judge)
+        monkeypatch.setattr(ds.settings, "FABRICATION_JUDGE", "on",
+                            raising=False)
+
+        # The old UI's payload: the whole sentence as the fact
+        d2 = attest_claim(db, d, "40%", save_to_profile=True,
+                          profile_fact=sentence, profile=p)
+        vouched = json.loads(p.vouched_facts or "[]")
+        assert vouched == [], (
+            f"a sentence-shaped profile_fact rode through the per-claim "
+            f"opt-in: {vouched}"
+        )
+        assert "team of 12" not in json.dumps(vouched)
+        assert sources, "the final check never ran"
+        confirmed_block = [
+            src for src in sources
+            if "Facts the user has personally confirmed" in src
+        ]
+        assert not any("team of 12" in src for src in confirmed_block), (
+            "the unconfirmed sentence reached the final check's source as "
+            "user-confirmed truth"
+        )
+        assert d2.status == "failed", (
+            "the judge must still be able to flag the sentence's other "
+            "claims"
+        )
+        attested = json.loads(d2.fabrication_attested or "[]")
+        assert attested and attested[0]["saved_to_profile"] is False
+
+    def test_attest_saves_only_the_claim_itself(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "I cut the ticket backlog by 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        d2 = attest_claim(db, d, "40%", save_to_profile=True,
+                          profile_fact="40%", profile=p)
+        assert json.loads(p.vouched_facts or "[]") == ["40%"], (
+            "the per-claim opt-in must save exactly the confirmed claim"
+        )
+        assert d2.status == "ready", d2.error
+
+    # N2: ONE bound at both write sites — an attest-saved fact must never
+    # block a later profile preferences save (the form resends the list)
+    def test_attest_fact_survives_profile_round_trip(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "Led a team of 12 at Svenska Spel cutting costs 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        attest_claim(db, d, "40%", save_to_profile=True,
+                     profile_fact="40%", profile=p)
+        vouched = json.loads(p.vouched_facts or "[]")
+        assert vouched == ["40%"], "setup: the fact must save for the round-trip"
+
+        # The Profile form resends the whole list on every save — the
+        # editor's 200-char bound must accept everything attest writes.
+        r = client.put("/api/v1/profile/me", json={
+            "preferred_roles": ["Python Developer"],
+            "vouched_facts": vouched,
+        })
+        assert r.status_code == 200, (
+            f"a vouched fact attest saved now blocks every profile save: "
+            f"{r.text}"
+        )
+        assert r.json()["vouched_facts"] == vouched
+
+    # N3: judge claim values are free text and can exceed 200 chars —
+    # exact match (R2) already closes the override hole, so the blanket
+    # length cap only recreates WO-23's dead end for true long claims
+    def test_long_judge_claim_can_be_confirmed(self, client, db, monkeypatch):
+        import json
+
+        from app.services import draft_service as ds
+        from app.services.draft_service import (
+            attest_claim,
+            create_draft_for_job,
+        )
+
+        p, job, uid = self._seed(client, db)
+        long_claim = (
+            "Cover letter: 'Jag är fullstack-utvecklare' and profile "
+            "header 'Fullstack-utvecklare' imply senior fullstack "
+            "competence across the whole stack, which the CV does not "
+            "support anywhere in its experience section."
+        )
+        assert len(long_claim) > 200
+        catch = [{"claim": long_claim, "why": "not in the CV"}]
+        t_calls, _ = self._script_tailor(monkeypatch, [self.CLEAN_OUT])
+        self._script_judge(monkeypatch, ds, [catch, catch, catch])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        assert d.status == "failed" and d.fabrication_blocked, d.error
+        findings = json.loads(d.fabrication_findings or "[]")
+        assert any(f["value"] == long_claim for f in findings), findings
+
+        self._script_judge(monkeypatch, ds, [[]])
+        d2 = attest_claim(db, d, long_claim, save_to_profile=False,
+                          profile=p)
+        assert d2.status == "ready", (
+            f"confirming a >200-char flagged claim as listed must work — "
+            f"{d2.error}"
+        )
+
+    # R6: regeneration never clears fabrication_blocked (constraint 4 —
+    # raw fabrication-rate data) and drops attestations that belonged to
+    # the replaced text (their durable channel is profile.vouched_facts)
+    def test_regeneration_preserves_block_and_clears_attestations(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        self._script_tailor(
+            monkeypatch, [self.BLOCKED_OUT, self.BLOCKED_OUT, self.BLOCKED_OUT])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        d = attest_claim(db, d, "AWS Certified Solutions Architect",
+                         save_to_profile=False, profile=p)
+        assert d.status == "ready"
+
+        # Regenerate: clean output replaces the blocked text
+        self._script_tailor(monkeypatch, [self.CLEAN_OUT])
+        d2 = create_draft_for_job(db, job, profile=p, user_id=uid, force=True)
+        assert d2.status == "ready", d2.error
+        assert d2.fabrication_blocked is True, (
+            "constraint 4: regeneration is a recovery — the block stays "
+            "in the fabrication-rate data"
+        )
+        assert json.loads(d2.fabrication_attested or "[]") == [], (
+            "attestations of the replaced text must not suppress flags on "
+            "the new text"
+        )
+
+    # R4: vouched facts must NOT reach the match-scoring prompt — the
+    # WO-23 intent is tailoring + guard. Otherwise one attestation
+    # changes scores for unrelated jobs under the SAME prompt_version
+    # (m2-62c2452b), breaking AI-13 comparability.
+    def test_matcher_context_excludes_vouched_facts(self, client, db, monkeypatch):
+        import json as _json
+
+        from app.services import cv_service, matcher_service
+
+        p, job, uid = self._seed(client, db)
+        p.vouched_facts = _json.dumps(["Microsoft Office, daily use for 20 years"])
+        db.commit()
+
+        # The rendering itself: tailor/guard see the facts, matching does not
+        ctx_tailor = cv_service.build_profile_context(p)
+        ctx_matching = cv_service.build_profile_context(p, include_vouched=False)
+        assert "Microsoft Office" in ctx_tailor, (
+            "generator/guard channel lost the vouched facts"
+        )
+        assert "Microsoft Office" not in ctx_matching, (
+            "the matching context renders vouched facts"
+        )
+
+        # And the matcher actually opts out — spy on its composition call
+        # through the real loop entry (empty job list: composition runs,
+        # no AI spend)
+        seen = {}
+        real = cv_service.build_profile_context
+
+        def spy(profile, include_derived=True, include_vouched=True):
+            seen["include_vouched"] = include_vouched
+            return real(profile, include_derived=include_derived,
+                        include_vouched=include_vouched)
+
+        monkeypatch.setattr(matcher_service, "build_profile_context", spy)
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(matcher_service, "get_ai_service",
+                            lambda: SimpleNamespace(model="glm-test"))  # zero jobs: no AI spend
+        matcher_service._run_matching_loop(
+            db, [], p, uid, limit=0, max_seconds=None,
+        )
+        assert seen.get("include_vouched") is False, (
+            f"the matcher composes its context with include_vouched="
+            f"{seen.get('include_vouched')!r} — scores would silently mix "
+            "vouched-fact and non-vouched inputs under one prompt_version"
+        )
+
+    # R7: portability — user-provided vouched facts and attestations
+    # belong in the Article 20 export
+    def test_export_includes_vouched_and_attested(self, client, db, monkeypatch):
+        import json as _json
+
+        d, p, uid = self._blocked(client, db, monkeypatch)
+        from app.services.draft_service import attest_claim
+
+        d = attest_claim(db, d, "AWS Certified Solutions Architect",
+                         save_to_profile=True,
+                         profile_fact="AWS Certified Solutions Architect",
+                         profile=p)
+        assert d.status == "ready"
+
+        r = client.get("/api/v1/account/export")
+        assert r.status_code == 200, r.text
+        payload = r.json()
+        profile_out = payload.get("profile") or {}
+        vouched_out = _json.loads(profile_out.get("vouched_facts") or "[]")
+        assert any("AWS Certified Solutions Architect" in v for v in vouched_out), (
+            f"user-entered vouched facts missing from the export profile: "
+            f"{sorted(profile_out)}"
+        )
+        drafts_out = payload.get("drafts") or []
+        mine = [x for x in drafts_out if x.get("job_id") == d.job_id]
+        assert mine, "the attested draft is missing from the export"
+        attested_out = _json.loads(mine[0].get("fabrication_attested") or "[]")
+        assert any("AWS Certified" in (a.get("claim") or "")
+                   for a in attested_out), (
+            f"attestations missing from the export draft row: {mine[0]}"
+        )
 
 
 class TestUserIdOnCostRows:

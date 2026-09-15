@@ -69,6 +69,13 @@ class Profile(Base):
     # by code catches ads whose title never contains the free-text query.
     occupation_codes = Column(Text, nullable=True)
     languages = Column(Text, nullable=True)  # JSON array — languages the user works in
+    # WO-23: JSON array of strings — skills/facts the user says are true
+    # but aren't on the CV. Rendered by build_profile_context OUTSIDE the
+    # include_derived gate (user-entered, like location): the generator
+    # may use them AND the guard accepts them. The addendum to the CV,
+    # never an edit — the original CV stays immutable (invariant #1).
+    # Bounded: 30 items x 200 characters (enforced at the write sites).
+    vouched_facts = Column(Text, nullable=True)  # JSON array of strings
 
     user_id = Column(Uuid, ForeignKey("users.id"), unique=True, nullable=False, index=True)
     # is_active kept for the migration backfill only; per-user semantics

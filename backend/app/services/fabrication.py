@@ -289,7 +289,12 @@ def _dedupe(claims: List[Claim], _) -> List[Claim]:
     for c in claims:
         # RAW casefold, not _normalise: 'c#' and 'c++' both normalise to
         # 'c' and collapsed into one claim (found via the dead-entry fix)
-        key = (c.kind, c.value.casefold())
+        # Context is part of the key (WO-23 round 5): the SAME value in
+        # two sentences is TWO uses — deduping by value alone showed the
+        # panel one sentence, and one confirmation then cleared uses the
+        # user never saw. Identical (kind, value, sentence) still collapses
+        # (the cover letter and tailored CV often repeat verbatim).
+        key = (c.kind, c.value.casefold(), (c.context or "").casefold())
         if key not in seen:
             seen.add(key)
             out.append(c)

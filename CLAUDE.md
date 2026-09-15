@@ -131,7 +131,10 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
    Every job-specific version lives in its own `ApplicationDraft` row.
 2. **All AI output talks TO the job seeker** ("Your tech stack…"), never "the candidate".
 3. **Nothing is sent without explicit user approval** — approve match → review draft → send.
-4. **Zero fabrication in tailoring** — every fact must trace to the original CV.
+4. **Zero unconfirmed fabrication in tailoring** (WO-23 wording) — every
+   fact must trace to the original CV, the profile's vouched facts, or a
+   per-draft attestation. No claim ships that the user hasn't written or
+   confirmed; the AI inventing on their behalf still blocks.
 5. **Profession-agnostic platform** — queries/titles derive from each user's CV via onboarding.
 6. **Per-user data isolation** — every profile/match/draft/application lookup is scoped
    by user_id. The unsafe unscoped call is inexpressible (required keyword-only params).
@@ -157,7 +160,7 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   the model toward posting-only terms, quoted team names, or non-CV
   practicalities. Measured before/after per WO-02 discipline; rate pairs and
   residual classes in the WO-02 addendum. The tailor prompt is versioned:
-  `AIService.tailoring_prompt_version()` = `t2-95af0d8b`, pinned in
+  `AIService.tailoring_prompt_version()` = `t2-2f8f4e86` (input-composition v2: the WO-23 vouched-facts block), pinned in
   `TestTailorPromptCraft` — silent edits fail CI like the match prompt.
 - Prompt version: `AIService.matching_prompt_version()` — SHA-256 of the prompt
   text; any accidental edit changes the version and calibration tests fail

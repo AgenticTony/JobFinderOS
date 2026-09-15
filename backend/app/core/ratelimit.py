@@ -48,6 +48,13 @@ BUCKETS = {
     "hunt": (12, 3600),              # manual pipeline runs
     "match_run": (12, 3600),         # matching kicks
     "draft_prepare": (20, 3600),     # tailored packages
+    # WO-23 blocked-draft recovery: the re-check is a paid judge call
+    # (Layer A is free, the judge is not). Confirming the LAST unresolved
+    # claim runs that same final check (review round 5), so it enforces
+    # draft_recheck too — the 60/h attest bucket covers only the cheap
+    # per-claim record writes.
+    "draft_recheck": (10, 3600),     # guard re-checks (incl. attest final) per hour
+    "draft_attest": (60, 3600),      # claim confirmations per hour
     # MIG-WO2: the four auth buckets (register/login, per-email and
     # per-IP) are deleted — signup and login moved to Supabase Auth,
     # which enforces its own rate limits. These per-USER buckets are the

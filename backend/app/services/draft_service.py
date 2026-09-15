@@ -40,16 +40,20 @@ MAX_FABRICATION_RETRIES = 2
 
 # Function words only — enough to tie a claim to the CV LINE it conflicts
 # with without pretending to do semantics. Swedish + English articles,
-# pronouns, conjunctions.
+# pronouns, conjunctions, prepositions. WO-23: the 2026-09-10 Experis
+# block quoted lines that matched ONLY the preposition "under" — the
+# Swedish function words that were missing are here now.
 _CLAIM_STOPWORDS = frozenset(
     "the a an and or in of to for with my me i am is are both have has "
     "was were this that och eller i på med för att som jag är av en ett "
-    "till från inte även".split()
+    "till från inte även under över inom utom genom utan mot hos när då "
+    "både alla sin sina deras vår era detta dessa sedan redan".split()
 )
 
 
 def _cv_lines_near_claims(cv_text: str, high, max_lines: int = 2) -> list:
-    """CV lines sharing an informative token with an unsupported claim.
+    """CV lines sharing informative tokens with an unsupported claim,
+    RANKED by overlap (WO-23 fix).
 
     The live case this exists for (2026-09-02, owner account): the letter
     claimed "Jag är obehindrad i både svenska och engelska" while the CV
@@ -57,6 +61,11 @@ def _cv_lines_near_claims(cv_text: str, high, max_lines: int = 2) -> list:
     naming only the claim read as "the guard didn't see my languages".
     Quoting the conflicting line puts the answer on screen. Pure token
     overlap, casefolded, unicode-word tokens; bounded, no semantics.
+
+    2026-09-10 (fixed in WO-23): taking the first two matches top-down let
+    a one-token line ("Under studietiden…") crowd out the line that
+    actually carried the conflict — matches now rank by shared-token
+    count, ties broken by CV order (stable sort).
     """
     import re
 
@@ -68,15 +77,20 @@ def _cv_lines_near_claims(cv_text: str, high, max_lines: int = 2) -> list:
         claim_tokens |= toks(str(getattr(c, "value", ""))) - _CLAIM_STOPWORDS
     if not claim_tokens:
         return []
-    out: list = []
-    for line in cv_text.splitlines():
+    scored: list = []
+    for order, line in enumerate(cv_text.splitlines()):
         line = line.strip()
-        if len(line) < 8 or line in out:
+        if len(line) < 8:
             continue
-        if toks(line) & claim_tokens:
-            out.append(line if len(line) <= 140 else line[:137] + "...")
-            if len(out) >= max_lines:
-                break
+        overlap = len(toks(line) & claim_tokens)
+        if overlap:
+            trimmed = line if len(line) <= 140 else line[:137] + "..."
+            scored.append((-overlap, order, trimmed))
+    scored.sort()
+    out: list = []
+    for _, _, trimmed in scored[:max_lines]:
+        if trimmed not in out:
+            out.append(trimmed)
     return out
 
 
@@ -93,7 +107,7 @@ def fabrication_block_error(cv_text: str, high) -> str:
     if near:
         quoted = "; ".join(f'"{line}"' for line in near)
         msg += f" Your CV says: {quoted}."
-    return msg + " Edit your CV to include them, or regenerate."
+    return msg + " Fix or confirm them below, or regenerate."
 
 
 def get_ai_service_with_judge():
@@ -102,6 +116,106 @@ def get_ai_service_with_judge():
     if getattr(settings, "FABRICATION_JUDGE", "on") == "off":
         return None
     return get_ai_service()
+
+
+def _attested_entries(draft: ApplicationDraft) -> list:
+    """Attestation records on THIS draft: {claim, context, at,
+    saved_to_profile}. They scope the guard (a confirmed use must not
+    re-flag — that is the loop the 2026-09-10 Experis block had no exit
+    from) WITHOUT clearing the value's other uses (round 5)."""
+    from app.schemas.common import parse_json_list
+
+    entries = parse_json_list(getattr(draft, "fabrication_attested", None))
+    return [e for e in entries if isinstance(e, dict) and e.get("claim")]
+
+
+def _finding_view(f) -> tuple:
+    """(kind, value, context) from a Claim object OR a findings-JSON
+    dict — check_package works on Claims, the recovery paths on parsed
+    JSON, and _resolves_finding serves both."""
+    if isinstance(f, dict):
+        return (str(f.get("kind", "")), str(f.get("value", "")),
+                str(f.get("context") or ""))
+    return (str(getattr(f, "kind", "")), str(getattr(f, "value", "")),
+            str(getattr(f, "context") or ""))
+
+
+def check_package(profile: Profile, job: JobPosting,
+                  cover_letter: str, tailored_cv: str,
+                  attested=()) -> tuple:
+    """WO-23 constraint 5: ONE implementation of 'check a package'.
+
+    Layer A + the production judge over the GIVEN text. Generation and
+    re-check call this same function — duplicated thresholds are what
+    dismissed 62 matcher rows on a single sample.
+
+    Round 5 (per-use confirmations): Layer A runs against the plain
+    source (CV + user-entered context — NO attested text), so a
+    repeated value flags EACH use with its own sentence; the uses the
+    user confirmed are then exempted by (value, context) — never the
+    value alone, which cleared uses the user never saw. The judge's
+    source ADDS the confirmed sentences (with the each-line-supports-
+    only-what-it-states header) so it does not re-flag what the user
+    confirmed; its source is never smaller than the generator's input
+    (2026-08-31 invariant — the Layer-A exemption is explicit and
+    per-use, functionally stronger than source text).
+
+    Returns (high, advisory) claim lists; never mutates the draft row —
+    the caller decides what a finding means (generation regenerates and
+    blocks; re-check reports and resolves). Judge transport failures
+    raise (fail-closed; the caller's except handles them).
+    """
+    from app.services.ai_service import CV_GUARD_CHARS
+    from app.services.cv_service import confirmed_facts_block
+    from app.services.fabrication import split_tiers, unsupported_claims
+
+    document = f"{cover_letter or ''}\n{tailored_cv or ''}"
+    layer_a_source = (
+        f"{profile.cv_text[:CV_GUARD_CHARS]}\n"
+        f"{build_profile_context(profile, include_derived=False)}"
+    )
+    findings = unsupported_claims(
+        layer_a_source,
+        document,
+        allowed_names=[n for n in (job.company, job.title) if n],
+    )
+    high, advisory = split_tiers(findings)
+
+    # Per-use exemption: only the (value, sentence) uses the user
+    # confirmed leave the high list. The value's other uses stay.
+    high = [c for c in high
+            if not any(_resolves_finding(a, c) for a in attested)]
+
+    # WO-02: the production judge — semantic evidence Layer A cannot
+    # see. Runs after Layer A is clean; a finding joins the
+    # high-confidence path. Kill switch: FABRICATION_JUDGE=off.
+    if not high and get_ai_service_with_judge():
+        # The confirmed block carries the CLAIM VALUES only — never the
+        # finding's sentence, which would tell the judge its unconfirmed
+        # claims ("team of 12" beside a confirmed "40%") are user-true
+        # (round-3 finding, resurfaced in round 5). Per-use scoping is
+        # the Layer A exemption above; the judge only needs to know not
+        # to re-flag the confirmed value.
+        judge_source = layer_a_source + confirmed_facts_block(
+            [str(a.get("claim", "")).strip() for a in attested])
+        judge_claims = get_ai_service_with_judge().judge_fabrication(
+            judge_source, document)
+        if judge_claims:
+            judge_high = [
+                type("JudgeClaim", (), {
+                    "value": c.get("claim", "?"),
+                    "kind": "judge", "tier": "high",
+                    "context": c.get("why", ""),
+                })() for c in judge_claims
+            ]
+            # A judge claim the user already confirmed does not re-block
+            # (judge claims are unique-valued; no per-use ambiguity).
+            high = [c for c in judge_high
+                    if not any(_resolves_finding(a, c) for a in attested)]
+    return high, advisory
+
+
+
 
 DRAFT_DIR = "uploads/drafts"
 
@@ -185,6 +299,14 @@ def create_draft_for_job(
     )
     draft.status = "drafting"
     draft.error = None
+    # Review fix R6 (2026-09-15): a regeneration REPLACES the text, so
+    # the previous text's attestations die with it — they must not
+    # suppress flags on documents they never saw. Their durable channel
+    # is profile.vouched_facts (saved at attest time by choice). The
+    # block itself is NEVER cleared (constraint 4): regeneration is a
+    # recovery, and the fabrication-rate data keeps the block.
+    draft.fabrication_attested = None
+    draft.fabrication_resolved_at = None
     # P1-5b: snapshot the CV reference this tailoring runs against. The
     # profile's path moves on re-upload; without the snapshot the send
     # path cannot know which CV the package was built from, and a
@@ -207,11 +329,11 @@ def create_draft_for_job(
         # up to MAX_FABRICATION_RETRIES; a survivor BLOCKS the draft and
         # names the untraceable claim. Advisory findings persist for the
         # review UI and never auto-act.
-        from app.services.fabrication import (
-            findings_as_json,
-            split_tiers,
-            unsupported_claims,
-        )
+        # WO-23: the check itself (source composition, Layer A, judge)
+        # lives in check_package — ONE implementation shared with
+        # re-check. Attestations on this draft ride along: a claim the
+        # user already confirmed must not re-block a regeneration.
+        from app.services.fabrication import findings_as_json
 
         correction: Optional[str] = None
         retries = 0
@@ -231,56 +353,22 @@ def create_draft_for_job(
 
             draft.changes_summary = dump_json_list(result["changes_summary"])
 
-            # The guard's source of truth must match the MODEL'S input
-            # (WO-01 review): the model saw cv_text + profile_context, so
-            # verifying against the CV alone flags facts we ourselves fed
-            # it via the summary. After the lossy-years fix, the summary
-            # is safe to include — aligning before that fix would have
-            # laundered the bad summary into 'supported'.
-            #
-            # INVARIANT (2026-08-31): the guard's source is never smaller
-            # than the generator's input. The CV is guarded BEFORE
-            # composing — slicing the composed source later (the old
-            # [:9000] in judge_fabrication) cut the profile context off
-            # long CVs entirely, and truthful claims sourced from it were
-            # flagged as fabrications: regeneration loop, blocked send,
-            # for exactly the long-master-CV users the product targets.
-            from app.services.ai_service import CV_GUARD_CHARS
-            model_input = (f"{profile.cv_text[:CV_GUARD_CHARS]}\n"
-                           f"{build_profile_context(profile, include_derived=False)}")
-            findings = unsupported_claims(
-                model_input,
-                f"{result.get('cover_letter', '')}\n{result.get('tailored_cv', '')}",
-                allowed_names=[n for n in (job.company, job.title) if n],
+            high, advisory = check_package(
+                profile, job,
+                result.get("cover_letter", ""), result.get("tailored_cv", ""),
+                attested=_attested_entries(draft),
             )
-            high, advisory = split_tiers(findings)
-
-            # WO-02: the production judge — semantic evidence Layer A
-            # cannot see. Runs after Layer A is clean (no point judging a
-            # document Layer A already rejected); a finding joins the
-            # high-confidence path: regenerate with the claim named, block
-            # after MAX retries. Kill switch: FABRICATION_JUDGE=off.
-            if not high and get_ai_service_with_judge():
-                judge_claims = get_ai_service_with_judge().judge_fabrication(
-                    model_input,
-                    f"{result.get('cover_letter', '')}\n{result.get('tailored_cv', '')}",
-                )
-                if judge_claims:
-                    high = [
-                        type("JudgeClaim", (), {
-                            "value": c.get("claim", "?"),
-                            "kind": "judge", "tier": "high",
-                            "context": c.get("why", ""),
-                        })() for c in judge_claims
-                    ]
-                    advisory = advisory  # unchanged
 
             if not high:
                 from app.schemas.common import dump_json_list as _dumps
 
                 draft.fabrication_findings = _dumps(findings_as_json(advisory))
                 draft.fabrication_retries = retries
-                draft.fabrication_blocked = False
+                # Constraint 4 (review fix R6): fabrication_blocked is
+                # never cleared on ANY recovery path — a draft that
+                # blocked once keeps the block in the fabrication-rate
+                # data even after a clean regeneration. It is False only
+                # for drafts that never blocked (column default).
                 draft.status = "ready"
                 db.add(draft)
                 db.commit()
@@ -292,7 +380,13 @@ def create_draft_for_job(
                 return draft
 
             if retries >= MAX_FABRICATION_RETRIES:
-                draft.fabrication_findings = None  # blocked — nothing to review
+                # WO-23: the findings PERSIST (high + advisory) — they are
+                # the recovery UI's content ("Why this was blocked"), and
+                # the block itself stays recorded forever.
+                from app.schemas.common import dump_json_list as _dumps
+
+                draft.fabrication_findings = _dumps(findings_as_json(
+                    high + advisory))
                 draft.fabrication_retries = retries
                 draft.fabrication_blocked = True
                 draft.status = "failed"
@@ -345,6 +439,275 @@ def save_draft_edits(
         draft.cover_letter = cover_letter
     if tailored_cv is not None:
         draft.tailored_cv = tailored_cv
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return draft
+
+
+def recheck_draft(db: Session, draft: ApplicationDraft, *, profile: Profile) -> ApplicationDraft:
+    """WO-23: run the shared guard over the draft's CURRENT text.
+
+    Clean -> 'ready' (fabrication_resolved_at set; fabrication_blocked
+    STAYS true — constraint 4). Still flagged -> stays 'failed' with the
+    remaining findings persisted for the recovery panel; each resolves by
+    fix-in-text (edit + re-check again) or by attestation.
+
+    The re-check is for drafts that failed the guard FIRST time round
+    (owner decision 2026-09-11): edits on a draft that never failed stay
+    un-checked — the guard polices AI output; what the user writes is
+    theirs.
+    """
+    if not draft.fabrication_blocked:
+        raise DraftError(
+            "Only drafts blocked by the fabrication guard can be re-checked"
+        )
+    if draft.status != "failed":
+        # Review fix R3 (2026-09-15): recovery never clears
+        # fabrication_blocked, so the flag alone let a SUBMITTED draft
+        # recheck back to 'ready' — and submit again, a second employer
+        # email. 'sending' and 'drafting' are excluded for the same
+        # reason: their owners finish first.
+        raise DraftError(
+            f"Only failed drafts can be re-checked — this one is "
+            f"'{draft.status}'"
+        )
+    if not (draft.cover_letter or draft.tailored_cv):
+        raise DraftError("No documents to check — regenerate the draft first")
+
+    job: Optional[JobPosting] = draft.job
+    if job is None:
+        job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()
+    try:
+        high, advisory = check_package(
+            profile, job, draft.cover_letter, draft.tailored_cv,
+            attested=_attested_entries(draft),
+        )
+    except Exception as e:  # noqa: BLE001 — transport failure, never a verdict
+        # The user's text is already saved (save_draft_edits); only this
+        # check failed. Record it, keep the draft failed, re-raise for 400.
+        draft.error = f"Re-check failed: {type(e).__name__}: {e}"
+        db.add(draft)
+        db.commit()
+        raise DraftError(draft.error) from e
+
+    from app.schemas.common import dump_json_list
+    from app.services.fabrication import findings_as_json
+
+    draft.fabrication_findings = dump_json_list(findings_as_json(high + advisory))
+    if not high:
+        draft.status = "ready"
+        draft.fabrication_resolved_at = utc_now()
+        draft.error = None
+        logger.info("Draft %s RECOVERED by re-check", draft.id)
+    else:
+        # stays failed; the panel shows only what remains
+        draft.status = "failed"
+        draft.error = fabrication_block_error(profile.cv_text, high)
+        logger.info(
+            "Draft %s re-check: %d claims still unresolved",
+            draft.id, len(high),
+        )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return draft
+
+
+def _norm_claim(s: str) -> str:
+    return (s or "").strip().casefold()
+
+
+def _resolves_finding(attested_entry: dict, finding) -> bool:
+    """Does a recorded attestation resolve THIS flagged finding?
+
+    Round 5 (per-use): a Layer A value match resolves ONLY the same USE
+    — the finding's sentence must equal the attested sentence. A bare
+    value match cleared uses of the value the user never saw ("40%" in
+    a true sentence and in an invented one). Judge claims resolve by
+    value alone (unique values, no use ambiguity). Variant findings
+    from one credential sentence ("AWS Certified Solutions Architect"
+    also yields "aws certified" + "certified solutions architect")
+    resolve within their shared sentence by containment — containment
+    WITHOUT the shared sentence is the whole-draft-override hole (a
+    one-letter claim or a pasted document; review fix R2, 2026-09-15).
+    """
+    kind, fv, fc = _finding_view(finding)
+    av = _norm_claim(str(attested_entry.get("claim", "")))
+    ac = (attested_entry.get("context") or "").strip()
+    nv = _norm_claim(fv)
+    if not av or not nv:
+        return False
+    if kind == "judge":
+        return av == nv
+    if av == nv:
+        return ac == fc  # the SAME use — value AND sentence
+    return bool(ac) and bool(fc) and ac == fc and (av in nv or nv in av)
+
+
+def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
+                 save_to_profile: bool, *, profile: Profile,
+                 profile_fact: Optional[str] = None,
+                 context: Optional[str] = None,
+                 user_id=None) -> ApplicationDraft:
+    """WO-23: record the user's 'This is true — keep it' for ONE flagged
+    claim. Per-claim resolution — never a whole-draft override.
+
+    Review fixes (2026-09-15):
+    - R3: only status 'failed' drafts accept attestations — a submitted
+      draft must never be confirmable back to 'ready' (second send).
+    - R2: the claim must EXACTLY match a currently-flagged value
+      (casefolded). Variants resolve via the shared extraction sentence,
+      not global containment.
+    - R1: when the last unresolved claim is confirmed, the guard runs
+      AGAIN on the current text before 'ready'. A draft blocked by
+      Layer A was never judged (the judge only runs on a Layer-A-clean
+      document), and text edited after the block was never re-checked —
+      attest-ready without a final check shipped exactly that.
+    - R5 (round-2 N1): the profile save takes ONLY the explicit
+      profile_fact the client sends (the UI displays it in full next to
+      the opt-in), bounded by the SAME 200-char bound as the profile
+      editor (N2 — an attest-saved fact must never block a later
+      preferences save). The backend derives nothing: confirming one
+      atom of a sentence ("40%") must not vouch the sentence's other
+      claims ("team of 12") into guard truth.
+    - N3: no blanket claim length cap — judge claim values are free
+      text; EXACT match to a stored flagged value is the override gate,
+      and rejecting what the guard itself listed recreates WO-23's
+      original dead end.
+
+    Round 5: confirmations are PER-USE — the claim's sentence (context)
+    pins WHICH flagged use is confirmed; a value match alone would clear
+    the value's other uses, in sentences the user never saw. The final
+    check counts against the draft_recheck budget (it runs the judge).
+    Per-draft attestations die with this text (regeneration clears
+    them) and only suppress flags on THIS draft. fabrication_blocked is
+    never cleared on any recovery path.
+    """
+    from app.schemas.common import dump_json_list, parse_json_list
+    from app.services.cv_service import (
+        VOUCHED_FACTS_MAX_CHARS,
+        VOUCHED_FACTS_MAX_ITEMS,
+    )
+
+    if not draft.fabrication_blocked:
+        raise DraftError(
+            "Only drafts blocked by the fabrication guard can be attested"
+        )
+    attested = [a for a in parse_json_list(
+        getattr(draft, "fabrication_attested", None)) if isinstance(a, dict)]
+    ctx = (context or "").strip()
+    if any(_norm_claim(str(a.get("claim", ""))) == _norm_claim(claim)
+           and (not ctx or not a.get("context")
+                or str(a.get("context")) == ctx)
+           for a in attested):
+        # Replayed click — idempotent no-op BEFORE the status gate: the
+        # first click may have recovered the draft to 'ready' (or it may
+        # since have been submitted); a replay must not error and must
+        # not mutate anything.
+        return draft
+    if draft.status != "failed":
+        raise DraftError(
+            "Only failed drafts can be confirmed — this one is "
+            f"'{draft.status}'"
+        )
+    claim = (claim or "").strip()
+    if not claim:
+        raise DraftError("Empty claim")
+
+    findings = parse_json_list(draft.fabrication_findings)
+    unresolved_high = [f for f in findings
+                       if isinstance(f, dict) and f.get("tier") == "high"]
+    candidates = [f for f in unresolved_high
+                  if _norm_claim(str(f.get("value", ""))) == _norm_claim(claim)]
+    if ctx:
+        # Round 5: pin the USE — the finding whose sentence was shown
+        candidates = [f for f in candidates
+                      if (f.get("context") or "") == ctx]
+    matched = candidates[0] if candidates else None
+    if matched is None:
+        raise DraftError(
+            "That claim is not currently flagged — confirm the claims the "
+            "guard listed, or fix them in the text"
+        )
+
+    saved = False
+    if save_to_profile:
+        fact = (profile_fact or "").strip()
+        # Round-3 N1: the per-claim opt-in saves ONLY the confirmed claim
+        # itself — a longer text (the finding's sentence, what the old UI
+        # sent by default) carries claims the user did NOT confirm and
+        # must not reach the profile or the final check's source. The
+        # full sentence is a separate explicit action through the
+        # profile editor, where the user reads what gets saved.
+        # ONE bound with the profile editor (N2): the Profile form
+        # resends the whole vouched list on every save — anything this
+        # path writes must survive normalize_vouched_facts verbatim.
+        if (0 < len(fact) <= VOUCHED_FACTS_MAX_CHARS
+                and _norm_claim(fact) == _norm_claim(claim)):
+            vouched = [str(v).strip() for v in parse_json_list(
+                getattr(profile, "vouched_facts", None))]
+            if (fact not in vouched
+                    and len(vouched) < VOUCHED_FACTS_MAX_ITEMS):
+                vouched.append(fact)
+                profile.vouched_facts = dump_json_list(vouched)
+                db.add(profile)
+                saved = True
+
+    attested.append({"claim": claim,
+                     "context": matched.get("context") or "",
+                     "kind": matched.get("kind") or "",
+                     "at": utc_now().isoformat(),
+                     "saved_to_profile": saved})
+    draft.fabrication_attested = dump_json_list(attested)
+
+    remaining = [f for f in unresolved_high
+                 if not any(_resolves_finding(a, f) for a in attested)]
+    if remaining:
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+        return draft  # still failed — the panel lists what is left
+
+    # R1: the last claim is confirmed — verify the CURRENT text before
+    # 'ready'. The attested USES are exempted per (value, sentence);
+    # anything ELSE the guard finds surfaces here. Round 5: this runs
+    # the judge — it counts against the recheck budget, not the cheap
+    # attest bucket.
+    if user_id is not None:
+        from app.core.ratelimit import enforce
+
+        enforce(user_id, "draft_recheck")
+    job: Optional[JobPosting] = draft.job
+    if job is None:
+        job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()
+    try:
+        high, advisory = check_package(
+            profile, job, draft.cover_letter, draft.tailored_cv,
+            attested=attested,
+        )
+    except Exception as e:  # noqa: BLE001 — transport failure, never a verdict
+        draft.error = f"Re-check failed: {type(e).__name__}: {e}"
+        db.add(draft)
+        db.commit()
+        raise DraftError(draft.error) from e
+
+    from app.services.fabrication import findings_as_json
+
+    draft.fabrication_findings = dump_json_list(findings_as_json(high + advisory))
+    if not high:
+        draft.status = "ready"
+        draft.fabrication_resolved_at = utc_now()
+        draft.error = None
+        logger.info("Draft %s RECOVERED by attestation (%d claims, "
+                    "guard re-run clean)", draft.id, len(attested))
+    else:
+        # New findings on the current text — the loop continues; the
+        # user confirms or fixes these the same way.
+        draft.status = "failed"
+        draft.error = fabrication_block_error(profile.cv_text, high)
+        logger.info("Draft %s attest re-check surfaced %d new findings",
+                    draft.id, len(high))
     db.add(draft)
     db.commit()
     db.refresh(draft)
