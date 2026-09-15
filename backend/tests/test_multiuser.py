@@ -2199,7 +2199,8 @@ class TestWO23BlockedDraftRecovery:
     # 2. Re-check on edited-clean text -> ready; blocked stays True
     def test_recheck_clean_text_goes_ready(self, client, db, monkeypatch):
         from app.services.draft_service import (
-            create_draft_for_job, recheck_draft, save_draft_edits,
+            recheck_draft,
+            save_draft_edits,
         )
 
         d, p, uid = self._blocked(client, db, monkeypatch)
@@ -2215,9 +2216,10 @@ class TestWO23BlockedDraftRecovery:
         )
 
     def test_recheck_refuses_non_blocked_drafts(self, client, db, monkeypatch):
-        from app.services import draft_service
         from app.services.draft_service import (
-            DraftError, create_draft_for_job, recheck_draft,
+            DraftError,
+            create_draft_for_job,
+            recheck_draft,
         )
 
         p, job, uid = self._seed(client, db)
@@ -2294,8 +2296,8 @@ class TestWO23BlockedDraftRecovery:
     #    text + the cover-letter PDF rendered for the employer)
     def test_attested_claim_reaches_outbound_artifacts(self, client, db, monkeypatch):
         from app.core.config import settings
-        from app.services import pdf_service
         from app.services import draft_service as _ds
+        from app.services import pdf_service
         from app.services.draft_service import attest_claim, submit_draft
 
         d, p, uid = self._blocked(client, db, monkeypatch)
@@ -2422,7 +2424,6 @@ class TestWO23BlockedDraftRecovery:
     # 9. A recovered draft's API response separates advisory findings
     #    from attested claims (the ready-card panel filters on this)
     def test_recovered_response_separates_advisory_and_attested(self, client, db, monkeypatch):
-        import json
 
         from app.services.draft_service import attest_claim
 

@@ -785,8 +785,11 @@ An empty list means the document is faithful."""
     #: rendering, the cv_text/job_description truncations in
     #: tailor_application, the 0.3 temperature). 1 = the implicit
     #: pre-constant era (CV whole up to CV_GUARD_CHARS, job description
-    #: capped at 6000).
-    TAILOR_INPUT_COMPOSITION_VERSION = 1
+    #: capped at 6000). 2 = WO-23: build_profile_context can render a
+    #: confirmed-facts block (vouched facts + attestations) — identical
+    #: input for profiles without them, but compositions must stay
+    #: distinguishable for WO-02 measurement discipline (AI-13 pattern).
+    TAILOR_INPUT_COMPOSITION_VERSION = 2
 
     @classmethod
     def tailoring_prompt_version(cls) -> str:

@@ -70,11 +70,17 @@ export interface ApplicationDraft {
   changes_summary: string[];
   status: 'drafting' | 'ready' | 'submitted' | 'failed';
   error: string | null;
-  // WO-01 fabrication guard: advisory (technology-class) findings for the
-  // review UI; high-confidence ones drove regeneration or a block instead
+  // WO-01 fabrication guard findings. Since WO-23 a BLOCKED draft also
+  // persists its high findings (the recovery UI's content) — consumers
+  // showing the advisory panel must filter tier === 'advisory'.
   fabrication_findings: { kind: string; value: string; context: string; tier: string }[];
   fabrication_retries: number;
   fabrication_blocked: boolean;
+  // WO-23 recovery: per-claim "This is true — keep it" records (never
+  // cleared) + when the draft recovered to ready. fabrication_blocked
+  // stays true through recovery — the raw fabrication-rate data.
+  fabrication_attested: { claim: string; at: string; saved_to_profile: boolean }[];
+  fabrication_resolved_at: string | null;
   created_at: string;
   updated_at: string;
   job: Job | null;
@@ -95,6 +101,9 @@ export interface Profile {
   remote_ok: boolean;
   min_salary: string | null;
   exclude_keywords: string[];
+  // WO-23: true-but-not-on-the-CV facts — rendered into the generator's
+  // prompt AND the guard's source by build_profile_context.
+  vouched_facts: string[];
   onboarded: boolean;
   country: string | null;
   region: string | null;

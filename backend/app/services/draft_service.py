@@ -484,10 +484,11 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
     bound (the attestation always lands; the profile save is skipped
     when the claim exceeds 200 chars or the list its 30 items).
     """
-    from app.services.cv_service import (
-        VOUCHED_FACTS_MAX_CHARS, VOUCHED_FACTS_MAX_ITEMS,
-    )
     from app.schemas.common import dump_json_list, parse_json_list
+    from app.services.cv_service import (
+        VOUCHED_FACTS_MAX_CHARS,
+        VOUCHED_FACTS_MAX_ITEMS,
+    )
 
     if not draft.fabrication_blocked:
         raise DraftError(

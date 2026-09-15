@@ -9,6 +9,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   Copy,
   Cpu,
@@ -21,8 +22,10 @@ import {
   MousePointerClick,
   Play,
   Radar,
+  RefreshCw,
   Save,
   Send,
+  ShieldAlert,
 } from 'lucide-react';
 import CvUpload from '@/components/CvUpload';
 // GA4 funnel events — consent-gated (lib/analytics.ts).
@@ -32,6 +35,7 @@ import OnboardingWizard from '@/components/OnboardingWizard';
 import Sidebar, { NAV, type View } from '@/components/Sidebar';
 import HuntPulse from '@/components/HuntPulse';
 import {
+  attestDraft,
   decideMatch,
   getApplications,
   getDrafts,
@@ -41,6 +45,7 @@ import {
   getProfileStatus,
   api,
   prepareDraft,
+  recheckDraft,
   retryApplication,
   runMatching,
   runPipeline,
@@ -1410,6 +1415,30 @@ function DraftCard({
   const job = draft.job;
   const canEmail = Boolean(job?.application_email);
 
+  // WO-23 blocked-draft recovery. The editor gate is the GUARD BLOCK
+  // (documents present), not status==='failed' — a timeout/malformed
+  // failure has no documents to edit and shows only Try again.
+  const hasDocs = Boolean(draft.cover_letter || draft.tailored_cv);
+  const guardBlocked = draft.status === 'failed' && draft.fabrication_blocked && hasDocs;
+  const showEditor = draft.status === 'ready' || guardBlocked;
+  // Mirrors the backend's _claims_match: a confirmation covers the
+  // extraction variants of the same credential sentence.
+  const attestedClaims = (draft.fabrication_attested ?? []).map((a) =>
+    a.claim.trim().toLowerCase()
+  );
+  const covers = (value: string) => {
+    const v = value.trim().toLowerCase();
+    return attestedClaims.some((c) => c && v && (c.includes(v) || v.includes(c)));
+  };
+  const unresolvedHigh = (draft.fabrication_findings ?? []).filter(
+    (f) => f.tier === 'high' && !covers(f.value)
+  );
+  const advisoryFindings = (draft.fabrication_findings ?? []).filter(
+    (f) => f.tier === 'advisory'
+  );
+  // Per-claim "Also add to my profile" (default on, per the WO flow)
+  const [alsoProfile, setAlsoProfile] = useState<Record<string, boolean>>({});
+
   const save = async () => {
     setBusy('save');
     try {
@@ -1452,6 +1481,58 @@ function DraftCard({
 
   const copyCoverLetter = async () => {
     await navigator.clipboard.writeText(coverLetter);
+  };
+
+  // WO-23: run the guard over the current text — flush pending edits
+  // first (same contract as submit): the check must see what the user
+  // sees, not the last saved version.
+  const recheck = async () => {
+    setSubmitError(null);
+    setBusy('recheck');
+    try {
+      if (dirty) {
+        await updateDraft(draft.id, draftSavePayload(draft, edits));
+        onClearEdits();
+      }
+      await recheckDraft(draft.id);
+      await onChanged();
+    } catch (err) {
+      setSubmitError(apiErrorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // WO-23: per-claim "This is true — keep it". When no unresolved claim
+  // remains the backend flips the draft to ready — no further AI call.
+  const attest = async (claim: string, saveToProfile: boolean) => {
+    setSubmitError(null);
+    setBusy(`attest:${claim}`);
+    try {
+      await attestDraft(draft.id, claim, saveToProfile);
+      await onChanged();
+    } catch (err) {
+      setSubmitError(apiErrorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Every failed draft gets the way out that already exists in the API:
+  // prepareDraft regenerates a failed draft's documents without the
+  // flagged claims.
+  const regenerate = async () => {
+    setSubmitError(null);
+    setBusy('regenerate');
+    try {
+      await prepareDraft(draft.job_id, true);
+      onClearEdits();
+      await onChanged();
+    } catch (err) {
+      setSubmitError(apiErrorMessage(err));
+    } finally {
+      setBusy(null);
+    }
   };
 
   // Downloads always reflect saved content — flush pending edits first.
@@ -1537,19 +1618,101 @@ function DraftCard({
                 <p className="text-sm text-bad">{draft.error}</p>
               )}
 
+              {/* WO-23: why this was blocked — each flagged claim with its
+                  sentence, resolved per-claim: fix in the text + Check
+                  again, or "This is true — keep it". Never a whole-draft
+                  override. */}
+              {guardBlocked && unresolvedHigh.length > 0 && (
+                <div className="rounded-lg border border-bad/30 bg-bad/5 p-3">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-bad">
+                    <ShieldAlert className="h-3.5 w-3.5" /> Why this was blocked
+                  </p>
+                  <ul className="space-y-2.5">
+                    {unresolvedHigh.map((f, i) => (
+                      <li key={i} className="text-sm text-mid">
+                        • <span className="font-medium text-hi">{f.value}</span>
+                        {f.context ? (
+                          <span className="text-low"> — “{f.context.slice(0, 120)}”</span>
+                        ) : null}
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => attest(f.value, alsoProfile[f.value] ?? true)}
+                            disabled={busy !== null}
+                            className="inline-flex items-center gap-1 rounded-lg border border-bad/40 px-2.5 py-1 text-xs text-mid transition-colors hover:border-bad hover:text-hi disabled:opacity-40"
+                          >
+                            <Check className="h-3 w-3" />
+                            {busy === `attest:${f.value}` ? 'Confirming…' : 'This is true — keep it'}
+                          </button>
+                          <label className="flex items-center gap-1.5 text-xs text-low">
+                            <input
+                              type="checkbox"
+                              checked={alsoProfile[f.value] ?? true}
+                              onChange={(e) =>
+                                setAlsoProfile((m) => ({ ...m, [f.value]: e.target.checked }))
+                              }
+                            />
+                            Also add to my profile
+                          </label>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* WO-23: a non-guard failure (timeout, malformed response,
+                  no documents) has nothing to edit — only Try again. */}
+              {draft.status === 'failed' && !guardBlocked && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={regenerate}
+                    disabled={busy !== null}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-40"
+                  >
+                    <RefreshCw className={cn('h-4 w-4', busy === 'regenerate' && 'animate-spin')} />
+                    {busy === 'regenerate' ? 'Retrying…' : 'Try again'}
+                  </button>
+                </div>
+              )}
+
               {/* WO-01 fabrication guard: advisory findings (technology-class
-                  check) — flagged for REVIEW, never auto-acted on */}
-              {draft.status === 'ready' && (draft.fabrication_findings?.length ?? 0) > 0 && (
+                  check) — flagged for REVIEW, never auto-acted on.
+                  WO-23 sweep: the column can also carry tier:'high' items
+                  (blocked/recovered history) — the advisory panel shows
+                  ONLY tier:'advisory'; attested claims render separately. */}
+              {draft.status === 'ready' && advisoryFindings.length > 0 && (
                 <div className="rounded-lg border border-signal/30 bg-signal/5 p-3">
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-signal">
                     Verify before sending — tech not found in your CV
                   </p>
                   <ul className="space-y-1">
-                    {draft.fabrication_findings.map((f, i) => (
+                    {advisoryFindings.map((f, i) => (
                       <li key={i} className="text-sm text-mid">
                         • <span className="font-medium text-hi">{f.value}</span>
                         {f.context ? (
                           <span className="text-low"> — “{f.context.slice(0, 120)}”</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* WO-23: what the user personally confirmed on this draft —
+                  the counterpart of the advisory panel above. */}
+              {draft.status === 'ready' && (draft.fabrication_attested?.length ?? 0) > 0 && (
+                <div className="rounded-lg border border-line bg-surface-2/50 p-3">
+                  <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
+                    Confirmed by you
+                  </p>
+                  <ul className="space-y-1">
+                    {draft.fabrication_attested.map((a, i) => (
+                      <li key={i} className="text-sm text-mid">
+                        • <span className="font-medium text-hi">{a.claim}</span>
+                        {a.saved_to_profile ? (
+                          <span className="text-low"> — added to your profile</span>
                         ) : null}
                       </li>
                     ))}
@@ -1573,7 +1736,7 @@ function DraftCard({
                 </div>
               )}
 
-              {draft.status === 'ready' && (
+              {showEditor && (
                 <>
           {/* Cover letter editor */}
           <div>
@@ -1641,6 +1804,32 @@ function DraftCard({
               <Save className="h-4 w-4" /> {busy === 'save' ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
             </button>
 
+            {/* WO-23: the recovery actions — the primary exit for a
+                blocked draft. Check again runs the shared guard on the
+                saved text; Regenerate rewrites without the claims. */}
+            {guardBlocked && (
+              <>
+                <button
+                  onClick={recheck}
+                  disabled={busy !== null}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
+                >
+                  <ShieldAlert className="h-4 w-4" />
+                  {busy === 'recheck' ? 'Checking…' : 'Check again'}
+                </button>
+                <button
+                  onClick={regenerate}
+                  disabled={busy !== null}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-40"
+                >
+                  <RefreshCw className={cn('h-4 w-4', busy === 'regenerate' && 'animate-spin')} />
+                  {busy === 'regenerate' ? 'Regenerating…' : 'Regenerate without these claims'}
+                </button>
+              </>
+            )}
+
+            {draft.status === 'ready' && (
+              <>
             <span className="mx-1 h-6 w-px bg-line" />
 
             {canEmail ? (
@@ -1662,6 +1851,8 @@ function DraftCard({
               <MousePointerClick className="h-4 w-4" />
               {busy === 'submit-browser' ? 'Opening…' : 'Approve & apply in browser'}
             </button>
+              </>
+            )}
           </div>
                 </>
               )}
@@ -1693,6 +1884,8 @@ function ProfileView({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [preferredRoles, setPreferredRoles] = useState('');
   const [excludeKeywords, setExcludeKeywords] = useState('');
+  // WO-23: newline-separated — facts contain commas ("Stockholm, Sweden")
+  const [vouchedFacts, setVouchedFacts] = useState('');
   const [fullName, setFullName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -1705,6 +1898,7 @@ function ProfileView({
     if (prefsDirty.current) return;
     setPreferredRoles(profile?.preferred_roles?.join(', ') ?? '');
     setExcludeKeywords(profile?.exclude_keywords?.join(', ') ?? '');
+    setVouchedFacts(profile?.vouched_facts?.join('\n') ?? '');
     setFullName(profile?.full_name ?? '');
     setContactEmail(profile?.email ?? '');
     setPhone(profile?.phone ?? '');
@@ -1717,6 +1911,7 @@ function ProfileView({
       await updateProfile({
         preferred_roles: preferredRoles.split(',').map((s) => s.trim()).filter(Boolean),
         exclude_keywords: excludeKeywords.split(',').map((s) => s.trim()).filter(Boolean),
+        vouched_facts: vouchedFacts.split('\n').map((s) => s.trim()).filter(Boolean),
         full_name: fullName.trim() || undefined,
         email: contactEmail.trim() || undefined,
         phone: phone.trim() || undefined,
@@ -1878,6 +2073,27 @@ function ProfileView({
                   className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                 />
               </label>
+            </div>
+
+            {/* WO-23 Part B: "Things I can vouch for" — one fact per line.
+                These reach BOTH the AI (it may use them) and the guard
+                (it accepts them), so a true-but-not-on-the-CV fact never
+                blocks again. */}
+            <div className="mt-4">
+              <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
+                Things I can vouch for (one per line)
+              </span>
+              <textarea
+                value={vouchedFacts}
+                onChange={(e) => { prefsDirty.current = true; setVouchedFacts(e.target.value); }}
+                rows={3}
+                placeholder={'Microsoft Office, daily use for 20 years\nEU citizen with full work rights'}
+                className="w-full rounded-lg border border-line bg-ink p-3 font-mono text-sm leading-relaxed text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
+              />
+              <p className="mt-1 text-xs text-low">
+                Skills and facts that are true but aren't on your CV. We'll use them, and we won't
+                flag them.
+              </p>
             </div>
             <button
               onClick={save}

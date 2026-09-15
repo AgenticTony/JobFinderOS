@@ -1,7 +1,7 @@
 # WO-23 — Blocked-draft recovery: edit, re-check, vouch
 
 > Priority: P1 · Depends on: WO-01 (fabrication guard) ✅, WO-02 (judge) ✅
-> Status: not started · Owner decision 2026-09-11 (options A + B)
+> Status: **executed 2026-09-15** (options A + B, owner decision 2026-09-11)
 > **Touches the fabrication guard — treat as a SAFETY change.**
 
 ## Why
@@ -185,3 +185,48 @@ fail, restore) — per CLAUDE.md standard 2.
   stands (owner decision 2026-09-11: the re-check is for drafts that
   failed first time round).
 - Editing the original CV — immutable by invariant #1.
+
+## Execution record (2026-09-15)
+
+All acceptance criteria verified; 14 red-first tests in
+`TestWO23BlockedDraftRecovery` + 2 in `TestFabricationBlockMessage`
+(evidence-quoting fix), revert-checked per CLAUDE.md standard 2.
+Full suite 488 green / 14 skipped; ruff, tsc, `next build` clean.
+
+Landed as designed, plus what implementation surfaced:
+
+- **`check_package`** (draft_service) is the one implementation of
+  "check a package": Layer A + judge over given text, guard source =
+  CV + user-entered context + this draft's attestations. Generation
+  and re-check call it; the block path persists
+  `findings_as_json(high + advisory)` instead of discarding them.
+- **Attestation matching is containment, not equality** (`_claims_match`):
+  Layer A extracts up to three variant findings from one credential
+  sentence ("AWS Certified Solutions Architect" also yields "aws
+  certified" + "certified solutions architect") — a human confirms the
+  claim ONCE; the confirmation covers its variants. The UI mirrors the
+  same rule client-side.
+- **`confirmed_facts_block`** (cv_service) is the single rendering of
+  user-confirmed facts — the header sentence ("each line supports only
+  what it states") is the constraint-6 guard against blanket vouches.
+  `build_profile_context` renders vouched facts through it OUTSIDE the
+  include_derived gate; the guard source appends attestations through
+  the same function.
+- **`TAILOR_INPUT_COMPOSITION_VERSION` 1 → 2** (AI-13 discipline): the
+  vouched-facts block changes what the model can see; compositions stay
+  distinguishable for WO-02 measurement. Pin now `t2-2f8f4e86`.
+- **Evidence-quoting fix**: Swedish function words added to
+  `_CLAIM_STOPWORDS` (the Experis "under"-only matches);
+  `_cv_lines_near_claims` ranks by shared-token count (stable by CV
+  order) instead of first-two-top-down.
+- **Bounds**: strict 30×200 at the profile editor (400 back to the
+  user); LENIENT at attest — the attestation always lands, the profile
+  save is skipped past the bound (a draft must never stay blocked over
+  a list bound).
+- **Lifecycle**: vouched facts die with the profile row and attestations
+  with the draft row in the GDPR cascade; both new rate-limit buckets
+  are user-keyed so `clear_user` purges them with no code.
+- The outbound-artifact test asserts the attested claim in the email
+  body AND the exact text the employer-facing PDF was rendered from
+  (renderer-input spy — fpdf2's Unicode streams are not byte-greppable,
+  and that fragility belongs in no test).

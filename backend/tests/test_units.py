@@ -4637,7 +4637,7 @@ class TestTailorPromptLanguageRule:
 #: If the prompt text changes, AIService.tailoring_prompt_version()
 #: changes and the pinned test fails — bump DELIBERATELY and re-run
 #: RUN_FABRICATION before/after (WO-02).
-TAILORED_PROMPT_VERSION = "t2-95af0d8b"
+TAILORED_PROMPT_VERSION = "t2-2f8f4e86"  # WO-23: input-composition v2 (vouched facts)
 
 
 class TestTailorPromptCraft:

@@ -91,7 +91,7 @@ const en = {
   guardSec: {
     h2a: 'Nothing invented.',
     h2b: 'Ever.',
-    body: "Every claim in your tailored CV is checked against your real CV before it's sent. If a claim is not in your history, it does not ship.",
+    body: "Every claim in your tailored CV is checked against your real CV before it's sent. If a claim isn't in your history, it doesn't ship unless you confirm it.",
     receipt: {
       ariaLabel: 'Example of the draft guard checking claims against your CV (illustrative, not a real audit)',
       label: 'Draft guard · cover letter',
@@ -279,7 +279,7 @@ const sv: Dict = {
   guardSec: {
     h2a: 'Inget påhittat.',
     h2b: 'Aldrig.',
-    body: 'Varje påstående i ditt anpassade CV kontrolleras mot ditt riktiga CV innan det skickas. Finns påståendet inte i din historik skickas det inte.',
+    body: 'Varje påstående i ditt anpassade CV kontrolleras mot ditt riktiga CV innan det skickas. Finns påståendet inte i din historik skickas det inte förrän du bekräftar det.',
     receipt: {
       ariaLabel:
         'Exempel på hur utkastvakten kontrollerar påståenden mot ditt CV (illustrativt, ingen riktig granskning)',

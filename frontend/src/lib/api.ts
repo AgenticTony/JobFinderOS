@@ -205,6 +205,7 @@ export const updateProfile = async (prefs: Partial<{
   remote_ok: boolean;
   min_salary: string;
   exclude_keywords: string[];
+  vouched_facts: string[];
 }>): Promise<Profile> => {
   const response = await api.put<Profile>('/api/v1/profile/me', prefs);
   return response.data;
@@ -305,6 +306,28 @@ export const updateDraft = async (
   const response = await api.put<ApplicationDraft>(
     `/api/v1/applications/draft/${draftId}`,
     edits
+  );
+  return response.data;
+};
+
+// WO-23 blocked-draft recovery: run the fabrication guard over the
+// draft's CURRENT text (clean -> ready), and per-claim "This is true —
+// keep it" (when no unresolved claim remains -> ready, no AI call).
+export const recheckDraft = async (draftId: number): Promise<ApplicationDraft> => {
+  const response = await slowApi.post<ApplicationDraft>(
+    `/api/v1/applications/draft/${draftId}/recheck`
+  );
+  return response.data;
+};
+
+export const attestDraft = async (
+  draftId: number,
+  claim: string,
+  saveToProfile = true
+): Promise<ApplicationDraft> => {
+  const response = await slowApi.post<ApplicationDraft>(
+    `/api/v1/applications/draft/${draftId}/attest`,
+    { claim, save_to_profile: saveToProfile }
   );
   return response.data;
 };
