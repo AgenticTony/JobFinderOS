@@ -48,6 +48,11 @@ BUCKETS = {
     "hunt": (12, 3600),              # manual pipeline runs
     "match_run": (12, 3600),         # matching kicks
     "draft_prepare": (20, 3600),     # tailored packages
+    # WO-23 blocked-draft recovery: the re-check is a paid judge call
+    # (Layer A is free, the judge is not); attestations are DB-only and
+    # cheap — the bucket exists for scripted bursts, not humans.
+    "draft_recheck": (10, 3600),     # guard re-checks per hour
+    "draft_attest": (60, 3600),      # claim confirmations per hour
     # MIG-WO2: the four auth buckets (register/login, per-email and
     # per-IP) are deleted — signup and login moved to Supabase Auth,
     # which enforces its own rate limits. These per-USER buckets are the

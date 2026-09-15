@@ -4773,7 +4773,7 @@ class TestFabricationBlockMessage:
         assert "obehindrad" in msg                    # the claim, named
         assert "Your CV says:" in msg                 # the confrontation
         assert "god nivå" in msg                      # the CV's actual level
-        assert "Edit your CV" in msg                  # the way out, kept
+        assert "Fix or confirm" in msg                # the WO-23 way out
 
     def test_no_token_overlap_omits_quote_not_guesses(self):
         from app.services.draft_service import fabrication_block_error
@@ -4794,3 +4794,40 @@ class TestFabricationBlockMessage:
         )
         quoted = msg.split('Your CV says: "')[1].split('"')[0]
         assert len(quoted) <= 140
+
+    def test_stopword_only_matches_do_not_crowd_out_the_real_line(self):
+        """WO-23 (2026-09-10 Experis block): both quoted lines matched
+        ONLY the preposition 'under' — Swedish function words missing
+        from the stopwords, and first-two-top-down packing with junk
+        crowded out the line that carried the conflict (the languages
+        line 'daglig användning' was lifted from)."""
+        from app.services.draft_service import _cv_lines_near_claims
+
+        cv = "\n".join([
+            "Under studietiden läste jag statistik och ekonomi",   # 'under' only
+            "Under perioden arbetade jag med kundsupport",         # 'under' only
+            "Språk: Engelska, Svenska (daglig användning)",        # the real one
+        ])
+        out = _cv_lines_near_claims(
+            cv, [self._claim(
+                "Microsoft Office (daglig användning under 20 års yrkesliv)")])
+        assert out == ["Språk: Engelska, Svenska (daglig användning)"], (
+            f"stopword-only matches must not crowd out the conflicting "
+            f"line: {out}"
+        )
+
+    def test_lines_rank_by_overlap_not_cv_order(self):
+        """A weaker match earlier in the CV must not outrank a stronger
+        one later — ranking by shared informative tokens, ties by CV
+        order (stable)."""
+        from app.services.draft_service import _cv_lines_near_claims
+
+        cv = "\n".join([
+            "Office-handläggare inom fastighetsbranschen",   # overlap 1 (office)
+            "Kompetenser: Microsoft Office, daglig användning",  # overlap 3
+        ])
+        out = _cv_lines_near_claims(
+            cv, [self._claim("Microsoft Office (daglig användning)")])
+        assert out[0] == "Kompetenser: Microsoft Office, daglig användning", (
+            f"the 3-token line must outrank the 1-token one: {out}"
+        )

@@ -49,6 +49,63 @@ def _store_cv_file(content: bytes, filename: str) -> Tuple[str, str]:
     return key, safe
 
 
+#: WO-23 Part B bounds: 30 items x 200 characters. Enforced STRICTLY at
+#: the profile editor (400 back to the user) and LENIENTLY at attest
+#: (the attestation always lands; the profile save is skipped when the
+#: bound would break — the draft must never stay blocked over a bound).
+VOUCHED_FACTS_MAX_ITEMS = 30
+VOUCHED_FACTS_MAX_CHARS = 200
+
+
+def normalize_vouched_facts(items) -> list:
+    """Strip and drop empties; raise ValueError past the 30x200 bound."""
+    out = []
+    for it in items or []:
+        s = str(it).strip()
+        if s:
+            out.append(s)
+    if len(out) > VOUCHED_FACTS_MAX_ITEMS:
+        raise ValueError(
+            f"At most {VOUCHED_FACTS_MAX_ITEMS} vouched facts — "
+            f"got {len(out)}"
+        )
+    for s in out:
+        if len(s) > VOUCHED_FACTS_MAX_CHARS:
+            raise ValueError(
+                f"Each vouched fact is at most {VOUCHED_FACTS_MAX_CHARS} "
+                f"characters — '{s[:40]}…' is {len(s)}"
+            )
+    return out
+
+
+#: WO-23: the single rendering of user-confirmed facts (profile vouched
+#: facts, per-draft attestations). The header sentence is load-bearing
+#: guard language — the judge sees this block inside its SOURCE OF TRUTH,
+#: and "each line supports only what it states" is what stops a blanket
+#: entry ("everything I say is true") from blessing an unrelated claim
+#: the AI invented. Layer A needs no instruction (substring-on-atoms),
+#: but the generator also reads this block, where the sentence is
+#: on-message anyway: use the fact, don't extrapolate from it.
+CONFIRMED_FACTS_HEADER = (
+    "Facts the user has personally confirmed (each line supports only "
+    "what it states):"
+)
+
+
+def confirmed_facts_block(lines) -> str:
+    """Render confirmed facts as a delimited list; '' when there are none.
+
+    One implementation shared by build_profile_context (vouched facts)
+    and the draft guard source (this draft's attestations) — duplicated
+    presentations are how one side drifts and the other doesn't."""
+    items = [str(line).strip() for line in (lines or []) if str(line).strip()]
+    if not items:
+        return ""
+    return "\n" + CONFIRMED_FACTS_HEADER + "\n" + "\n".join(
+        f"- {item}" for item in items
+    )
+
+
 def build_profile_context(profile: Profile, include_derived: bool = True) -> str:
     """Compact text summary of the profile + preferences fed to the matcher."""
     skills = parse_json_list(profile.skills)
@@ -100,6 +157,14 @@ def build_profile_context(profile: Profile, include_derived: bool = True) -> str
     context = "\n".join(lines)
     if role_lines:
         context += "\nRecent roles:\n" + "\n".join(role_lines)
+    # WO-23: vouched facts render OUTSIDE the include_derived gate —
+    # user-entered, like location and languages. The generator's prompt
+    # (default call) and the guard's source (include_derived=False) both
+    # see them; feeding one and not the other is the guard-untraceable
+    # trap (guard-only -> the AI never uses them; prompt-only -> the AI
+    # uses them and the guard blocks it).
+    context += confirmed_facts_block(parse_json_list(
+        getattr(profile, "vouched_facts", None)))
     return context
 
 

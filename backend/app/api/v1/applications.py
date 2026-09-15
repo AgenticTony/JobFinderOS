@@ -14,6 +14,7 @@ from app.crud import get_application, get_job, list_applications
 from app.models import User
 from app.schemas.application import (
     ApplicationResponse,
+    DraftAttestRequest,
     DraftResponse,
     DraftSubmitRequest,
     DraftUpdateRequest,
@@ -22,9 +23,11 @@ from app.services.apply_service import ApplyError, retry_application
 from app.services.draft_service import (
     DraftConflictError,
     DraftError,
+    attest_claim,
     create_draft_for_job,
     get_draft,
     list_drafts,
+    recheck_draft,
     save_draft_edits,
     submit_draft,
 )
@@ -184,6 +187,75 @@ async def update_draft(
     try:
         draft = await run_in_threadpool(
             save_draft_edits, db, draft, payload.cover_letter, payload.tailored_cv
+        )
+    except DraftError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return DraftResponse.from_orm_draft(draft)
+
+
+@router.post("/draft/{draft_id}/recheck", response_model=DraftResponse)
+async def recheck(
+    draft_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
+    """WO-23: run the fabrication guard over the draft's CURRENT text.
+
+    Clean -> ready (recovered); still flagged -> stays failed with the
+    remaining claims listed for fix-in-text or attestation. The judge is
+    a paid call — this bucket is tighter than draft_prepare.
+    """
+    enforce(user.id, "draft_recheck")
+    draft = get_draft(db, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    owns_or_404(draft.user_id, user, "Draft")
+
+    # TENANCY LAYER 1: the guard verifies against the caller's own CV —
+    # resolved at the route, injected into the service.
+    from app.services.cv_service import get_active_profile
+
+    profile = get_active_profile(db, user_id=user.id)
+    if not profile or not profile.cv_text:
+        raise HTTPException(status_code=400, detail="No CV on file for this account")
+    try:
+        draft = await run_in_threadpool(recheck_draft, db, draft, profile=profile)
+    except DraftError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return DraftResponse.from_orm_draft(draft)
+
+
+@router.post("/draft/{draft_id}/attest", response_model=DraftResponse)
+async def attest(
+    draft_id: int,
+    payload: DraftAttestRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_authenticated_user),
+):
+    """WO-23: record 'This is true — keep it' for ONE flagged claim.
+
+    Per-claim resolution, never a whole-draft override. When no
+    unresolved claim remains the draft goes ready — no further AI call.
+    save_to_profile (default) also appends the claim to the caller's
+    vouched facts so future drafts use it without flagging.
+    """
+    enforce(user.id, "draft_attest")
+    draft = get_draft(db, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    owns_or_404(draft.user_id, user, "Draft")
+
+    # TENANCY LAYER 1: attest may write the CALLER's profile — resolve it
+    # here, inject it; the service never looks one up.
+    from app.services.cv_service import get_active_profile
+
+    profile = get_active_profile(db, user_id=user.id)
+    if not profile:
+        raise HTTPException(status_code=400, detail="No CV on file for this account")
+    try:
+        draft = await run_in_threadpool(
+            attest_claim, db, draft, payload.claim, payload.save_to_profile,
+            profile=profile,
         )
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))

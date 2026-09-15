@@ -38,6 +38,10 @@ class ProfilePreferencesUpdate(BaseModel):
     remote_ok: Optional[bool] = None
     min_salary: Optional[str] = None
     exclude_keywords: Optional[List[str]] = None
+    # WO-23 Part B: "Things I can vouch for" — true-but-not-on-the-CV
+    # facts the generator may use and the guard accepts. Bounded
+    # 30 x 200 (strict — a 400 back to the user, not a silent trim).
+    vouched_facts: Optional[List[str]] = None
 
 
 class ProfileResponse(BaseModel):
@@ -69,6 +73,9 @@ class ProfileResponse(BaseModel):
     # [{"code","label"}] — Arbetsförmedlingen occupation-name concepts
     occupation_codes: List[dict] = []
     languages: List[str] = []
+    # WO-23: user-confirmed facts rendered into the generator's prompt
+    # AND the guard's source by build_profile_context.
+    vouched_facts: List[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -109,6 +116,8 @@ class ProfileResponse(BaseModel):
             occupation_codes=parse_json_list(
                 getattr(profile, "occupation_codes", None)),
             languages=parse_json_list(profile.languages),
+            vouched_facts=parse_json_list(
+                getattr(profile, "vouched_facts", None)),
             created_at=profile.created_at,
             updated_at=profile.updated_at,
             skills=parse_json_list(profile.skills),

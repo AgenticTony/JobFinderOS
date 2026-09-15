@@ -101,6 +101,16 @@ async def update_preferences(
     for field, value in data.items():
         if field in ("preferred_roles", "exclude_keywords"):
             setattr(profile, field, dump_json_list(value))
+        elif field == "vouched_facts":
+            # WO-23: strict 30x200 bound — a 400 the user can act on,
+            # not a silent trim of facts they believe are saved.
+            from app.services.cv_service import normalize_vouched_facts
+
+            try:
+                setattr(profile, field, dump_json_list(
+                    normalize_vouched_facts(value)))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
         elif field == "remote_ok":
             setattr(profile, field, 1 if value else 0)
         else:
