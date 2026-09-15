@@ -230,3 +230,52 @@ Landed as designed, plus what implementation surfaced:
   body AND the exact text the employer-facing PDF was rendered from
   (renderer-input spy — fpdf2's Unicode streams are not byte-greppable,
   and that fragility belongs in no test).
+
+## Review round (2026-09-15, fix.md — 7 findings, all fixed)
+
+The recovery paths as first built gave ways AROUND the guard. All seven
+findings verified real and fixed; each fix's test was seen red before
+it (the full pre-fix red run + flip-based red-proofs for R1/R2 — never
+`git checkout`, per lesson #7):
+
+- **R1 (must-fix)**: attest-ready shipped text the guard never fully
+  checked — a Layer-A-blocked draft was never judged (the judge only
+  runs on a Layer-A-clean document), and edits after the block were
+  never re-checked. Fix: confirming the LAST unresolved claim re-runs
+  `check_package` on the current text (attested claims ride in the
+  source); ready only if clean, new findings surface for the same
+  resolve loop. This supersedes the WO's "no further AI call" line —
+  the final check costs one Layer A (+judge when enabled) call.
+- **R2 (must-fix)**: `_claims_match` containment let one API call
+  (`claim="e"`, or the whole pasted letter) resolve every finding — a
+  whole-draft override, exactly what the WO forbids. Fix: acceptance is
+  EXACT casefolded match to a flagged value (≤200 chars); variants
+  resolve only within the SAME extraction sentence
+  (`_resolves_finding`, attested entries record the finding's context).
+  The frontend `covers()` mirrors the same rule.
+- **R3 (must-fix)**: recheck/attest gated only on `fabrication_blocked`
+  (never cleared) — a SUBMITTED draft could be rechecked back to
+  'ready' and emailed twice. Fix: both require `status == 'failed'`;
+  a replayed attest click still no-ops idempotently before the gate.
+- **R4**: vouched facts reached the MATCH-scoring prompt via
+  `build_profile_context` default — score comparability under one
+  `MATCHING_INPUT_COMPOSITION_VERSION` broken, one job's attestation
+  shifting unrelated jobs' scores. Fix: `include_vouched=False` at the
+  matcher call site; vouched facts serve tailoring + guard only.
+- **R5**: save-to-profile stored the bare flagged atom — a vouched
+  "40%" blessed every future 40% claim via substring. Fix: the profile
+  stores the finding's CONTEXT SENTENCE (the human-meaningful unit);
+  judge-kind findings store the claim (their context is the "why").
+  Per-draft attestations stay value-based — they die with this text
+  (R6) and only scope THIS draft.
+- **R6**: the regeneration ready-path still reset
+  `fabrication_blocked = False` — constraint 4 violated, the block
+  vanished from the fabrication-rate data. Fix: never written on any
+  recovery path; regeneration also clears the replaced text's
+  attestations (their durable channel is profile.vouched_facts).
+- **R7**: the Article 20 export omitted `vouched_facts` and
+  `fabrication_attested`. Fix: both in the export payload (raw JSON
+  strings, same convention as `languages`/`search_queries`), tested
+  beside TestGDPRExportCompleteness.
+
+Suite: 495 passed / 14 skipped; ruff, tsc, `next build` clean.

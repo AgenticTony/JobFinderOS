@@ -1423,15 +1423,20 @@ function DraftCard({
   const showEditor = draft.status === 'ready' || guardBlocked;
   // Mirrors the backend's _claims_match: a confirmation covers the
   // extraction variants of the same credential sentence.
-  const attestedClaims = (draft.fabrication_attested ?? []).map((a) =>
-    a.claim.trim().toLowerCase()
-  );
-  const covers = (value: string) => {
+  // Mirrors the backend's _resolves_finding (review fix R2): exact
+  // casefolded match, or the SAME extraction sentence with containment —
+  // containment alone let one attestation clear every claim.
+  const covers = (value: string, context: string) => {
     const v = value.trim().toLowerCase();
-    return attestedClaims.some((c) => c && v && (c.includes(v) || v.includes(c)));
+    return (draft.fabrication_attested ?? []).some((a) => {
+      const c = a.claim.trim().toLowerCase();
+      if (!c || !v) return false;
+      if (c === v) return true;
+      return Boolean(a.context) && a.context === context && (c.includes(v) || v.includes(c));
+    });
   };
   const unresolvedHigh = (draft.fabrication_findings ?? []).filter(
-    (f) => f.tier === 'high' && !covers(f.value)
+    (f) => f.tier === 'high' && !covers(f.value, f.context)
   );
   const advisoryFindings = (draft.fabrication_findings ?? []).filter(
     (f) => f.tier === 'advisory'
@@ -1642,7 +1647,7 @@ function DraftCard({
                             className="inline-flex items-center gap-1 rounded-lg border border-bad/40 px-2.5 py-1 text-xs text-mid transition-colors hover:border-bad hover:text-hi disabled:opacity-40"
                           >
                             <Check className="h-3 w-3" />
-                            {busy === `attest:${f.value}` ? 'Confirming…' : 'This is true — keep it'}
+                            {busy === `attest:${f.value}` ? 'Confirming + checking…' : 'This is true — keep it'}
                           </button>
                           <label className="flex items-center gap-1.5 text-xs text-low">
                             <input

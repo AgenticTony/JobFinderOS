@@ -79,7 +79,10 @@ export interface ApplicationDraft {
   // WO-23 recovery: per-claim "This is true — keep it" records (never
   // cleared) + when the draft recovered to ready. fabrication_blocked
   // stays true through recovery — the raw fabrication-rate data.
-  fabrication_attested: { claim: string; at: string; saved_to_profile: boolean }[];
+  // context = the finding's extraction sentence — variant resolution
+  // keys on it (review fix R2: containment alone was a whole-draft
+  // override; "e" or a pasted document matched every claim).
+  fabrication_attested: { claim: string; context?: string; at: string; saved_to_profile: boolean }[];
   fabrication_resolved_at: string | null;
   created_at: string;
   updated_at: string;

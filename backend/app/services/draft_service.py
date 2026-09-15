@@ -266,6 +266,14 @@ def create_draft_for_job(
     )
     draft.status = "drafting"
     draft.error = None
+    # Review fix R6 (2026-09-15): a regeneration REPLACES the text, so
+    # the previous text's attestations die with it — they must not
+    # suppress flags on documents they never saw. Their durable channel
+    # is profile.vouched_facts (saved at attest time by choice). The
+    # block itself is NEVER cleared (constraint 4): regeneration is a
+    # recovery, and the fabrication-rate data keeps the block.
+    draft.fabrication_attested = None
+    draft.fabrication_resolved_at = None
     # P1-5b: snapshot the CV reference this tailoring runs against. The
     # profile's path moves on re-upload; without the snapshot the send
     # path cannot know which CV the package was built from, and a
@@ -323,7 +331,11 @@ def create_draft_for_job(
 
                 draft.fabrication_findings = _dumps(findings_as_json(advisory))
                 draft.fabrication_retries = retries
-                draft.fabrication_blocked = False
+                # Constraint 4 (review fix R6): fabrication_blocked is
+                # never cleared on ANY recovery path — a draft that
+                # blocked once keeps the block in the fabrication-rate
+                # data even after a clean regeneration. It is False only
+                # for drafts that never blocked (column default).
                 draft.status = "ready"
                 db.add(draft)
                 db.commit()
@@ -417,6 +429,16 @@ def recheck_draft(db: Session, draft: ApplicationDraft, *, profile: Profile) -> 
         raise DraftError(
             "Only drafts blocked by the fabrication guard can be re-checked"
         )
+    if draft.status != "failed":
+        # Review fix R3 (2026-09-15): recovery never clears
+        # fabrication_blocked, so the flag alone let a SUBMITTED draft
+        # recheck back to 'ready' — and submit again, a second employer
+        # email. 'sending' and 'drafting' are excluded for the same
+        # reason: their owners finish first.
+        raise DraftError(
+            f"Only failed drafts can be re-checked — this one is "
+            f"'{draft.status}'"
+        )
     if not (draft.cover_letter or draft.tailored_cv):
         raise DraftError("No documents to check — regenerate the draft first")
 
@@ -459,15 +481,30 @@ def recheck_draft(db: Session, draft: ApplicationDraft, *, profile: Profile) -> 
     return draft
 
 
-def _claims_match(a: str, b: str) -> bool:
-    """Casefolded containment either way. Layer A extracts several variant
-    findings from one credential sentence ("AWS Certified Solutions
-    Architect" also yields "aws certified" and "certified solutions
-    architect"); a human reads ONE claim and confirms it once — the
-    confirmation must cover its variants, or the panel makes the user
-    attest the same sentence three times."""
-    a, b = (a or "").strip().casefold(), (b or "").strip().casefold()
-    return bool(a) and bool(b) and (a in b or b in a)
+def _norm_claim(s: str) -> str:
+    return (s or "").strip().casefold()
+
+
+def _resolves_finding(attested_entry: dict, finding: dict) -> bool:
+    """Does a recorded attestation resolve THIS flagged finding?
+
+    Exact value match, or — for Layer A's variant findings from one
+    credential sentence ("AWS Certified Solutions Architect" also yields
+    "aws certified" + "certified solutions architect") — the SAME
+    extraction sentence with containment overlap. Containment WITHOUT
+    the shared sentence is the whole-draft-override hole: a one-letter
+    claim ('e') or a whole pasted document matches every finding
+    (review fix R2, 2026-09-15).
+    """
+    av = _norm_claim(str(attested_entry.get("claim", "")))
+    fv = _norm_claim(str(finding.get("value", "")))
+    if not av or not fv:
+        return False
+    if av == fv:
+        return True
+    ac = attested_entry.get("context") or ""
+    fc = finding.get("context") or ""
+    return bool(ac) and ac == fc and (av in fv or fv in av)
 
 
 def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
@@ -475,39 +512,61 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
     """WO-23: record the user's 'This is true — keep it' for ONE flagged
     claim. Per-claim resolution — never a whole-draft override.
 
-    When no unresolved high claim remains, the draft goes 'ready' with no
-    further AI call: the rest of the text passed the re-check, and this
-    claim is now user-confirmed. fabrication_blocked is never cleared.
+    Review fixes (2026-09-15):
+    - R3: only status 'failed' drafts accept attestations — a submitted
+      draft must never be confirmable back to 'ready' (second send).
+    - R2: the claim must EXACTLY match a currently-flagged value
+      (casefolded, <= 200 chars). Variants resolve via the shared
+      extraction sentence, not global containment.
+    - R1: when the last unresolved claim is confirmed, the guard runs
+      AGAIN on the current text before 'ready'. A draft blocked by
+      Layer A was never judged (the judge only runs on a Layer-A-clean
+      document), and text edited after the block was never re-checked —
+      attest-ready without a final check shipped exactly that.
+    - R5: save_to_profile stores the finding's CONTEXT SENTENCE for
+      Layer A kinds, not the bare atom — a vouched '40%' would bless
+      every future 40% claim via substring. Per-draft attestations stay
+      value-based: they die with this text (regeneration clears them)
+      and only suppress flags on THIS draft.
 
-    save_to_profile appends the claim to profile.vouched_facts so future
-    drafts for other jobs can use it without flagging — LENIENT at the
-    bound (the attestation always lands; the profile save is skipped
-    when the claim exceeds 200 chars or the list its 30 items).
+    fabrication_blocked is never cleared on any recovery path.
     """
     from app.schemas.common import dump_json_list, parse_json_list
-    from app.services.cv_service import (
-        VOUCHED_FACTS_MAX_CHARS,
-        VOUCHED_FACTS_MAX_ITEMS,
-    )
+    from app.services.cv_service import VOUCHED_FACTS_MAX_ITEMS
 
     if not draft.fabrication_blocked:
         raise DraftError(
             "Only drafts blocked by the fabrication guard can be attested"
         )
+    attested = [a for a in parse_json_list(
+        getattr(draft, "fabrication_attested", None)) if isinstance(a, dict)]
+    if any(_norm_claim(str(a.get("claim", ""))) == _norm_claim(claim)
+           for a in attested):
+        # Replayed click — idempotent no-op BEFORE the status gate: the
+        # first click may have recovered the draft to 'ready' (or it may
+        # since have been submitted); a replay must not error and must
+        # not mutate anything.
+        return draft
+    if draft.status != "failed":
+        raise DraftError(
+            "Only failed drafts can be confirmed — this one is "
+            f"'{draft.status}'"
+        )
     claim = (claim or "").strip()
     if not claim:
         raise DraftError("Empty claim")
-
-    attested = [a for a in parse_json_list(
-        getattr(draft, "fabrication_attested", None)) if isinstance(a, dict)]
-    if any(_claims_match(str(a.get("claim", "")), claim) for a in attested):
-        return draft  # replayed click — idempotent, no duplicate record
+    if len(claim) > 200:
+        raise DraftError(
+            "Confirm the flagged claim as the guard listed it"
+        )
 
     findings = parse_json_list(draft.fabrication_findings)
     unresolved_high = [f for f in findings
                        if isinstance(f, dict) and f.get("tier") == "high"]
-    if not any(_claims_match(str(f.get("value", "")), claim)
-               for f in unresolved_high):
+    matched = next((f for f in unresolved_high
+                    if _norm_claim(str(f.get("value", ""))) == _norm_claim(claim)),
+                   None)
+    if matched is None:
         raise DraftError(
             "That claim is not currently flagged — confirm the claims the "
             "guard listed, or fix them in the text"
@@ -515,31 +574,68 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
 
     saved = False
     if save_to_profile:
-        vouched = [str(v).strip() for v in parse_json_list(
-            getattr(profile, "vouched_facts", None))]
-        if (claim not in vouched
-                and len(claim) <= VOUCHED_FACTS_MAX_CHARS
-                and len(vouched) < VOUCHED_FACTS_MAX_ITEMS):
-            vouched.append(claim)
-            profile.vouched_facts = dump_json_list(vouched)
-            db.add(profile)
-            saved = True
+        # R5: the sentence is the human-meaningful unit — the fact the
+        # user is actually vouching for. Judge findings carry the claim
+        # itself (their context is the 'why', not a sentence).
+        fact = claim if matched.get("kind") == "judge" else (
+            matched.get("context") or claim)
+        if len(fact) <= 300:  # lenient: the attestation lands regardless
+            vouched = [str(v).strip() for v in parse_json_list(
+                getattr(profile, "vouched_facts", None))]
+            if (fact not in vouched
+                    and len(vouched) < VOUCHED_FACTS_MAX_ITEMS):
+                vouched.append(fact)
+                profile.vouched_facts = dump_json_list(vouched)
+                db.add(profile)
+                saved = True
 
-    attested.append({"claim": claim, "at": utc_now().isoformat(),
+    attested.append({"claim": claim,
+                     "context": matched.get("context") or "",
+                     "at": utc_now().isoformat(),
                      "saved_to_profile": saved})
     draft.fabrication_attested = dump_json_list(attested)
 
-    # Ready when nothing unresolved remains — no AI call: the rest of the
-    # text passed the guard, and this claim (and its extraction variants,
-    # via _claims_match) is now user-confirmed.
-    if not [f for f in unresolved_high
-            if not any(_claims_match(str(a.get("claim", "")),
-                                     str(f.get("value", "")))
-                       for a in attested)]:
+    remaining = [f for f in unresolved_high
+                 if not any(_resolves_finding(a, f) for a in attested)]
+    if remaining:
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+        return draft  # still failed — the panel lists what is left
+
+    # R1: the last claim is confirmed — verify the CURRENT text before
+    # 'ready'. The attested claims ride in the guard's source, so they
+    # cannot re-flag; anything ELSE the guard finds surfaces here.
+    job: Optional[JobPosting] = draft.job
+    if job is None:
+        job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()
+    try:
+        high, advisory = check_package(
+            profile, job, draft.cover_letter, draft.tailored_cv,
+            attested_claims=[a["claim"] for a in attested],
+        )
+    except Exception as e:  # noqa: BLE001 — transport failure, never a verdict
+        draft.error = f"Re-check failed: {type(e).__name__}: {e}"
+        db.add(draft)
+        db.commit()
+        raise DraftError(draft.error) from e
+
+    from app.services.fabrication import findings_as_json
+
+    draft.fabrication_findings = dump_json_list(findings_as_json(high + advisory))
+    if not high:
         draft.status = "ready"
         draft.fabrication_resolved_at = utc_now()
         draft.error = None
-        logger.info("Draft %s RECOVERED by attestation (%d claims)", draft.id, len(attested))
+        logger.info("Draft %s RECOVERED by attestation (%d claims, "
+                    "guard re-run clean)", draft.id, len(attested))
+    else:
+        # New findings on the current text — the loop continues; the
+        # user confirms or fixes these the same way.
+        draft.status = "failed"
+        draft.error = fabrication_block_error(profile.cv_text, high)
+        logger.info("Draft %s attest re-check surfaced %d new findings",
+                    draft.id, len(high))
     db.add(draft)
     db.commit()
     db.refresh(draft)

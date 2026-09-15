@@ -106,7 +106,10 @@ def confirmed_facts_block(lines) -> str:
     )
 
 
-def build_profile_context(profile: Profile, include_derived: bool = True) -> str:
+def build_profile_context(
+    profile: Profile, include_derived: bool = True,
+    include_vouched: bool = True,
+) -> str:
     """Compact text summary of the profile + preferences fed to the matcher."""
     skills = parse_json_list(profile.skills)
     preferred = parse_json_list(profile.preferred_roles)
@@ -163,8 +166,13 @@ def build_profile_context(profile: Profile, include_derived: bool = True) -> str
     # see them; feeding one and not the other is the guard-untraceable
     # trap (guard-only -> the AI never uses them; prompt-only -> the AI
     # uses them and the guard blocks it).
-    context += confirmed_facts_block(parse_json_list(
-        getattr(profile, "vouched_facts", None)))
+    # Review fix R4 (2026-09-15): include_vouched=False excludes them —
+    # the MATCHER opts out. Matching scores must stay comparable under
+    # one MATCHING_INPUT_COMPOSITION_VERSION; a vouched fact confirmed
+    # for one job must not shift scores for unrelated jobs.
+    if include_vouched:
+        context += confirmed_facts_block(parse_json_list(
+            getattr(profile, "vouched_facts", None)))
     return context
 
 

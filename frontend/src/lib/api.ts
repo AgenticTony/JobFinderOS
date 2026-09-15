@@ -312,7 +312,8 @@ export const updateDraft = async (
 
 // WO-23 blocked-draft recovery: run the fabrication guard over the
 // draft's CURRENT text (clean -> ready), and per-claim "This is true —
-// keep it" (when no unresolved claim remains -> ready, no AI call).
+// keep it". Confirming the LAST claim re-runs the guard on the current
+// text before ready (review fix R1) — it can take a few seconds.
 export const recheckDraft = async (draftId: number): Promise<ApplicationDraft> => {
   const response = await slowApi.post<ApplicationDraft>(
     `/api/v1/applications/draft/${draftId}/recheck`

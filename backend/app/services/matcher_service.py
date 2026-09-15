@@ -684,7 +684,11 @@ def _run_matching_loop(
     from concurrent.futures import ThreadPoolExecutor
 
     service = get_ai_service()
-    profile_context = build_profile_context(profile)
+    # include_vouched=False (WO-23 review fix R4): vouched facts serve
+    # tailoring + the guard, NOT match scoring. Scores must stay
+    # comparable under one MATCHING_INPUT_COMPOSITION_VERSION — a fact
+    # confirmed for one job must not shift scores for unrelated jobs.
+    profile_context = build_profile_context(profile, include_vouched=False)
     exclude_keywords = [k.lower() for k in parse_json_list(profile.exclude_keywords)]
     languages = parse_json_list(profile.languages) or []
 

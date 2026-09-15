@@ -252,6 +252,9 @@ async def export_account(
             "cover_letter": d.cover_letter,
             "tailored_cv": d.tailored_cv,
             "changes_summary": d.changes_summary,
+            # WO-23 (review fix R7): the claims the user personally
+            # confirmed on this draft — user-provided data, portable.
+            "fabrication_attested": getattr(d, "fabrication_attested", None),
             "created_at": d.created_at.isoformat() if d.created_at else None,
         }
 
@@ -306,6 +309,9 @@ async def export_account(
             "region": profile.region,
             "municipality": profile.municipality,
             "languages": profile.languages,
+            # WO-23 (review fix R7): user-entered facts — portability
+            # covers them like every other field the user typed.
+            "vouched_facts": profile.vouched_facts,
             "search_queries": profile.search_queries,
             "cv_file_name": profile.cv_file_name,
             "cv_text": profile.cv_text,
