@@ -324,10 +324,11 @@ export const recheckDraft = async (draftId: number): Promise<ApplicationDraft> =
 export const attestDraft = async (
   draftId: number,
   claim: string,
-  saveToProfile = true,
-  // Round-2 N1: the EXPLICIT fact text the user saw in full and opted
-  // in to. Without it the backend saves nothing — it never derives
-  // guard truth the user didn't confirm.
+  saveToProfile = false,
+  // Round 4: saveToProfile defaults FALSE — our UI never sets it true
+  // (per-claim profile saving had no safe form; permanent vouching goes
+  // through the profile editor). The backend additionally only saves a
+  // fact that exactly equals the confirmed claim.
   profileFact?: string
 ): Promise<ApplicationDraft> => {
   const response = await slowApi.post<ApplicationDraft>(

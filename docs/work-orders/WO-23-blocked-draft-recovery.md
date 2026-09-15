@@ -342,3 +342,33 @@ profile"); the sentence link only appears when the sentence differs
 from the claim and fits the 200-char bound.
 
 Suite: 500 passed / 14 skipped; ruff, tsc, `next build` clean.
+
+## Review round 4 (2026-09-15 — 2 findings + the design call)
+
+Round 3's claim-only checkbox recreated R5 as the product default
+(a vouched bare "40%" passes Layer A for any future 40% claim), and
+"Save … instead…" left the claim unresolved. Four rounds of per-claim
+profile saving had alternated between the two bad forms — the atom is
+too broad, the sentence carries unconfirmed claims — so the reviewer's
+stable design was adopted outright (their words: a product decision
+rather than a bug fix):
+
+**Confirming a claim resolves THIS draft only. Permanent vouching goes
+through the profile editor, as text the user typed or fully saw and
+deliberately saved.**
+
+- The per-claim checkbox is GONE. "This is true — keep it" sends
+  `save_to_profile=false` — a per-draft attestation that dies with the
+  text and never touches guard truth for other drafts. The API keeps
+  the fields (backend-gated: a fact saves only when it casefold-equals
+  the confirmed claim), but the client default is now false.
+- The whole-sentence action completes the flow: the confirm dialog
+  shows the full sentence and what it means ("used in future
+  applications and won't be flagged"), saves through `PUT /profile/me`,
+  flushes pending edits, then RE-CHECKS — the sentence is in the
+  guard's source, so a true claim resolves and the draft recovers
+  instead of dangling. Label no longer says "instead": "This whole
+  sentence is true — save it and re-check".
+
+Suite: 500 passed / 14 skipped (backend unchanged this round);
+ruff, tsc, `next build` clean.

@@ -1441,8 +1441,6 @@ function DraftCard({
   const advisoryFindings = (draft.fabrication_findings ?? []).filter(
     (f) => f.tier === 'advisory'
   );
-  // Per-claim "Also add to my profile" (default on, per the WO flow)
-  const [alsoProfile, setAlsoProfile] = useState<Record<string, boolean>>({});
 
   const save = async () => {
     setBusy('save');
@@ -1510,11 +1508,16 @@ function DraftCard({
 
   // WO-23: per-claim "This is true — keep it". When no unresolved claim
   // remains the backend flips the draft to ready — no further AI call.
-  const attest = async (claim: string, saveToProfile: boolean, profileFact?: string) => {
+  // Round 4: confirming resolves THIS draft only — saveToProfile is
+  // always false from our UI. Per-claim profile saving had no safe form
+  // (bare atom: any future "40%" passes Layer A; whole sentence: its
+  // unconfirmed claims ride along). Permanent vouching goes through the
+  // profile editor — typed, or the explicit whole-sentence action below.
+  const attest = async (claim: string) => {
     setSubmitError(null);
     setBusy(`attest:${claim}`);
     try {
-      await attestDraft(draft.id, claim, saveToProfile, profileFact);
+      await attestDraft(draft.id, claim, false);
       await onChanged();
     } catch (err) {
       setSubmitError(apiErrorMessage(err));
@@ -1523,13 +1526,15 @@ function DraftCard({
     }
   };
 
-  // Round-3 N1: saving the finding's FULL sentence is its own explicit
-  // action — the confirm dialog shows all of it, and it saves through
-  // the profile-editor channel (the user-entered-facts surface), never
-  // through the per-claim attest opt-in.
+  // Round 4: saving the finding's FULL sentence is its own explicit
+  // action — the confirm dialog shows all of it, it saves through the
+  // profile-editor channel (the user-entered-facts surface), and the
+  // flow COMPLETES: a re-check runs right after, so the claim resolves
+  // (the sentence is now in the guard's source) instead of leaving the
+  // draft blocked with the claim still listed.
   const saveSentence = async (sentence: string) => {
     if (!window.confirm(
-      `Add this whole sentence to your vouched facts?\n\n“${sentence}”`
+      `Add this whole sentence to your vouched facts?\n\n“${sentence}”\n\nIt will be used in future applications and won't be flagged.`
     )) {
       return;
     }
@@ -1541,6 +1546,11 @@ function DraftCard({
       if (!existing.includes(sentence)) {
         await updateProfile({ vouched_facts: [...existing, sentence] });
       }
+      if (dirty) {
+        await updateDraft(draft.id, draftSavePayload(draft, edits));
+        onClearEdits();
+      }
+      await recheckDraft(draft.id);
       await onChanged();
     } catch (err) {
       setSubmitError(apiErrorMessage(err));
@@ -1660,12 +1670,10 @@ function DraftCard({
                   </p>
                   <ul className="space-y-2.5">
                     {unresolvedHigh.map((f, i) => {
-                      // Round-3 N1: the per-claim opt-in saves ONLY the
-                      // claim itself (what the user confirmed). The full
-                      // sentence — shown untruncated above — is a
-                      // separate explicit action (saveSentence).
-                      const claimTooLong = f.value.length > 200;
-                      const addToProfile = (alsoProfile[f.value] ?? true) && !claimTooLong;
+                      // Round 4: confirming resolves THIS draft only —
+                      // no profile write. The full sentence (shown
+                      // untruncated above) is the separate permanent
+                      // option, and it completes the flow with a re-check.
                       const sentence = (f.context || '').trim();
                       const sentenceSaveable = sentence
                         && sentence !== f.value.trim() && sentence.length <= 200;
@@ -1678,24 +1686,13 @@ function DraftCard({
                         <div className="mt-1.5 flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => attest(f.value, addToProfile, addToProfile ? f.value : undefined)}
+                            onClick={() => attest(f.value)}
                             disabled={busy !== null}
                             className="inline-flex items-center gap-1 rounded-lg border border-bad/40 px-2.5 py-1 text-xs text-mid transition-colors hover:border-bad hover:text-hi disabled:opacity-40"
                           >
                             <Check className="h-3 w-3" />
                             {busy === `attest:${f.value}` ? 'Confirming + checking…' : 'This is true — keep it'}
                           </button>
-                          <label className="flex items-center gap-1.5 text-xs text-low">
-                            <input
-                              type="checkbox"
-                              disabled={claimTooLong}
-                              checked={addToProfile}
-                              onChange={(e) =>
-                                setAlsoProfile((m) => ({ ...m, [f.value]: e.target.checked }))
-                              }
-                            />
-                            {claimTooLong ? 'Claim too long for your profile' : 'Also add “' + f.value + '” to my profile'}
-                          </label>
                         </div>
                         {sentenceSaveable && (
                           <button
@@ -1703,8 +1700,9 @@ function DraftCard({
                             onClick={() => saveSentence(sentence)}
                             disabled={busy !== null}
                             className="mt-1 text-xs text-low underline underline-offset-2 transition-colors hover:text-mid disabled:opacity-40"
+                            title="Saves the sentence to your profile and re-checks this draft"
                           >
-                            {busy === 'save-sentence' ? 'Saving…' : 'Save the whole sentence to my profile instead…'}
+                            {busy === 'save-sentence' ? 'Saving + re-checking…' : 'This whole sentence is true — save it and re-check'}
                           </button>
                         )}
                       </li>
