@@ -2636,15 +2636,17 @@ class TestWO23BlockedDraftRecovery:
         )
         assert d2.status == "ready", d2.error
 
-        # The informed path: the client sends the sentence the user saw
-        # in full — exactly that text is saved, nothing derived.
+        # The informed path (round 3): the per-claim opt-in saves the
+        # CLAIM itself — exactly what the user confirmed. The full
+        # sentence is a separate action through the profile editor
+        # (covered by test_sentence_shaped_fact_is_not_saved_by_attest).
         p2, job2, uid2 = self._seed(client, db)
         self._script_tailor(
             monkeypatch, [metric_out, metric_out, metric_out])
         d3 = create_draft_for_job(db, job2, profile=p2, user_id=uid2)
         d4 = attest_claim(db, d3, "40%", save_to_profile=True,
-                          profile_fact=sentence, profile=p2)
-        assert json.loads(p2.vouched_facts or "[]") == [sentence]
+                          profile_fact="40%", profile=p2)
+        assert json.loads(p2.vouched_facts or "[]") == ["40%"]
         assert d4.status == "ready", d4.error
 
     def test_attest_final_check_does_not_inherit_unconfirmed_sentence(self, client, db, monkeypatch):
@@ -2677,6 +2679,89 @@ class TestWO23BlockedDraftRecovery:
         findings = json.loads(d2.fabrication_findings or "[]")
         assert any("team of 12" in f["value"] for f in findings), findings
 
+    # N3-round-3: the FRONTEND-shaped payload — profile_fact set to the
+    # finding's context sentence (what the old UI sent by default on a
+    # plain confirm click). The per-claim opt-in may save only the claim
+    # itself; a longer text the user did not separately opt into must
+    # not reach the profile OR the final check's source.
+    def test_sentence_shaped_fact_is_not_saved_by_attest(self, client, db, monkeypatch):
+        import json
+
+        from app.services import draft_service as ds
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "Led a team of 12 at Svenska Spel cutting costs 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+
+        # Capture the judge's source on the attest-triggered final check
+        sources = []
+        from app.services.ai_service import AIService
+
+        def fake_judge(self_, source_of_truth, tailored_text):
+            sources.append(source_of_truth)
+            return [{"claim": "Led a team of 12", "why": "not in the CV"}]
+
+        fake = AIService.__new__(AIService); fake.model = "glm-test"
+        monkeypatch.setattr(ds, "get_ai_service", lambda: fake)
+        monkeypatch.setattr(AIService, "judge_fabrication", fake_judge)
+        monkeypatch.setattr(ds.settings, "FABRICATION_JUDGE", "on",
+                            raising=False)
+
+        # The old UI's payload: the whole sentence as the fact
+        d2 = attest_claim(db, d, "40%", save_to_profile=True,
+                          profile_fact=sentence, profile=p)
+        vouched = json.loads(p.vouched_facts or "[]")
+        assert vouched == [], (
+            f"a sentence-shaped profile_fact rode through the per-claim "
+            f"opt-in: {vouched}"
+        )
+        assert "team of 12" not in json.dumps(vouched)
+        assert sources, "the final check never ran"
+        confirmed_block = [
+            src for src in sources
+            if "Facts the user has personally confirmed" in src
+        ]
+        assert not any("team of 12" in src for src in confirmed_block), (
+            "the unconfirmed sentence reached the final check's source as "
+            "user-confirmed truth"
+        )
+        assert d2.status == "failed", (
+            "the judge must still be able to flag the sentence's other "
+            "claims"
+        )
+        attested = json.loads(d2.fabrication_attested or "[]")
+        assert attested and attested[0]["saved_to_profile"] is False
+
+    def test_attest_saves_only_the_claim_itself(self, client, db, monkeypatch):
+        import json
+
+        from app.services.draft_service import attest_claim, create_draft_for_job
+
+        p, job, uid = self._seed(client, db)
+        sentence = "I cut the ticket backlog by 40%."
+        metric_out = {
+            "cover_letter": sentence,
+            "tailored_cv": "Erik. Python developer at Svenska Spel.",
+            "changes_summary": [],
+        }
+        self._script_tailor(
+            monkeypatch, [metric_out, metric_out, metric_out])
+        d = create_draft_for_job(db, job, profile=p, user_id=uid)
+        d2 = attest_claim(db, d, "40%", save_to_profile=True,
+                          profile_fact="40%", profile=p)
+        assert json.loads(p.vouched_facts or "[]") == ["40%"], (
+            "the per-claim opt-in must save exactly the confirmed claim"
+        )
+        assert d2.status == "ready", d2.error
+
     # N2: ONE bound at both write sites — an attest-saved fact must never
     # block a later profile preferences save (the form resends the list)
     def test_attest_fact_survives_profile_round_trip(self, client, db, monkeypatch):
@@ -2695,9 +2780,9 @@ class TestWO23BlockedDraftRecovery:
             monkeypatch, [metric_out, metric_out, metric_out])
         d = create_draft_for_job(db, job, profile=p, user_id=uid)
         attest_claim(db, d, "40%", save_to_profile=True,
-                     profile_fact=sentence, profile=p)
+                     profile_fact="40%", profile=p)
         vouched = json.loads(p.vouched_facts or "[]")
-        assert vouched, "setup: the fact must save for the round-trip"
+        assert vouched == ["40%"], "setup: the fact must save for the round-trip"
 
         # The Profile form resends the whole list on every save — the
         # editor's 200-char bound must accept everything attest writes.

@@ -310,3 +310,35 @@ confirmed. All three findings verified real and fixed red-first:
   which is gone). Tested with a 230-char judge claim → confirm → ready.
 
 Suite: 498 passed / 14 skipped; ruff, tsc, `next build` clean.
+
+## Review round 3 (2026-09-15 — 1 finding, fixed)
+
+**N1 residual**: the round-2 backend gate was right, but the UI still
+sent the finding's full sentence as `profile_fact` by default — a plain
+"This is true — keep it" click on "40%" posted "Led a team of 12 … 40%"
+and the backend saved it before the final check, exactly what N1 was
+meant to stop. The round-2 tests only covered the raw-API path without
+a fact, missing the payload the product actually sends.
+
+Fix (all three of the reviewer's asks):
+
+- The per-claim checkbox now saves ONLY the claim itself — enforced in
+  the BACKEND: `profile_fact` is saved iff it casefold-equals the
+  confirmed claim. A sentence-shaped fact (the old UI's payload) saves
+  nothing, whatever a client sends.
+- Saving the full sentence is its own explicit action: a separate link
+  under the claim opens a confirm dialog showing the whole sentence,
+  then saves through the profile-editor channel (`PUT /profile/me`) —
+  the user-entered-facts surface, never the attest opt-in.
+- The frontend-shaped test (`test_sentence_shaped_fact_is_not_saved_
+  by_attest`) posts `profile_fact = context` exactly as the old UI did
+  and asserts: nothing lands in `vouched_facts`, the confirmed-facts
+  block in the FINAL CHECK's captured judge source lacks the sentence,
+  and the judge can still flag "team of 12". Red-proven by flipping the
+  equality gate out.
+
+Checkbox label now shows exactly what it saves ("Also add '40%' to my
+profile"); the sentence link only appears when the sentence differs
+from the claim and fits the 200-char bound.
+
+Suite: 500 passed / 14 skipped; ruff, tsc, `next build` clean.

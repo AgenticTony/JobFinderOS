@@ -1523,6 +1523,32 @@ function DraftCard({
     }
   };
 
+  // Round-3 N1: saving the finding's FULL sentence is its own explicit
+  // action — the confirm dialog shows all of it, and it saves through
+  // the profile-editor channel (the user-entered-facts surface), never
+  // through the per-claim attest opt-in.
+  const saveSentence = async (sentence: string) => {
+    if (!window.confirm(
+      `Add this whole sentence to your vouched facts?\n\n“${sentence}”`
+    )) {
+      return;
+    }
+    setSubmitError(null);
+    setBusy('save-sentence');
+    try {
+      const current = await getProfile();
+      const existing = current?.vouched_facts ?? [];
+      if (!existing.includes(sentence)) {
+        await updateProfile({ vouched_facts: [...existing, sentence] });
+      }
+      await onChanged();
+    } catch (err) {
+      setSubmitError(apiErrorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // Every failed draft gets the way out that already exists in the API:
   // prepareDraft regenerates a failed draft's documents without the
   // flagged claims.
@@ -1634,13 +1660,15 @@ function DraftCard({
                   </p>
                   <ul className="space-y-2.5">
                     {unresolvedHigh.map((f, i) => {
-                      // N1: the fact this claim can save is its full
-                      // sentence, shown untruncated above — never more
-                      // than the user has seen. N2: bounded like the
-                      // profile editor, or the save is skipped.
-                      const fact = f.context || f.value;
-                      const factTooLong = fact.length > 200;
-                      const addToProfile = (alsoProfile[f.value] ?? true) && !factTooLong;
+                      // Round-3 N1: the per-claim opt-in saves ONLY the
+                      // claim itself (what the user confirmed). The full
+                      // sentence — shown untruncated above — is a
+                      // separate explicit action (saveSentence).
+                      const claimTooLong = f.value.length > 200;
+                      const addToProfile = (alsoProfile[f.value] ?? true) && !claimTooLong;
+                      const sentence = (f.context || '').trim();
+                      const sentenceSaveable = sentence
+                        && sentence !== f.value.trim() && sentence.length <= 200;
                       return (
                       <li key={i} className="text-sm text-mid">
                         • <span className="font-medium text-hi">{f.value}</span>
@@ -1650,7 +1678,7 @@ function DraftCard({
                         <div className="mt-1.5 flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => attest(f.value, addToProfile, addToProfile ? fact : undefined)}
+                            onClick={() => attest(f.value, addToProfile, addToProfile ? f.value : undefined)}
                             disabled={busy !== null}
                             className="inline-flex items-center gap-1 rounded-lg border border-bad/40 px-2.5 py-1 text-xs text-mid transition-colors hover:border-bad hover:text-hi disabled:opacity-40"
                           >
@@ -1660,19 +1688,24 @@ function DraftCard({
                           <label className="flex items-center gap-1.5 text-xs text-low">
                             <input
                               type="checkbox"
-                              disabled={factTooLong}
+                              disabled={claimTooLong}
                               checked={addToProfile}
                               onChange={(e) =>
                                 setAlsoProfile((m) => ({ ...m, [f.value]: e.target.checked }))
                               }
                             />
-                            {factTooLong ? 'Sentence too long for your profile' : 'Also add to my profile'}
+                            {claimTooLong ? 'Claim too long for your profile' : 'Also add “' + f.value + '” to my profile'}
                           </label>
                         </div>
-                        {addToProfile && (
-                          <p className="mt-1 text-xs text-low">
-                            Will add to profile: “{fact}”
-                          </p>
+                        {sentenceSaveable && (
+                          <button
+                            type="button"
+                            onClick={() => saveSentence(sentence)}
+                            disabled={busy !== null}
+                            className="mt-1 text-xs text-low underline underline-offset-2 transition-colors hover:text-mid disabled:opacity-40"
+                          >
+                            {busy === 'save-sentence' ? 'Saving…' : 'Save the whole sentence to my profile instead…'}
+                          </button>
                         )}
                       </li>
                       );

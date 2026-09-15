@@ -583,10 +583,17 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
     saved = False
     if save_to_profile:
         fact = (profile_fact or "").strip()
+        # Round-3 N1: the per-claim opt-in saves ONLY the confirmed claim
+        # itself — a longer text (the finding's sentence, what the old UI
+        # sent by default) carries claims the user did NOT confirm and
+        # must not reach the profile or the final check's source. The
+        # full sentence is a separate explicit action through the
+        # profile editor, where the user reads what gets saved.
         # ONE bound with the profile editor (N2): the Profile form
         # resends the whole vouched list on every save — anything this
         # path writes must survive normalize_vouched_facts verbatim.
-        if 0 < len(fact) <= VOUCHED_FACTS_MAX_CHARS:
+        if (0 < len(fact) <= VOUCHED_FACTS_MAX_CHARS
+                and _norm_claim(fact) == _norm_claim(claim)):
             vouched = [str(v).strip() for v in parse_json_list(
                 getattr(profile, "vouched_facts", None))]
             if (fact not in vouched
