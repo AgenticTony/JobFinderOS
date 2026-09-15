@@ -145,6 +145,10 @@ def test_real_tailoring_produces_zero_unsupported_claims():
                 "tailored": tailored,
                 "layer_a": findings_as_json(findings),
                 "judge": unsupported,
+                # Which tailoring prompt produced this catch — WO-02 rate
+                # runs are only comparable within one prompt version
+                # (t1-… since 2026-09-15; pre-t1 files are unversioned).
+                "tailoring_prompt_version": AIService.tailoring_prompt_version(),
             }, ensure_ascii=False, indent=2))
             print(f"      snapshot saved: {snapshot.name}")
 

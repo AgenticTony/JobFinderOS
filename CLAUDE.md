@@ -148,7 +148,14 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   threads inside copied contexts (ai_usage attribution survives), every DB
   write on the calling thread. The flat-rate key's behavior under
   parallelism is unmeasured: watch the first uncapped hunts and tune.
-- Tailoring: default temperature 0.3 (variety in cover letters is desirable)
+- Tailoring: default temperature 0.3 (variety in cover letters is desirable).
+  Craft rules adopted 2026-09-15 from the cv-writing.skill tier-1 review
+  (terminology mirroring, voice preservation / anti-AI-tell register,
+  cover-letter structure, Swedish register) — measured before/after per WO-02
+  discipline; see the WO-02 addendum (5/5 → 4/5 on the 5-job pool, residual
+  classes recorded). The tailor prompt is now versioned:
+  `AIService.tailoring_prompt_version()` = `t1-c3417954`, pinned in
+  `TestTailorPromptCraft` — silent edits fail CI like the match prompt.
 - Prompt version: `AIService.matching_prompt_version()` — SHA-256 of the prompt
   text; any accidental edit changes the version and calibration tests fail
 - Dead-band: scores in [13, 25) are re-scored once and averaged before keep/dismiss

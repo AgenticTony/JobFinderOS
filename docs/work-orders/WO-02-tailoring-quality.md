@@ -90,3 +90,53 @@ sample than 5 jobs before prompt surgery — the re-measurement protocol
 auto-saves a regression fixture. The next rate check should run
 FABRICATION_N=20 before any prompt change, and after any, so the
 effect is measured, not felt.
+
+## Addendum — 2026-09-15: t1 craft adoption, measured before/after
+
+The first deliberate prompt change since this WO, per its own
+discipline (same-day before/after, same pool, same model; N=5 — the
+pool ceiling this WO already recorded):
+
+- **Change**: four craft rules adopted into `_build_tailoring_prompt()`
+  from the `cv-writing.skill` tier-1 review — terminology mirroring
+  (employer's exact term for honestly-held skills), voice preservation
+  (no polishing the CV's own phrasing; banned register: hedged
+  intensifiers, spearheaded/orchestrated-class verbs, rule-of-three
+  lists), cover-letter structure (why THIS employer + practicalities
+  line only when the profile states them), Swedish register
+  (understated; no American superlatives).
+- **Versioning**: the tailor prompt is now pinned —
+  `AIService.tailoring_prompt_version()` = `t1-c3417954`, hash of
+  prompt + input composition (mirrors the match-prompt scheme;
+  `TestTailorPromptCraft` fails on any silent edit). The harness
+  snapshots record the version from t1 onward.
+- **Measured** (5 approved jobs, owner's CV, glm-5.1):
+
+  | | pre-t1 | t1 |
+  |---|---|---|
+  | docs with findings | **5/5** | **4/5** |
+  | judge findings | 14 | 11 |
+  | layer-A high | 0 | 1 |
+
+  Job 583 (IT konsult, Swedish) came back fully clean under t1 — its
+  pre-t1 catches were the dropped "Junior", "jobbar dagligen med
+  C#/.NET", and a consulting-experience implication.
+
+- **Honest read**: direction consistent, magnitude within noise at
+  N=5 with unquantified judge-strictness variance. This is NOT a
+  claim that t1 fixed the rate; it is the recorded baseline pair the
+  next change measures against.
+- **Residual classes** (from the t1 snapshots, for the next prompt
+  iteration): frequency/intensity inflation ("use daily" — 342, 583's
+  pre-t1 shape), focus recharacterization (frontend-focus vs the CV's
+  backend-focus, 316), project-property embellishment ("structured
+  outputs", "latency-optimized", 300/580), practicalities invention
+  ("open to relocating to Berlin" — present in BOTH runs, so it
+  predates the practicalities line, but the new line is an invention
+  pressure when profile context is thin). Candidate t2 rule, not yet
+  applied: frequency and intensity claims must quote the CV's own
+  wording — the same shape as the language-proficiency rule.
+- **On-disk fixtures**: live_catch_{300,316,342,580} are t1-run
+  catches; live_catch_583 is retained from the pre-t1 run (its job
+  was clean under t1; the pre-t1 catches stay load-bearing for the
+  checker per TestLiveCatchFixturesLoadBearing).
