@@ -150,11 +150,14 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   parallelism is unmeasured: watch the first uncapped hunts and tune.
 - Tailoring: default temperature 0.3 (variety in cover letters is desirable).
   Craft rules adopted 2026-09-15 from the cv-writing.skill tier-1 review
-  (terminology mirroring, voice preservation / anti-AI-tell register,
-  cover-letter structure, Swedish register) — measured before/after per WO-02
-  discipline; see the WO-02 addendum (5/5 → 4/5 on the 5-job pool, residual
-  classes recorded). The tailor prompt is now versioned:
-  `AIService.tailoring_prompt_version()` = `t1-c3417954`, pinned in
+  (posting-aligned emphasis, voice preservation / anti-AI-tell register,
+  cover-letter structure, Swedish register), same-day review-hardened (t2)
+  so every rule stays traceable by the fabrication guard — the guard's truth
+  is CV + profile and it NEVER sees the job posting, so rules must not push
+  the model toward posting-only terms, quoted team names, or non-CV
+  practicalities. Measured before/after per WO-02 discipline; rate pairs and
+  residual classes in the WO-02 addendum. The tailor prompt is versioned:
+  `AIService.tailoring_prompt_version()` = `t2-95af0d8b`, pinned in
   `TestTailorPromptCraft` — silent edits fail CI like the match prompt.
 - Prompt version: `AIService.matching_prompt_version()` — SHA-256 of the prompt
   text; any accidental edit changes the version and calibration tests fail

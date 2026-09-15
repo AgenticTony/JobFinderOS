@@ -4620,19 +4620,24 @@ class TestTailorPromptLanguageRule:
         assert "god nivå" in prompt and "obehindrad" in prompt
 
 
-#: The tailoring prompt in force since the cv-writing.skill tier-1 craft
-#: adoption (2026-09-15). If the prompt text changes,
-#: AIService.tailoring_prompt_version() changes and the pinned test fails —
-#: bump DELIBERATELY and re-run RUN_FABRICATION before/after (WO-02).
-TAILORED_PROMPT_VERSION = "t1-c3417954"
+#: The tailoring prompt in force since the cv-writing.skill craft
+#: adoption (t1, 2026-09-15) and its same-day review hardening (t2:
+#: the three guard-untraceable rules narrowed to CV-traceable forms).
+#: If the prompt text changes, AIService.tailoring_prompt_version()
+#: changes and the pinned test fails — bump DELIBERATELY and re-run
+#: RUN_FABRICATION before/after (WO-02).
+TAILORED_PROMPT_VERSION = "t2-95af0d8b"
 
 
 class TestTailorPromptCraft:
     """2026-09-15, cv-writing.skill tier 1: four craft rules mined from the
-    packaged cv-writing skill (mirroring, anti-AI-tell register, cover-
-    letter structure, Swedish register), plus a prompt-version pin — the
-    match prompt has had one since calibration; the tailor prompt had
-    none, so accidental edits were silent."""
+    packaged cv-writing skill (posting-aligned emphasis, anti-AI-tell
+    register, cover-letter structure, Swedish register), plus a
+    prompt-version pin — the match prompt has had one since calibration;
+    the tailor prompt had none, so accidental edits were silent. The
+    alignment and structure rules are t2-hardened: every rule must be
+    traceable by the fabrication guard (CV + profile lexicon), which
+    never sees the job posting."""
 
     def _captured_prompt(self, monkeypatch):
         import json as _json
@@ -4657,12 +4662,14 @@ class TestTailorPromptCraft:
         )
         return captured["system"]
 
-    def test_prompt_mirrors_the_jobs_own_terminology(self, monkeypatch):
-        # Gate-2 lever: the employer's exact vocabulary for honestly-held
-        # skills, anchored against fabrication (never for skills they lack)
+    def test_prompt_aligns_skills_using_the_cvs_own_terms(self, monkeypatch):
+        # Gate-2 lever, guard-compatible (2026-09-15 review): make the
+        # CV's own evidence for the posting's requirements prominent —
+        # never swap in posting synonyms, which the fabrication guard
+        # (CV+profile lexicon) cannot trace and the judge flags
         prompt = self._captured_prompt(monkeypatch)
-        assert "Mirror the job posting" in prompt
-        assert "employer's exact term" in prompt
+        assert "CV's own term" in prompt
+        assert "Do not swap in the posting's synonym" in prompt
 
     def test_prompt_preserves_the_cvs_voice(self, monkeypatch):
         # The tailor's AI-tell failure mode is polishing the human's real
@@ -4674,10 +4681,23 @@ class TestTailorPromptCraft:
 
     def test_prompt_structures_the_cover_letter(self, monkeypatch):
         # Why THIS employer + one practicalities line — the parts that
-        # survive the recruiter's verification read
+        # survive the recruiter's verification read. Review-hardened:
+        # employer specificity must be PARAPHRASED (posting proper nouns
+        # and figures trip the guard as org/metric claims — the 342
+        # fixture's "Operations Engineering Team" false positive), and
+        # practicalities are CV-carried only (availability/notice/
+        # relocation never are; relocation passes the guard invisibly
+        # because preferred_locations is guard-truth)
         prompt = self._captured_prompt(monkeypatch)
         assert "why THIS employer" in prompt
         assert "practicalities" in prompt
+        assert "own paraphrased words" in prompt
+        assert "quote the posting's team names" in prompt, (
+            "posting proper nouns trip the guard as org claims"
+        )
+        assert "Never state availability" in prompt, (
+            "notice/availability/relocation are never CV-carried"
+        )
 
     def test_prompt_sets_the_swedish_register(self, monkeypatch):
         # Understated and factual for Swedish output; American-register

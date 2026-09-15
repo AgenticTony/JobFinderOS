@@ -361,10 +361,13 @@ Prepare my tailored application package.
         accidental edits were silent).
 
         The four craft rules adopted 2026-09-15 from the cv-writing.skill
-        tier-1 review: terminology mirroring, voice preservation,
-        cover-letter structure, Swedish register. Measured against the
-        fabrication baseline before/after (RUN_FABRICATION) per WO-02's
-        discipline."""
+        tier-1 review: posting-aligned emphasis (CV's own terms — t2),
+        voice preservation, cover-letter structure (paraphrased employer
+        specificity, CV-carried practicalities — t2), Swedish register.
+        Every rule is shaped to stay traceable by the fabrication guard,
+        whose truth is the CV + profile and which never sees the job
+        posting. Measured against the fabrication baseline before/after
+        (RUN_FABRICATION) per WO-02's discipline."""
         return """You are an expert career coach preparing a job application package.
 The person reading your output IS the job seeker (never say "the candidate").
 
@@ -383,10 +386,12 @@ RULES — READ BEFORE WRITING ANYTHING
   * Experience bullets from the original CV most relevant to this role kept
     and made prominent; clearly irrelevant material trimmed or shortened
   * Keep the original chronology and job titles — do not rename roles
-- Mirror the job posting's own terminology where it is honestly true: if the
-  posting says "serviceorder" or "ticket handling" and the CV shows that work,
-  name it with the employer's exact term. Adopt their vocabulary only for
-  skills the person genuinely has — mirroring a skill they lack is fabrication.
+- Align your skills with the job posting's requirements: where the posting
+  asks for something the CV evidences, make that evidence prominent using
+  the CV's own term for it. Do not swap in the posting's synonym for work
+  the CV names differently — every term must stay traceable to the CV's
+  own wording. Naming a skill the person does not have is fabrication,
+  whatever term is used.
 - Preserve the CV's own voice. Do not polish or "improve" its phrasing — the
   specific, uneven, human wording is an asset, and fluent generic rewording
   is how machine-written documents read. Where you do write (the summary
@@ -396,11 +401,14 @@ RULES — READ BEFORE WRITING ANYTHING
   rewrote), no rule-of-three virtue lists, and no sentence a thousand other
   applicants could carry unchanged.
 - The cover letter is in FIRST PERSON ("I..."), under 220 words, addressed to
-  the employer: why THIS employer specifically (something only true of them),
-  1-2 concrete, real pieces of experience from the CV that fit THIS job's
-  requirements (not a restatement of the CV), and — only when the profile
-  states them — one practicalities line (availability, notice period,
-  location). Warm, direct, no fluff, no generic filler.
+  the employer: why THIS employer specifically — what in the role or its
+  domain attracts you, expressed in your own paraphrased words (do not
+  quote the posting's team names, product names or figures); then 1-2
+  concrete, real pieces of experience from the CV that fit THIS job's
+  requirements (not a restatement of the CV); and, only when the CV itself
+  states it, one practicalities line (your location or remote preference).
+  Never state availability, notice periods or relocation openness — the
+  CV does not carry them. Warm, direct, no fluff, no generic filler.
 - changes_summary: 3-5 short bullets addressed to the job seeker in second
   person ("Moved your Azure experience to the top because this role...").
 - Write both documents in the language of the job posting (a German posting
@@ -760,12 +768,17 @@ An empty list means the document is faithful."""
         return f"{cls.MATCHING_PROMPT_MAJOR}-{digest}"
 
     #: Tailoring-prompt major. t1 = 2026-09-15, the cv-writing.skill
-    #: tier-1 craft rules (terminology mirroring, voice preservation,
-    #: cover-letter structure, Swedish register). NOT stored on draft
-    #: rows — drafts are not cross-compared numerically the way scores
-    #: are; the pin exists so accidental edits fail the pinned test and
-    #: fabrication-rate runs stay attributable to a prompt id.
-    TAILORING_PROMPT_MAJOR = "t1"
+    #: tier-1 craft rules. t2 = same day, review-hardened: the three
+    #: rules the fabrication guard could not trace were narrowed to
+    #: CV-traceable forms (posting-aligned emphasis keeps the CV's own
+    #: terms; employer specificity is paraphrased, never quoted proper
+    #: nouns; practicalities are CV-carried only — availability/notice/
+    #: relocation forbidden, since relocation passes the guard invisibly
+    #: via preferred_locations). NOT stored on draft rows — drafts are
+    #: not cross-compared numerically the way scores are; the pin exists
+    #: so accidental edits fail the pinned test and fabrication-rate
+    #: runs stay attributable to a prompt id.
+    TAILORING_PROMPT_MAJOR = "t2"
 
     #: Bump when the tailoring INPUT COMPOSITION changes — anything the
     #: model sees besides the system prompt (the profile-context
