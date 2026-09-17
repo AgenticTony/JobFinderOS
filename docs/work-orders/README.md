@@ -39,7 +39,7 @@ WO0–WO5 into this queue as the single source of sequencing. **Do not cite a
 bare "WO3" in either document until this is settled** — always qualify it as
 `MIGRATION.md WO3` or `work-orders/WO-03`.
 
-## Queue — open work (board refreshed 2026-09-08)
+## Queue — open work (board refreshed 2026-09-15)
 
 | # | Work order | Pri | Depends on | Status | Why now |
 |---|---|---|---|---|---|
@@ -51,7 +51,6 @@ bare "WO3" in either document until this is settled** — always qualify it as
 | **WO-20** | Outcome layer: canonical statuses, reply detection, deadline & follow-up nudges | P1 | — | open | ROADMAP's launch weapon, executed. Replies already land in the user's inbox (`reply_to` = account email) and Composio Gmail is connected in production — reply detection is a read-side use of machinery we own. Manual markers ship first; stats get a real denominator. Full detail: `WO-20-outcome-layer.md` |
 | **WO-21** | Outbound PDF text-layer verification | P2 | — | open | Half-day: pypdf extraction check on every generated CV/cover letter (test-time assert + runtime send-block). The PDF is the artifact the employer keeps; the unicode-font fallback path can silently break the text layer ATS parsers read. Full detail: `WO-21-pdf-text-layer.md` |
 | **WO-22** | Apply-time link recovery (dead portal → live twin from the pool) | P2 | WO-18 ✅ | open | Second pass over `ai-job-search`: their apply flow ESCALATES a dead posting to the employer's own listing instead of warning. WO-18's `likely_same_job` + `collapse_preference` are the lookup engine; when the pool holds only the degraded copy, hand off the live twin instead of a dead link. Full detail: `WO-22-apply-link-recovery.md` |
-| **WO-23** | Blocked-draft recovery: edit, re-check, vouch | P1 | — | open | A guard-blocked draft is a dead end today: the text is persisted and the edit API accepts it, but the UI hides the editor and nothing moves `failed → ready`. Edit in Review & Send, **Check again**, and per-claim **This is true** backed by a Profile "things I can vouch for" list that feeds BOTH the prompt and the guard. Never a whole-draft override. Full detail: `WO-23-blocked-draft-recovery.md` |
 
 Also live on the platform but tracked outside this queue (see CLAUDE.md open
 items): **send-from-own-Gmail as a submit `method`** — the Composio
@@ -111,6 +110,20 @@ Nothing here is to be redone — this is the record of what shipped.
   suite 436/2; live check on production rows: all three pairs collapse,
   #47 (live aplitrak portal) strictly preferred. See the WO's execution
   record.
+- **WO-23** blocked-draft recovery — 2026-09-15 (PR #114): a guard-blocked
+  draft is no longer a dead end. The editor opens on a block, **Check
+  again** re-runs the shared `check_package` (Layer A + judge) on the
+  current text, and **This is true — keep it** confirms ONE use of a
+  flagged claim (value + sentence), resolving this draft only. Permanent
+  vouching goes through `profiles.vouched_facts` (tailoring + guard, never
+  match scoring) via the profile editor or an explicit whole-sentence
+  action. Backend-enforced: confirming the last claim re-runs the full
+  guard, exact per-use match (no whole-draft override), `failed`-only
+  gates (no double send), nothing saved beyond what the user confirmed;
+  `fabrication_blocked` is never cleared. Five review rounds, 15 findings,
+  each red-first; 502/14 local, 514/2 on Postgres CI. Remaining: one live
+  click-through of a real blocked draft before beta testers see it. See
+  the WO's execution record.
 - **WO-14** hunt cadence + trial gating — 2026-08-31: 45-min scrape
   cooldown (repeat Hunt = free no-op, backfill exempt), daily scoring cap
   10/day with a 25-job day-1 boost enforced INSIDE run_matching (manual
