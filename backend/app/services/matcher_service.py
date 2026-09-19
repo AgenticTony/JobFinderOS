@@ -435,7 +435,43 @@ def _run_matching_inner(
         _mark_matching_done(user_id)
 
 
-def _apply_cheap_gates(db, user_id, unmatched, service, languages):
+def reevaluate_eligibility(db: Session, *, user_id, profile) -> int:
+    """WO-19 B (round-1 finding 5): the gate only ran on UNMATCHED jobs,
+    so changing work_rights left existing cards — including citizenship
+    postings a sponsorship seeker can't hold — visible in Awaiting.
+    Deterministic and free: re-evaluate every UNDECIDED match in place
+    whenever the answer changes. 'ineligible' rows are hidden by
+    list_matches (never deleted — the row survives so flipping the
+    answer back resurfaces it); decided rows keep their verdict frozen
+    per the WO-18 never-re-open rule. Returns rows touched."""
+    from app.services.country_lexicon import location_countries
+    from app.services.eligibility_lexicon import evaluate_eligibility
+
+    work_rights = getattr(profile, "work_rights", None) or "prefer_not_say"
+    home = getattr(profile, "country", None)
+    rows = (
+        db.query(MatchResult)
+        .join(JobPosting, MatchResult.job_id == JobPosting.id)
+        .filter(
+            MatchResult.user_id == user_id,
+            MatchResult.decision.is_(None),
+            MatchResult.dismissed_reason.is_(None),
+        )
+        .all()
+    )
+    for m in rows:
+        job = m.job
+        verdict, note = evaluate_eligibility(
+            f"{job.title}\n{job.description or ''}", work_rights,
+            home, location_countries(job.location))
+        m.eligibility = verdict
+        m.eligibility_note = note
+    db.commit()
+    return len(rows)
+
+
+def _apply_cheap_gates(db, user_id, unmatched, service, languages,
+                      work_rights="prefer_not_say", home_country=None):
     """The pre-AI filters: language, PIPE-16 scope, cross-board dedupe,
     fuzzy agency/direct dedupe, WO-18 all-history twin collapse. Pure
     trimming + per-user dismissals — no evaluation slots spent here."""
@@ -468,6 +504,28 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages):
         unmatched = [
             j for j in unmatched if passes_language_filter(j.title, j.description, languages)
         ]
+
+    # WO-19 part B eligibility gate: a posting that requires
+    # citizenship/PR/clearance is categorically unavailable to a user
+    # needing sponsorship — never scored, never shown. Deterministic and
+    # free, so like the scope gate it writes NO row: the user's answer
+    # can change, and the job re-enters the moment it does.
+    from app.services.country_lexicon import location_countries
+    from app.services.eligibility_lexicon import evaluate_eligibility
+
+    blocked = []
+    for j in unmatched:
+        verdict, _note = evaluate_eligibility(
+            f"{j.title}\n{j.description or ''}", work_rights,
+            home_country, location_countries(j.location))
+        if verdict == "ineligible":
+            blocked.append(j)
+    if blocked:
+        logger.info(
+            "Eligibility gate: hard-stopped %d citizenship/clearance "
+            "postings before any AI spend", len(blocked),
+        )
+        unmatched = [j for j in unmatched if j not in blocked]
 
     # PIPE-16 scope gate: the shared pool stores a job when it fits ANY
     # user's scope, so it always held rows this user's own fetch would
@@ -684,15 +742,28 @@ def _run_matching_loop(
     from concurrent.futures import ThreadPoolExecutor
 
     service = get_ai_service()
-    # include_vouched=False (WO-23 review fix R4): vouched facts serve
-    # tailoring + the guard, NOT match scoring. Scores must stay
-    # comparable under one MATCHING_INPUT_COMPOSITION_VERSION — a fact
-    # confirmed for one job must not shift scores for unrelated jobs.
-    profile_context = build_profile_context(profile, include_vouched=False)
+    # include_vouched/include_work_rights = False (WO-23 R4, WO-19 B):
+    # vouched facts and work rights serve tailoring + the guard, NOT
+    # match scoring. Scores must stay comparable under one
+    # MATCHING_INPUT_COMPOSITION_VERSION — a fact confirmed for one job
+    # (or a work-rights answer) must not shift scores for unrelated
+    # jobs. No re-score is owed for part B.
+    from app.services.country_lexicon import location_countries
+    from app.services.eligibility_lexicon import evaluate_eligibility
+
+    profile_context = build_profile_context(
+        profile, include_vouched=False, include_work_rights=False)
     exclude_keywords = [k.lower() for k in parse_json_list(profile.exclude_keywords)]
     languages = parse_json_list(profile.languages) or []
 
-    unmatched = _apply_cheap_gates(db, user_id, unmatched, service, languages)
+    work_rights = getattr(profile, "work_rights", None) or "prefer_not_say"
+    # Read ONCE: the profile ORM object is NOT touched inside the loop —
+    # a GDPR erase mid-run expires it, and per-job attribute reads raised
+    # ObjectDeletedError (caught by TestDeletedUserAbortsMatching).
+    home_country = getattr(profile, "country", None)
+    unmatched = _apply_cheap_gates(
+        db, user_id, unmatched, service, languages, work_rights=work_rights,
+        home_country=home_country)
 
     # None (beta uncapped) = no deadline: run until the backlog drains.
     deadline = (time.time() + max_seconds) if max_seconds else None
@@ -766,9 +837,17 @@ def _run_matching_loop(
 
         # Keep-min check on the FINAL averaged value
         if final_score < settings.MATCH_KEEP_MIN_SCORE:
+            # WO-19 part B: the deterministic eligibility verdict for
+            # every SHOWN (or auto-dismissed) match — hard-stopped posts
+            # never reach here.
+            _elig, _elig_note = evaluate_eligibility(
+                f"{job.title}\n{job.description or ''}", work_rights,
+                home_country, location_countries(job.location))
             auto_pass = MatchResult(
                 user_id=user_id,
                 job_id=job.id,
+                eligibility=_elig,
+                eligibility_note=_elig_note,
                 score=final_score,
                 tier=final_tier,
                 reasoning="Auto-passed: below the score threshold for your CV.",
@@ -796,9 +875,14 @@ def _run_matching_loop(
                     )
             return None
 
+        _elig, _elig_note = evaluate_eligibility(
+            f"{job.title}\n{job.description or ''}", work_rights,
+            home_country, location_countries(job.location))
         match = MatchResult(
             user_id=user_id,
             job_id=job.id,
+            eligibility=_elig,
+            eligibility_note=_elig_note,
             score=final_score,
             tier=final_tier,
             reasoning=best_payload.get("reasoning"),

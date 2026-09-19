@@ -77,6 +77,13 @@ def list_matches(
             # Pipeline-dismissed rows exist only to stop re-evaluation and
             # keep an audit trail — they are never part of the user's queue
             MatchResult.dismissed_reason.is_(None),
+            # WO-19 B (round-1 finding 5): rows re-evaluated to
+            # 'ineligible' after a work-rights change are HIDDEN, not
+            # deleted — the row survives so flipping the answer back
+            # resurfaces it (decided rows are never re-opened, and an
+            # eligibility verdict is not a decision).
+            or_(MatchResult.eligibility.is_(None),
+                MatchResult.eligibility != "ineligible"),
         )
     )
     if tier:
