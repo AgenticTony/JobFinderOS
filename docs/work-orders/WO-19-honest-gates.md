@@ -1,6 +1,6 @@
 # WO-19 — Honest gates II: work rights, language requirements, posting trust boundary
 
-> Priority: P1 · Depends on: none · Status: designed, not started
+> Priority: P1 · Depends on: none · Status: **part B executed 2026-09-15** (see execution record below); parts A (posting trust boundary) and C (language-requirement flag) designed, not started
 > Origin: 2026-09-08 competitive review of `MadsLorentzen/ai-job-search`
 > (the only production-grade repo surveyed across three; see session
 > notes). Its evaluation framework ships three protections we lack.
