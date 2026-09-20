@@ -286,3 +286,41 @@ collapse crossed tests. Seeds now carry a unique single-token company
 (the reset lives in test_units' drop_all, which runs AFTER
 test_multiuser alphabetically) — `rm test_suite.db` before diagnosing
 order-dependent failures.
+
+### Part B review round 3 (2026-09-20 — 2 findings, both confirmed by
+### execution, both fixed red-first)
+
+PR #116 review of the round-2 fixes. The reviewer re-ran all seven
+round-2 cases: five hold, one half-closed, one new gap from the fix
+itself. 2 new tests (1 unit, 1 integration), both seen red with the
+reviewer's failure. 543 passed / 14 skipped; ruff (CI scope) + tsc
+clean.
+
+- **R3-1 — key grouping missed its own target case** (the fuzzy
+  agency/direct twin has a different dedupe key BY CONSTRUCTION;
+  reviewer reproduced with the real helpers — the truncated Careerjet
+  copy's live apply URL outranks the original's better source in
+  `collapse_preference`, so the CLEAN copy survives collapse while the
+  requirement-carrying original is hidden): "the job" for eligibility
+  is now the COLLAPSE GROUP — exact dedupe key OR `likely_same_job`
+  pairing (bucketed by title, the twin pass's discipline). A survivor
+  whose OWN text carries the requirement is hidden (unchanged); a
+  survivor CONNECTED to a blocked copy is FLAGGED (unverified + "another
+  copy of this ad states a citizenship/clearance requirement"), never
+  shown clean and never hidden — conflicting ad text is the WO's
+  ambiguous case, and flag-not-hide is also what keeps a stale copy
+  from vetoing a newer one. `_apply_cheap_gates` returns
+  `(survivors, conflict_notes)`; both row-creation sites (kept +
+  auto-pass) apply the flag. This SUPERSEDES the round-2 "group-best
+  copy" rule: best-by-collapse-preference was the wrong arbiter for
+  evidence (the apply-URL slot ranks conversion, not completeness).
+  Residual (accepted, replaces the round-2 one):
+  `reevaluate_eligibility` on an answer change re-reads the survivor's
+  own text only — a conflict note set at match time survives until the
+  next full run.
+- **R3-2 — detected refusal discarded** (round-2 stopped the false
+  "verified" but returned `('unverified', None)` — chip-less card on a
+  posting that explicitly refuses sponsorship): the refusal scan now
+  returns its own note ("Posting states it does not offer visa
+  sponsorship (…)"), checked BEFORE the welcome scan so a mixed ad
+  resolves to the safety-relevant half. Sponsorship seekers only.

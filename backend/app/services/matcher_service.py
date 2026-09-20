@@ -479,8 +479,11 @@ def reevaluate_eligibility(db: Session, *, user_id, profile) -> int:
 def _apply_cheap_gates(db, user_id, unmatched, service, languages,
                       work_rights="prefer_not_say", home_country=None):
     """The pre-AI filters: language, PIPE-16 scope, cross-board dedupe,
-    fuzzy agency/direct dedupe, WO-18 all-history twin collapse. Pure
-    trimming + per-user dismissals — no evaluation slots spent here."""
+    fuzzy agency/direct dedupe, WO-18 all-history twin collapse, WO-19
+    eligibility hide/flag. Pure trimming + per-user dismissals — no
+    evaluation slots spent here. Returns (survivors, conflict_notes):
+    conflict_notes maps job_id -> note for survivors whose collapse
+    twin carried the eligibility requirement (round-3)."""
 
     # (WO-18) Snapshot the user's matched postings BEFORE any gate in
     # this chain writes dismissal rows: a fresh dismissal row must never
@@ -511,47 +514,35 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages,
             j for j in unmatched if passes_language_filter(j.title, j.description, languages)
         ]
 
-    # WO-19 part B eligibility gate (round-2 finding 6): the verdict
-    # belongs to the JOB, not to one copy of its ad. A posting that
-    # requires citizenship/PR/clearance is categorically unavailable to
-    # a user needing sponsorship — never scored, never shown. The
-    # evaluation runs HERE (cheap, pure regex) but the TRIM happens
-    # AFTER the dedupe gates below, and it reads the group's BEST copy
-    # (the WO-18 collapse preference: live apply link > official source
-    # > direct employer > fuller text) — fuller text is the better
-    # eligibility evidence, because truncation is exactly how a
-    # requirement sentence goes missing. Otherwise a truncated
-    # aggregator twin of the same job survives collapse, gets scored
-    # and shown, laundering the requirement away — and, symmetrically,
-    # a stale short copy must not veto a newer, fuller one.
-    # Deterministic and free, so like the scope gate it writes NO row:
-    # the user's answer can change, and the job re-enters the moment
-    # it does.
-    from app.core.dedupe import dedupe_key_for
+    # WO-19 part B eligibility gate (round-3 finding 1): the verdict
+    # belongs to the JOB, not to one copy of its ad — and "the job" is
+    # the COLLAPSE GROUP: exact dedupe key OR a likely_same_job pairing,
+    # never the key alone (the fuzzy agency/direct twin has a different
+    # key by construction, and it is exactly the copy that SURVIVES when
+    # its live apply URL outranks the original's better source — the
+    # round-2 key grouping missed its own target case). A copy whose
+    # OWN text requires citizenship/PR/clearance is never scored, never
+    # shown (categorically unavailable to a sponsorship seeker). A
+    # survivor whose requirement evidence lives in a CONNECTED copy is
+    # FLAGGED, never dropped: conflicting ad text is the WO's ambiguous
+    # case (and flag-not-hide also keeps a stale copy from vetoing a
+    # newer one). Deterministic and free, so like the scope gate it
+    # writes NO row: the user's answer can change, and the job
+    # re-enters the moment it does.
+    from app.core.dedupe import dedupe_key_for, likely_same_job
     from app.services.country_lexicon import location_countries
     from app.services.eligibility_lexicon import evaluate_eligibility
 
     def _elig_key(j) -> str:
         return j.dedupe_key or dedupe_key_for(j.title, j.company, j.location)
 
-    _elig_groups: dict = {}
-    for j in unmatched:
-        _elig_groups.setdefault(_elig_key(j), []).append(j)
-
-    blocked_keys = set()
-    for _key, copies in _elig_groups.items():
-        best = min(copies, key=_collapse_key)
-        verdict, _note = evaluate_eligibility(
-            f"{best.title}\n{best.description or ''}", work_rights,
-            home_country, location_countries(best.location))
-        if verdict == "ineligible":
-            blocked_keys.add(_key)
-    if blocked_keys:
-        logger.info(
-            "Eligibility gate: %d dedupe groups carry a citizenship/"
-            "clearance requirement (hidden after dedupe, before any AI "
-            "spend)", len(blocked_keys),
-        )
+    _elig_verdicts = {
+        j.id: evaluate_eligibility(
+            f"{j.title}\n{j.description or ''}", work_rights,
+            home_country, location_countries(j.location))[0]
+        for j in unmatched
+    }
+    _elig_batch = list(unmatched)  # pre-dedupe copies — the evidence pool
 
     # PIPE-16 scope gate: the shared pool stores a job when it fits ANY
     # user's scope, so it always held rows this user's own fetch would
@@ -645,9 +636,8 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages,
     # same-title candidates (the fuzzy title discipline can accept
     # nothing else). Reads the PRE-RUN by_title snapshot taken at the
     # top of this function — dismissal rows written by the gates above
-    # are deliberately invisible to it.
-    from app.core.dedupe import likely_same_job
-
+    # are deliberately invisible to it. (likely_same_job imported by
+    # the eligibility block above.)
     if by_title:
         twins_dropped = []
         twins_flipped = 0
@@ -695,15 +685,46 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages,
             )
         unmatched = kept_after_twins
 
-    # WO-19 B hide (the trim deferred from the eligibility block at the
-    # top): every survivor of a blocked dedupe group is hidden — same
-    # job, one verdict read from the group's best copy, whichever copy
-    # won the collapse. Copies that LOST collapse keep their
-    # duplicate-dismissal rows (they are real duplicates); hidden
-    # survivors write no row, so a changed work-rights answer
-    # resurfaces the job.
-    if blocked_keys:
-        hidden = [j for j in unmatched if _elig_key(j) in blocked_keys]
+    # WO-19 B hide + flag (the trim deferred from the eligibility block
+    # at the top). A survivor is HIDDEN when its own text carries the
+    # requirement; FLAGGED when a connected copy (same dedupe key, or a
+    # likely_same_job twin in the same title bucket) was blocked —
+    # one job, conflicting evidence: the human is the tiebreaker.
+    # Copies that LOST collapse keep their duplicate-dismissal rows;
+    # hidden survivors write no row, so a changed work-rights answer
+    # resurfaces the job. Residual (accepted): reevaluate_eligibility
+    # on an answer change re-reads the survivor's own text only — a
+    # conflict note set here survives until the next full run.
+    conflict_notes: dict = {}
+    if any(v == "ineligible" for v in _elig_verdicts.values()):
+        _elig_buckets: dict = {}
+        for j in _elig_batch:
+            b = title_bucket(j.title)
+            if b:
+                _elig_buckets.setdefault(b, []).append(j)
+        hidden = []
+        for j in unmatched:
+            if _elig_verdicts[j.id] == "ineligible":
+                hidden.append(j)
+                continue
+            key = _elig_key(j)
+            for other in _elig_buckets.get(title_bucket(j.title), ()):
+                if other.id == j.id:
+                    continue
+                if _elig_verdicts.get(other.id) != "ineligible":
+                    continue
+                if _elig_key(other) == key or likely_same_job(
+                    title_a=j.title, company_a=j.company,
+                    location_a=j.location,
+                    title_b=other.title, company_b=other.company,
+                    location_b=other.location,
+                    desc_a=j.description, desc_b=other.description,
+                ):
+                    conflict_notes[j.id] = (
+                        "Another copy of this ad states a citizenship/"
+                        "clearance requirement — check before applying."
+                    )
+                    break
         if hidden:
             logger.info(
                 "Eligibility gate: hid %d citizenship/clearance jobs "
@@ -712,7 +733,7 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages,
             )
         unmatched = [j for j in unmatched if j not in hidden]
 
-    return unmatched
+    return unmatched, conflict_notes
 
 
 def _score_job(service, profile_context, cv_text, job_text):
@@ -804,7 +825,7 @@ def _run_matching_loop(
     # a GDPR erase mid-run expires it, and per-job attribute reads raised
     # ObjectDeletedError (caught by TestDeletedUserAbortsMatching).
     home_country = getattr(profile, "country", None)
-    unmatched = _apply_cheap_gates(
+    unmatched, eligibility_flags = _apply_cheap_gates(
         db, user_id, unmatched, service, languages, work_rights=work_rights,
         home_country=home_country)
 
@@ -886,6 +907,11 @@ def _run_matching_loop(
             _elig, _elig_note = evaluate_eligibility(
                 f"{job.title}\n{job.description or ''}", work_rights,
                 home_country, location_countries(job.location))
+            # Round-3: the survivor of a collapse whose connected copy
+            # carried the requirement is flagged, never shown clean.
+            if job.id in eligibility_flags:
+                _elig, _elig_note = (
+                    "unverified", eligibility_flags[job.id])
             auto_pass = MatchResult(
                 user_id=user_id,
                 job_id=job.id,
@@ -921,6 +947,10 @@ def _run_matching_loop(
         _elig, _elig_note = evaluate_eligibility(
             f"{job.title}\n{job.description or ''}", work_rights,
             home_country, location_countries(job.location))
+        # Round-3: the survivor of a collapse whose connected copy
+        # carried the requirement is flagged, never shown clean.
+        if job.id in eligibility_flags:
+            _elig, _elig_note = ("unverified", eligibility_flags[job.id])
         match = MatchResult(
             user_id=user_id,
             job_id=job.id,

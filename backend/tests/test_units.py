@@ -4060,7 +4060,9 @@ class TestWO18DuplicateCollapse:
         from app.services.matcher_service import _apply_cheap_gates
         svc = AIService.__new__(AIService)
         svc.model = "glm-test"
-        return _apply_cheap_gates(db, owner, jobs, svc, [])
+        # round-3: the gate returns (survivors, conflict_notes) now —
+        # WO-18's tests exercise the dedupe half only
+        return _apply_cheap_gates(db, owner, jobs, svc, [])[0]
 
     def _undecided_match(self, db, owner, job, score=68):
         from app.core.timeutil import utc_now
@@ -5021,6 +5023,21 @@ class TestWO19EligibilityLexicon:
             verdict, note = self._ev(
                 sentence, "needs_sponsorship", "GB", {"SE"})
             assert verdict == "unverified", (sentence, verdict, note)
+
+    def test_refusal_carries_its_note(self):
+        # Round-3: the refusal patterns stopped the false "verified"
+        # but the matched clause was discarded — ('unverified', None)
+        # renders NO chip (MatchCard gates on the note). A posting that
+        # explicitly refuses sponsorship is the single most actionable
+        # signal this gate has for a sponsorship seeker.
+        for sentence in ("No visa sponsorship available for this role.",
+                         "Please note: no sponsorship available."):
+            verdict, note = self._ev(
+                sentence, "needs_sponsorship", "GB", {"GB"})
+            assert verdict == "unverified", (sentence, verdict)
+            assert note and "sponsorship" in note.lower(), (
+                f"{sentence!r}: refusal detected then discarded — {note!r}"
+            )
 
     def test_detected_requirement_with_unknown_rights_carries_a_note(self):
         # round-2 finding 4: prefer_not_say (every existing profile's

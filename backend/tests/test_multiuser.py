@@ -4515,6 +4515,65 @@ class TestWO19EligibilityGate:
 
 
 
+    # --- round-3 review (2026-09-20) ---
+
+    def test_fuzzy_twin_requirement_flags_the_survivor(self, client, db,
+                                                       monkeypatch):
+        """Round-3 finding 1: eligibility grouped by exact dedupe key,
+        but the fuzzy agency/direct twin has a DIFFERENT key by
+        construction. The requirement-carrying original was hidden; the
+        truncated copy won collapse (its live apply URL outranks the
+        original's better source) and was shown with no signal at all.
+        The verdict must travel across the PAIRING: a survivor connected
+        to a blocked copy is flagged, never shown clean."""
+        p, _pool_job, uid = self._seed(client, db,
+                                        work_rights="needs_sponsorship")
+        pair_title = f"Compliance Manager {uuid.uuid4().hex[:4]}"
+        orig = JobPosting(
+            source="jobtech", source_id=str(uuid.uuid4())[:8],
+            title=pair_title, company="PÅGEN AKTIEBOLAG",
+            url=f"https://pb/{uuid.uuid4().hex[:6]}",
+            status="new", location="Malmö",
+            description="Svenskt medborgarskap krävs för denna roll. "
+                        "Ansvar för efterlevnad, policy och rutiner.")
+        agg = JobPosting(
+            source="careerjet", source_id=str(uuid.uuid4())[:8],
+            title=pair_title, company="Pågen AB",
+            url=f"https://cj/{uuid.uuid4().hex[:6]}",
+            application_url=f"https://pb/apply/{uuid.uuid4().hex[:4]}",
+            status="new", location="Malmö",
+            description="Compliance Manager at Pågen. Apply now.")
+        db.add(orig)
+        db.add(agg)
+        db.commit()
+        calls = self._script_match(monkeypatch)
+        summary = self._run(db, p, uid)
+        assert summary["status"] == "completed", summary
+
+        rows = (db.query(MatchResult)
+                .filter(MatchResult.user_id == uid,
+                        MatchResult.job_id.in_([orig.id, agg.id]))
+                .all())
+        visible = [m for m in rows if m.dismissed_reason is None]
+        # the pair collapses (fuzzy gate) and the APPLY-URL copy wins;
+        # the original must never be shown clean
+        assert len(visible) == 1, (
+            f"expected one survivor, got "
+            f"{[(m.job_id, m.dismissed_reason) for m in rows]}"
+        )
+        survivor = visible[0]
+        assert survivor.eligibility == "unverified"
+        assert survivor.eligibility_note and "citizenship" in (
+            survivor.eligibility_note.lower()
+            .replace("medborgarskap", "citizenship")), (
+            f"the survivor of a requirement-carrying pair was shown "
+            f"clean: {survivor.eligibility_note!r}"
+        )
+        scored = "\n".join(calls.get("descs", []))
+        assert "medborgarskap krävs" not in scored, (
+            "the requirement-carrying original consumed an AI call"
+        )
+
     # --- round-2 review (2026-09-19) ---
 
     def test_stats_agree_with_the_hidden_ineligible_list(self, client, db,
@@ -4571,14 +4630,12 @@ class TestWO19EligibilityGate:
 
     def test_gate_hides_the_job_not_just_the_fuller_copy(self, client, db,
                                                          monkeypatch):
-        """Round-2 finding 6: the eligibility gate ran BEFORE dedupe, so
-        hiding the requirement-carrying direct copy stranded a truncated
-        aggregator twin of the SAME job, which then got scored and shown.
-        The verdict belongs to the dedupe GROUP and is read from its
-        BEST copy (WO-18 collapse preference — the fuller text is the
-        better evidence): the requirement-carrying direct copy is
-        fuller here, so the job is hidden whichever copy wins the
-        collapse."""
+        """Round-2 finding 6, updated to the round-3 contract: the
+        eligibility verdict travels across the EXACT-KEY collapse too.
+        The requirement-carrying copy is hidden (its own text convicts
+        it); the surviving twin is FLAGGED with a note — one job,
+        conflicting evidence, the human is the tiebreaker (flag, never
+        drop — and never a stale-copy veto of a newer one)."""
         p, _pool_job, uid = self._seed(client, db,
                                         work_rights="needs_sponsorship")
         # unique company so the PAIR collapses with each other, not with
@@ -4610,13 +4667,21 @@ class TestWO19EligibilityGate:
                         MatchResult.job_id.in_([direct.id, agg.id]))
                 .all())
         visible = [m for m in rows if m.dismissed_reason is None]
-        assert not visible, (
-            f"a copy of a citizenship-only job reached the queue "
-            f"(visible: {[(m.job_id, m.eligibility) for m in visible]}) — "
-            f"truncating the requirement sentence must not launder the job"
+        assert len(visible) == 1, (
+            f"expected one flagged survivor, got "
+            f"{[(m.job_id, m.dismissed_reason) for m in rows]}"
+        )
+        survivor = visible[0]
+        assert survivor.eligibility == "unverified"
+        assert survivor.eligibility_note and "citizenship" in (
+            survivor.eligibility_note.lower()), (
+            f"truncating the requirement sentence laundered the job "
+            f"clean: {survivor.eligibility_note!r}"
         )
         scored = "\n".join(calls.get("descs", []))
-        assert "Swedish citizens" not in scored
+        assert "Swedish citizens" not in scored, (
+            "the requirement-carrying copy consumed an AI call"
+        )
 
     def test_unchanged_work_rights_save_does_not_reevaluate(self, client, db,
                                                             monkeypatch):

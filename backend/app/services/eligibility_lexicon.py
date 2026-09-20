@@ -261,6 +261,24 @@ def evaluate_eligibility(text: str, work_rights: Optional[str],
     # Verification: sponsorship wording only, and only for the user who
     # needs it. (Relocation packages are NOT visa sponsorship.)
     if work_rights == "needs_sponsorship":
+        # Round-3: a DETECTED refusal is the most actionable signal
+        # this gate has for a sponsorship seeker — it must carry its
+        # note, not fall through to a chip-less plain card (MatchCard
+        # renders the chip only when a note exists; same shape as
+        # round-2 finding 4 for requirements). Scanned BEFORE the
+        # welcome: when an ad carries both, the refusal is the
+        # safety-relevant half.
+        for sentence in sentences:
+            for clause in re.split(r"[;–—]| - ", sentence):
+                for pattern in _SPONSORSHIP_REFUSAL_RES:
+                    m = pattern.search(clause)
+                    if m:
+                        return (
+                            "unverified",
+                            f"Posting states it does not offer visa "
+                            f"sponsorship "
+                            f"(“{m.group(0).strip()[:60]}”).",
+                        )
         m, _sentence = _first_welcome(_SPONSORSHIP_WELCOME_RES)
         if m:
             return (
