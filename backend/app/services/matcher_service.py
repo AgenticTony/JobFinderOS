@@ -449,9 +449,15 @@ def reevaluate_eligibility(db: Session, *, user_id, profile) -> int:
 
     work_rights = getattr(profile, "work_rights", None) or "prefer_not_say"
     home = getattr(profile, "country", None)
+    # contains_eager (round-2 finding 7): the join filters, but m.job
+    # still lazy-loaded one SELECT per row — populate the relationship
+    # from the join we already pay for.
+    from sqlalchemy.orm import contains_eager
+
     rows = (
         db.query(MatchResult)
         .join(JobPosting, MatchResult.job_id == JobPosting.id)
+        .options(contains_eager(MatchResult.job))
         .filter(
             MatchResult.user_id == user_id,
             MatchResult.decision.is_(None),
@@ -505,27 +511,47 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages,
             j for j in unmatched if passes_language_filter(j.title, j.description, languages)
         ]
 
-    # WO-19 part B eligibility gate: a posting that requires
-    # citizenship/PR/clearance is categorically unavailable to a user
-    # needing sponsorship — never scored, never shown. Deterministic and
-    # free, so like the scope gate it writes NO row: the user's answer
-    # can change, and the job re-enters the moment it does.
+    # WO-19 part B eligibility gate (round-2 finding 6): the verdict
+    # belongs to the JOB, not to one copy of its ad. A posting that
+    # requires citizenship/PR/clearance is categorically unavailable to
+    # a user needing sponsorship — never scored, never shown. The
+    # evaluation runs HERE (cheap, pure regex) but the TRIM happens
+    # AFTER the dedupe gates below, and it reads the group's BEST copy
+    # (the WO-18 collapse preference: live apply link > official source
+    # > direct employer > fuller text) — fuller text is the better
+    # eligibility evidence, because truncation is exactly how a
+    # requirement sentence goes missing. Otherwise a truncated
+    # aggregator twin of the same job survives collapse, gets scored
+    # and shown, laundering the requirement away — and, symmetrically,
+    # a stale short copy must not veto a newer, fuller one.
+    # Deterministic and free, so like the scope gate it writes NO row:
+    # the user's answer can change, and the job re-enters the moment
+    # it does.
+    from app.core.dedupe import dedupe_key_for
     from app.services.country_lexicon import location_countries
     from app.services.eligibility_lexicon import evaluate_eligibility
 
-    blocked = []
+    def _elig_key(j) -> str:
+        return j.dedupe_key or dedupe_key_for(j.title, j.company, j.location)
+
+    _elig_groups: dict = {}
     for j in unmatched:
+        _elig_groups.setdefault(_elig_key(j), []).append(j)
+
+    blocked_keys = set()
+    for _key, copies in _elig_groups.items():
+        best = min(copies, key=_collapse_key)
         verdict, _note = evaluate_eligibility(
-            f"{j.title}\n{j.description or ''}", work_rights,
-            home_country, location_countries(j.location))
+            f"{best.title}\n{best.description or ''}", work_rights,
+            home_country, location_countries(best.location))
         if verdict == "ineligible":
-            blocked.append(j)
-    if blocked:
+            blocked_keys.add(_key)
+    if blocked_keys:
         logger.info(
-            "Eligibility gate: hard-stopped %d citizenship/clearance "
-            "postings before any AI spend", len(blocked),
+            "Eligibility gate: %d dedupe groups carry a citizenship/"
+            "clearance requirement (hidden after dedupe, before any AI "
+            "spend)", len(blocked_keys),
         )
-        unmatched = [j for j in unmatched if j not in blocked]
 
     # PIPE-16 scope gate: the shared pool stores a job when it fits ANY
     # user's scope, so it always held rows this user's own fetch would
@@ -567,9 +593,8 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages,
 
     # Cross-board duplicate gate: if another posting with the same
     # title+company key already has a match, dismiss this copy instead of
-    # paying for the same job twice
-    from app.core.dedupe import dedupe_key_for
-
+    # paying for the same job twice (dedupe_key_for imported by the
+    # eligibility block above)
     matched_keys = {
         row[0]
         for row in db.query(JobPosting.dedupe_key)
@@ -669,6 +694,24 @@ def _apply_cheap_gates(db, user_id, unmatched, service, languages,
                 len(twins_dropped), twins_flipped,
             )
         unmatched = kept_after_twins
+
+    # WO-19 B hide (the trim deferred from the eligibility block at the
+    # top): every survivor of a blocked dedupe group is hidden — same
+    # job, one verdict read from the group's best copy, whichever copy
+    # won the collapse. Copies that LOST collapse keep their
+    # duplicate-dismissal rows (they are real duplicates); hidden
+    # survivors write no row, so a changed work-rights answer
+    # resurfaces the job.
+    if blocked_keys:
+        hidden = [j for j in unmatched if _elig_key(j) in blocked_keys]
+        if hidden:
+            logger.info(
+                "Eligibility gate: hid %d citizenship/clearance jobs "
+                "post-dedupe (no rows written — a changed answer "
+                "resurfaces them)", len(hidden),
+            )
+        unmatched = [j for j in unmatched if j not in hidden]
+
     return unmatched
 
 

@@ -54,8 +54,12 @@ _COUNTRY_NAMES = {"SE": "Sweden", "GB": "the United Kingdom"}
 _REQUIREMENT_RES = [
     re.compile(p, re.I) for p in (
         r"must\s+(?:hold|have|possess)[^.]{0,50}citizenship",
+        # (?![\w-]) — round-2 finding 2: "must be Swedish-speaking" and
+        # "must be British-based" are language/location requirements,
+        # not citizenship; the hyphen boundary is the difference (bare
+        # "must be British." stays a hard stop).
         r"must\s+be\s+(?:a\s+)?(?:british|swedish|danish|norwegian"
-        r"|finnish|citizen)",
+        r"|finnish|citizen)(?![\w-])",
         r"citizenship\s+(?:of\s+[a-z\s]+?\s+)?(?:is\s+)?required",
         r"citizenship\s+required",
         r"security\s+clearance[^.]{0,40}(?:is\s+)?required",
@@ -70,10 +74,12 @@ _REQUIREMENT_RES = [
 ]
 
 # A sentence carrying one of these does NOT state a requirement.
+# Round-2 finding 3: the Swedish idioms "är inte ett krav" / "inget krav
+# på" need krav as a negatable word and ingen/inget/inga as negators.
 _NEGATION_RE = re.compile(
-    r"(?i)\b(?:not|no|without|inte|ej|utan)\b[^.\n]{0,40}"
+    r"(?i)\b(?:not|no|without|inte|ej|utan|ingen|inget|inga)\b[^.\n]{0,40}"
     r"(?:required|needed|necessary|citizenship|clearance|medborgarskap"
-    r"|säkerhetsprövning)"
+    r"|säkerhetsprövning|krav)"
     r"|required[^.\n]{0,20}\bnot\b"
     r"|kräver\s+inte|krävs\s+inte",
 )
@@ -86,6 +92,22 @@ _SPONSORSHIP_WELCOME_RES = [
         r"(?<!\w)sponsor(?:ship)?\s+(?:is\s+)?available",
         r"international\s+applicants\s+welcome",
         r"vi\s+(?:erbjuder\s+)?arbetstillstånd",
+    )
+]
+
+# Sponsorship REFUSALS (round-2 finding 1): "No visa sponsorship
+# available" is standard UK boilerplate, and the welcome patterns match
+# inside it — a refusal clause must never verify. Per-clause, like the
+# welcome check: the refusal kills its own clause only.
+_SPONSORSHIP_REFUSAL_RES = [
+    re.compile(p, re.I) for p in (
+        r"(?<!\w)no\s+(?:visa\s+)?sponsorship",
+        r"(?<!\w)(?:visa\s+)?sponsorship[^.;\n]{0,40}\bnot\s+"
+        r"(?:available|offered|provided)",
+        r"(?<!\w)(?:do(?:es)?\s+not|don't|doesn't|cannot|can't|won't"
+        r"|will\s+not|unable\s+to)\s+(?:offer|provide|sponsor)",
+        r"vi\s+erbjuder\s+inte",
+        r"(?<!\w)(?:utan|ingen|inget|inga)\s+(?:arbetstillstånd|visum)",
     )
 ]
 
@@ -199,9 +221,14 @@ def evaluate_eligibility(text: str, work_rights: Optional[str],
         # Welcome wording is checked per CLAUSE: "Citizenship is not
         # required - we sponsor visas" must verify — the negation kills
         # the requirement reading, not the welcome clause beside it.
+        # A sponsorship REFUSAL kills its own clause the same way
+        # (round-2 finding 1: "no visa sponsorship available" is a
+        # refusal, not a welcome).
         for sentence in sentences:
             for clause in re.split(r"[;–—]| - ", sentence):
                 if _NEGATION_RE.search(clause):
+                    continue
+                if any(r.search(clause) for r in _SPONSORSHIP_REFUSAL_RES):
                     continue
                 for pattern in patterns:
                     m = pattern.search(clause)
@@ -212,7 +239,9 @@ def evaluate_eligibility(text: str, work_rights: Optional[str],
     rights = effective_rights(work_rights, home_country, job_countries)
 
     # Hard stop: explicit affirmative requirement, rights not
-    # established for THIS job. Unknown rights / unknown country flag.
+    # established for THIS job. Unknown rights / unknown country flag —
+    # a DETECTED requirement is never silently discarded (round-2
+    # finding 4): the note is the flag the card renders.
     m, _sentence = _first(_REQUIREMENT_RES)
     if m and rights == "not_established":
         return (
@@ -220,6 +249,13 @@ def evaluate_eligibility(text: str, work_rights: Optional[str],
             f"Posting requires citizenship/clearance "
             f"(“{m.group(0).strip()[:60]}”) — your work-rights answer "
             f"does not cover this job's country.",
+        )
+    if m and rights == "unknown":
+        return (
+            "unverified",
+            f"Posting states a citizenship/clearance requirement "
+            f"(“{m.group(0).strip()[:60]}”) — your work-rights answer "
+            f"doesn't cover this job's country; check before applying.",
         )
 
     # Verification: sponsorship wording only, and only for the user who

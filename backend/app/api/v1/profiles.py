@@ -98,6 +98,10 @@ async def update_preferences(
         raise HTTPException(status_code=404, detail="No profile yet — upload a CV first")
 
     data = prefs.model_dump(exclude_unset=True)
+    # Round-2 finding 7: the Profile editor sends work_rights on EVERY
+    # save — re-evaluation is owed only when the ANSWER changed, not
+    # when a phone number was edited beside it.
+    prior_work_rights = profile.work_rights
     for field, value in data.items():
         if field in ("preferred_roles", "exclude_keywords"):
             setattr(profile, field, dump_json_list(value))
@@ -131,9 +135,10 @@ async def update_preferences(
     db.add(profile)
     db.commit()
     db.refresh(profile)
-    if "work_rights" in data:
+    if "work_rights" in data and data.get("work_rights") != prior_work_rights:
         # Round-1 finding 5: the answer decides which postings are hidden
         # — existing undecided matches must follow it immediately.
+        # (Round-2 finding 7: only on an actual CHANGE.)
         from app.services.matcher_service import reevaluate_eligibility
 
         reevaluate_eligibility(db, user_id=user.id, profile=profile)

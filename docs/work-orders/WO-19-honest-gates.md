@@ -225,3 +225,64 @@ rule. Never mix scales in one queue.
    user's real value (TestOutboundIdentity pattern).
 6. Onboarding: the work-rights step gates wizard completion; settings
    edit round-trips.
+
+### Part B review round 2 (2026-09-20 — 7 findings, 6 confirmed by
+### execution + 1 plausible confirmed by inspection, all fixed red-first)
+
+PR #116 review. Every lexicon finding was reproduced by running the
+reviewer's sentences before any edit; 8 new tests (5 unit, 3
+integration) written red-first — all seen failing with the reviewer's
+failure, all green after. 541 passed / 14 skipped; ruff (CI scope) and
+tsc clean.
+
+- **F1 — refusals read as welcomes** ("No visa sponsorship available"
+  → green verified chip, the worst inversion the gate can produce):
+  new `_SPONSORSHIP_REFUSAL_RES`, checked per-clause beside the
+  welcome scan — a refusal kills its own clause, never the sentence.
+  The refusal list is NOT folded into `_NEGATION_RE` (shared with the
+  requirement path — "no sponsorship" there would neutralize real
+  requirement sentences).
+- **F2 — compounds read as citizenship** ("must be Swedish-speaking"
+  hard-stopped): `(?![\w-])` boundary after the nationality adjective.
+  Bare "must be British." stays a hard stop (pinned); hyphenated
+  compounds (language/location) match nothing.
+- **F3 — Swedish idiom invisible** ("Svenskt medborgarskap är inte ett
+  krav" hard-stopped): `krav` joins the negatable trailing words,
+  `ingen/inget/inga` join the negators.
+- **F4 — detected requirement discarded on unknown rights** (every
+  `prefer_not_say` profile, and unresolvable job countries): a matched
+  requirement + `unknown` rights now returns `unverified` WITH a note
+  ("check before applying") — the note is what the card renders.
+  `established` rights keep the pinned note-less pass; only
+  `not_established` hides.
+- **F5 — stats counted hidden rows** (Hunt Pulse "Awaiting" > the
+  list): `get_stats`' FILTER aggregate now carries list_matches'
+  `eligibility != 'ineligible'` clause. Decided-count queries
+  deliberately unchanged — decided rows keep frozen verdicts.
+- **F6 — gate before dedupe laundered requirements** (truncated
+  aggregator twin of a hidden direct copy survived and got shown; the
+  plausible one, confirmed by inspection): the gate now EVALUATES
+  pre-dedupe but TRIMS post-dedupe, keyed on the dedupe group, and
+  the verdict is read from the group's BEST copy (`_collapse_key` —
+  fuller text is the better eligibility evidence; truncation is how
+  the sentence goes missing). Symmetry matters: a stale short copy
+  must not veto a newer fuller one, so "any blocked copy blocks" was
+  rejected. Copies that lose collapse keep their duplicate-dismissal
+  rows; hidden survivors write no row (answer change resurfaces them).
+  Residual boundary, accepted: a stored copy matched in an EARLIER
+  run is re-verdicted only on answer change (reevaluate_eligibility),
+  not when a new blocked twin arrives later.
+- **F7 — every Profile save re-evaluated all matches** (the editor
+  sends `work_rights` on every save): re-evaluation now only on an
+  actual CHANGE (compared before assignment); `reevaluate_eligibility`
+  loads jobs via `contains_eager` (the join was already paid; the
+  lazy-load was one SELECT per row).
+
+Test-infrastructure notes from this round: the WO-19 integration
+seeds all shared `Dev/Acme/Malmö` — one dedupe key AND one
+`likely_same_job` employer token — so the group verdict and fuzzy
+collapse crossed tests. Seeds now carry a unique single-token company
+(`co<hex>`). Also: `test_suite.db` accumulates across targeted reruns
+(the reset lives in test_units' drop_all, which runs AFTER
+test_multiuser alphabetically) — `rm test_suite.db` before diagnosing
+order-dependent failures.

@@ -4975,6 +4975,67 @@ class TestWO19EligibilityLexicon:
             "We sponsor work visas.", "citizen_or_pr", "SE", {"SE"})
         assert verdict == "unverified"
 
+    # --- round-2 review (2026-09-19): refusals read as welcomes,
+    # --- compounds read as citizenship, Swedish idiom, discarded notes
+
+    def test_sponsorship_refusal_never_verifies(self):
+        # Standard UK boilerplate refusals — round-2 finding 1: the
+        # welcome patterns matched inside the refusal, handing a
+        # sponsorship seeker a green chip on the posting that rules
+        # them out (the worst inversion this gate can produce)
+        for sentence in ("No visa sponsorship available for this role.",
+                         "Please note: no sponsorship available."):
+            verdict, note = self._ev(
+                sentence, "needs_sponsorship", "GB", {"GB"})
+            assert verdict == "unverified", (sentence, verdict, note)
+
+    def test_refusal_clause_kills_only_its_own_welcome(self):
+        # A welcome in one clause must not survive a refusal in the
+        # sentence's other clause (per-clause discipline, both ways)
+        verdict, _ = self._ev(
+            "We offer relocation. Unfortunately no visa sponsorship "
+            "is available for this position.",
+            "needs_sponsorship", "GB", {"GB"})
+        assert verdict == "unverified"
+
+    def test_nationality_compound_is_not_citizenship(self):
+        # round-2 finding 2: "Swedish-speaking"/"British-based" are
+        # language/location requirements — the hyphen boundary is the
+        # difference between a hard stop and nothing (bare "must be
+        # British." stays a hard stop, pinned above)
+        verdict, _ = self._ev(
+            "You must be Swedish-speaking to join our Malmö team.",
+            "needs_sponsorship", "GB", {"SE"})
+        assert verdict == "unverified", "language requirement, not citizenship"
+        verdict, _ = self._ev(
+            "Candidates must be British-based.", "needs_sponsorship",
+            "SE", {"GB"})
+        assert verdict == "unverified", "location requirement, not citizenship"
+
+    def test_swedish_negated_requirement_idiom_is_not_a_requirement(self):
+        # round-2 finding 3: "är inte ett krav" / "inget krav på" — the
+        # idiomatic Swedish negation was invisible, so a posting that
+        # says citizenship is NOT required hard-stopped
+        for sentence in ("Svenskt medborgarskap är inte ett krav.",
+                         "Inget krav på svenskt medborgarskap."):
+            verdict, note = self._ev(
+                sentence, "needs_sponsorship", "GB", {"SE"})
+            assert verdict == "unverified", (sentence, verdict, note)
+
+    def test_detected_requirement_with_unknown_rights_carries_a_note(self):
+        # round-2 finding 4: prefer_not_say (every existing profile's
+        # default) and an unresolvable job country must not DISCARD a
+        # detected requirement — the note is the flag the card renders
+        for wr, countries in (("prefer_not_say", {"GB"}),
+                              ("needs_sponsorship", set())):
+            verdict, note = self._ev(
+                "Must hold British citizenship.", wr, "SE", countries)
+            assert verdict == "unverified", (wr, countries, verdict)
+            assert note, (
+                f"{wr}/{countries}: detected requirement silently "
+                f"discarded — the card renders no chip without a note"
+            )
+
     def test_prefer_not_say_is_unverified_everywhere(self):
         verdict, _ = self._ev(
             "We sponsor work visas and welcome international applicants.",

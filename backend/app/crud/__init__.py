@@ -253,6 +253,10 @@ def get_stats(db: Session, *, user_id) -> dict:
     # EGRESS 2026-09-11: match_q.all() hydrated EVERY kept match row
     # (score/tier/rationale/skills — ~KB each) per poll just to derive
     # four integers; one FILTER-aggregate round trip replaces the list.
+    # WO-19 B (round-2 finding 5): the aggregate must mirror
+    # list_matches — ineligible rows are hidden from the list, so the
+    # counts must not include them either (Hunt Pulse's "Awaiting" and
+    # the sidebar badge were counting cards the user cannot reach).
     (matches_total, matches_excellent,
      matches_good, matches_pending) = db.query(
         func.count(MatchResult.id),
@@ -265,6 +269,8 @@ def get_stats(db: Session, *, user_id) -> dict:
     ).filter(
         MatchResult.user_id == user_id,
         MatchResult.dismissed_reason.is_(None),
+        or_(MatchResult.eligibility.is_(None),
+            MatchResult.eligibility != "ineligible"),
     ).one()
 
     def count(query):
