@@ -18,6 +18,7 @@ import {
   Compass,
   FileText,
   Globe2,
+  IdCard,
   Languages,
   Loader2,
   MapPin,
@@ -58,6 +59,16 @@ interface Props {
 }
 
 const STEPS = ['Your CV', 'Country', 'Location', 'Languages', 'Job titles', 'Confirm'] as const;
+
+// WO-19 part B — mirrors the backend's WORK_RIGHTS_VALUES / LINES
+const WORK_RIGHTS_OPTIONS: [string, string][] = [
+  ['citizen_or_pr', 'Citizen / permanent resident'],
+  ['eu_right', 'EU/EEA work right'],
+  ['needs_sponsorship', 'Need sponsorship'],
+  ['prefer_not_say', 'Prefer not to say'],
+];
+const workRightsLabel = (v: string) =>
+  WORK_RIGHTS_OPTIONS.find(([value]) => value === v)?.[1] ?? v;
 
 const LANGUAGE_OPTIONS = [
   'English',
@@ -220,6 +231,9 @@ export default function OnboardingWizard({
   );
   const [includeRemote, setIncludeRemote] = useState(Boolean(initialIncludeRemote));
   const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']);
+  // WO-19 part B: one question, no AI. prefer_not_say = jobs show as
+  // unverified until answered (never dropped, never counted as verified).
+  const [workRights, setWorkRights] = useState('prefer_not_say');
   const [mode, setMode] = useState<SearchMode>('field');
   const [directQueries, setDirectQueries] = useState<string[]>([]);
   const [pivotSuggestions, setPivotSuggestions] = useState<{ query: string; why: string }[]>([]);
@@ -384,6 +398,7 @@ export default function OnboardingWizard({
         search_queries: [...selected],
         occupation_codes: [...occSelected],
         languages,
+        work_rights: workRights,
       });
     } catch (err) {
       // FE-21: keep the wizard open with the user's picks intact; show
@@ -503,6 +518,35 @@ export default function OnboardingWizard({
                         <p className="text-xs text-low">
                           {c.code === 'SE' ? 'Platsbanken — every public listing' : 'Reed.co.uk — every sector'}
                         </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {step === 1 && (
+                <div>
+                  <StepTitle icon={<IdCard className="h-4 w-4" />} title="Do you need visa sponsorship to work here?" />
+                  <p className="mt-2 text-sm text-low">
+                    Postings that require citizenship or security clearance are hidden for
+                    sponsorship seekers; everything else is shown with an eligibility note. You
+                    can change this anytime in Profile.
+                  </p>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {WORK_RIGHTS_OPTIONS.map(([value, label]) => (
+                      <button
+                        key={value}
+                        onClick={() => setWorkRights(value)}
+                        aria-pressed={workRights === value}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm transition-colors',
+                          workRights === value
+                            ? 'border-signal bg-signal/15 text-signal'
+                            : 'border-line text-low hover:border-line-2 hover:text-mid'
+                        )}
+                      >
+                        {workRights === value && <Check className="h-3.5 w-3.5" />}
+                        {label}
                       </button>
                     ))}
                   </div>
@@ -892,6 +936,7 @@ export default function OnboardingWizard({
                     />
                     <SummaryRow label="Remote" value={remoteOnly ? 'remote jobs only' : includeRemote ? 'local + remote' : 'strictly local'} />
                     <SummaryRow label="Languages" value={languages.join(', ')} />
+                    <SummaryRow label="Work rights" value={workRightsLabel(workRights)} />
                     <SummaryRow label="Strategy" value={MODES.find((m) => m.id === mode)?.label ?? mode} />
                     <SummaryRow label="Job titles" value={`${selected.size} search queries`} />
                   </div>
