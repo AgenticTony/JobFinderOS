@@ -196,7 +196,18 @@ only ENABLEs RLS there, never drops foreign policies — verified).
   a main boot re-ran `ensure_rls` and the policy survived; foreign stamp
   → drift exit 1 + boot diagnosis; advisory lock free after a refusal
   in-process.
-- Suites: 577 passed / 14 skipped (SQLite), 589 / 2 (Postgres 16).
+- Self-review defect, fixed: the first cut read the stamp on the
+  advisory-lock connection, holding ACCESS SHARE on alembic_version for
+  the whole migration — a migration (or ensure_rls) needing ACCESS
+  EXCLUSIVE on that table would wait on its own boot until lock_timeout.
+  Reproduced on PG16 (`LockNotAvailable`), fixed by reading on a
+  short-lived connection, probe re-run green, pinned by the advisory-lock
+  unit test (revert-checked).
+- Suites after the fix: 576 passed / 14 skipped (SQLite, 4 clean runs),
+  588 / 2 (Postgres 16), flow test green. One earlier SQLite run showed
+  18 failures that never reproduced (including under the same parallel
+  load) — most likely another session sharing `backend/test_suite.db`
+  (CLAUDE.md rule 7); unexplained, recorded rather than dismissed.
 
 **Deviation:** the single-head check lives in the drift workflow (runs
 even without the secret) and in the pytest suite

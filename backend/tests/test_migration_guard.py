@@ -160,8 +160,8 @@ class TestGuardedUpgradeIntegration:
     def test_branch_build_applies_nothing(self, scratch_db):
         cfg, eng = scratch_db
         before = _schema(eng)
-        with eng.connect() as conn, pytest.raises(MigrationGuardError):
-            database._guarded_upgrade(cfg, conn, env=RENDER_BRANCH)
+        with pytest.raises(MigrationGuardError):
+            database._guarded_upgrade(cfg, eng, env=RENDER_BRANCH)
         # The outbound artifact is the schema: untouched.
         assert _stamp(eng) == [PARENT], (
             "a branch build moved the production stamp — the 2026-09-28 outage")
@@ -169,14 +169,12 @@ class TestGuardedUpgradeIntegration:
 
     def test_main_build_applies_pending(self, scratch_db):
         cfg, eng = scratch_db
-        with eng.connect() as conn:
-            database._guarded_upgrade(cfg, conn, env=RENDER_MAIN)
+        database._guarded_upgrade(cfg, eng, env=RENDER_MAIN)
         assert _stamp(eng) == [HEAD]
 
     def test_local_unaffected(self, scratch_db):
         cfg, eng = scratch_db
-        with eng.connect() as conn:
-            database._guarded_upgrade(cfg, conn, env=LOCAL)
+        database._guarded_upgrade(cfg, eng, env=LOCAL)
         assert _stamp(eng) == [HEAD]
 
     def test_unknown_stamp_diagnosed_not_hashed(self, scratch_db):
@@ -184,8 +182,8 @@ class TestGuardedUpgradeIntegration:
         with eng.begin() as c:
             c.execute(text("UPDATE alembic_version SET version_num = :v"),
                       {"v": FOREIGN})
-        with eng.connect() as conn, pytest.raises(MigrationGuardError) as e:
-            database._guarded_upgrade(cfg, conn, env=LOCAL)
+        with pytest.raises(MigrationGuardError) as e:
+            database._guarded_upgrade(cfg, eng, env=LOCAL)
         msg = str(e.value)
         assert FOREIGN in msg and HEAD in msg
         assert "AHEAD of this build" in msg and "another branch" in msg

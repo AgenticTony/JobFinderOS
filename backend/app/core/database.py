@@ -140,13 +140,20 @@ def _read_current_heads(connection) -> tuple[str, ...]:
     return tuple(MigrationContext.configure(connection).get_current_heads())
 
 
-def _guarded_upgrade(cfg, connection, env=None) -> None:
+def _guarded_upgrade(cfg, bind, env=None) -> None:
     """WO-25: `upgrade head`, but only after the drift guard agrees.
 
-    Reads the database's stamped revision on `connection`, then refuses
-    (MigrationGuardError) when the stamp is unknown to this build, or when
-    a non-MIGRATION_BRANCH Render build has pending revisions. The ONLY
-    place init_db runs `command.upgrade` — a structural test pins that.
+    Reads the stamped revision, then refuses (MigrationGuardError) when the
+    stamp is unknown to this build, or when a non-MIGRATION_BRANCH Render
+    build has pending revisions. The ONLY place init_db runs
+    `command.upgrade` — a structural test pins that.
+
+    The read uses a SHORT-LIVED connection from `bind`, closed before
+    upgrading. Reading on the advisory-lock connection would hold ACCESS
+    SHARE on alembic_version for the whole migration, so any DDL on that
+    table would wait on this very boot until lock_timeout (reproduced on
+    PG16). The advisory lock is session-level on its own connection, so
+    boots stay serialized.
     """
     import os
 
@@ -157,7 +164,9 @@ def _guarded_upgrade(cfg, connection, env=None) -> None:
 
     env = os.environ if env is None else env
     script = ScriptDirectory.from_config(cfg)
-    state = revision_state(script, _read_current_heads(connection))
+    with bind.connect() as conn:
+        current = _read_current_heads(conn)
+    state = revision_state(script, current)
     assert_may_migrate(state, env, _settings.MIGRATION_BRANCH)
     if state.pending:
         logger.info("Applying %d pending migration(s): %s",
@@ -178,7 +187,7 @@ def init_db():
     from sqlalchemy import inspect as sa_inspect
     from sqlalchemy import text as sa_text
 
-    ini =Path(__file__).resolve().parent.parent.parent / "alembic.ini"
+    ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
     cfg = Config(str(ini))
     # DATABASE_URL is already the sync psycopg URL — asyncpg is gone
     cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
@@ -220,7 +229,7 @@ def init_db():
             try:
                 # Read the stamp AFTER taking the lock: a concurrent winner's
                 # upgrade is committed by now, so the guard sees the truth.
-                _guarded_upgrade(cfg, lock_conn)
+                _guarded_upgrade(cfg, engine)
             finally:
                 lock_conn.execute(sa_text(
                     f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_KEY})"))
@@ -244,8 +253,7 @@ def init_db():
     has_version = "alembic_version" in insp.get_table_names()
 
     if not has_tables:
-        with engine.connect() as conn:
-            _guarded_upgrade(cfg, conn)
+        _guarded_upgrade(cfg, engine)
         logger.info("Fresh SQLite database created via Alembic")
         return
     if not has_version:
@@ -262,7 +270,6 @@ def init_db():
             )
             conn.commit()
         logger.info("Stamped legacy SQLite schema at ab219adaba28")
-    with engine.connect() as conn:
-        _guarded_upgrade(cfg, conn)
+    _guarded_upgrade(cfg, engine)
     logger.info("SQLite migrated to head via Alembic")
 

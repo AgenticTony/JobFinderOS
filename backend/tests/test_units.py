@@ -3064,10 +3064,21 @@ class TestMigrationAdvisoryLock:
         monkeypatch.setattr(command, "upgrade", fake_upgrade)
         # WO-25: the drift guard reads the stamp first — at head here, so
         # it allows the upgrade and the lock sequence is what's under test.
+        read_on = []
         monkeypatch.setattr(dbmod, "_read_current_heads",
-                            lambda conn: tuple(_script_heads()))
+                            lambda conn: read_on.append(conn) or tuple(_script_heads()))
+        # A separate connection for the stamp read: reading on lock_conn
+        # holds ACCESS SHARE on alembic_version through the migration.
+        read_conn = MagicMock()
+        read_ctx = MagicMock()
+        read_ctx.__enter__.return_value = read_conn
+        fake_engine.connect.side_effect = [lock_ctx, read_ctx]
 
         dbmod.init_db()
+
+        assert read_on == [read_conn], (
+            "stamp read on the advisory-lock connection — it would hold "
+            "ACCESS SHARE on alembic_version for the whole migration")
 
         assert len(calls) == 4, f"expected timeout/lock/upgrade/unlock, got {calls}"
         assert "lock_timeout" in calls[0][1], calls[0]
