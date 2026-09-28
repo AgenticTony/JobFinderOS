@@ -76,6 +76,12 @@ class Profile(Base):
     # never an edit — the original CV stays immutable (invariant #1).
     # Bounded: 30 items x 200 characters (enforced at the write sites).
     vouched_facts = Column(Text, nullable=True)  # JSON array of strings
+    # WO-19 part B: the one requirement that is categorically
+    # disqualifying. Collected at onboarding (one question, no AI),
+    # editable in Profile preferences. NULL/'prefer_not_say' behaves as
+    # unverified-everywhere — never verification.
+    work_rights = Column(String(30), nullable=True,
+                         server_default="prefer_not_say")
 
     user_id = Column(Uuid, ForeignKey("users.id"), unique=True, nullable=False, index=True)
     # is_active kept for the migration backfill only; per-user semantics

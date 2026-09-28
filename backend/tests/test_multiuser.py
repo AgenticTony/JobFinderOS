@@ -2959,10 +2959,13 @@ class TestWO23BlockedDraftRecovery:
         seen = {}
         real = cv_service.build_profile_context
 
-        def spy(profile, include_derived=True, include_vouched=True):
+        def spy(profile, include_derived=True, include_vouched=True,
+                 include_work_rights=True):
             seen["include_vouched"] = include_vouched
+            seen["include_work_rights"] = include_work_rights
             return real(profile, include_derived=include_derived,
-                        include_vouched=include_vouched)
+                        include_vouched=include_vouched,
+                        include_work_rights=include_work_rights)
 
         monkeypatch.setattr(matcher_service, "build_profile_context", spy)
         from types import SimpleNamespace
@@ -4323,3 +4326,492 @@ class TestBetaRoutePrecheck:
         )
         assert r.status_code == 200, r.text
         assert r.json().get("status") != "daily_cap_reached", r.json()
+
+
+class TestWO19EligibilityGate:
+    """WO-19 part B: the work-rights eligibility gate — deterministic,
+    pre-AI hard stop for sponsorship users on citizenship/clearance
+    postings (never scored, never shown, re-evaluated each run), verdict
+    persisted on every shown match, and work rights fed to the TAILOR
+    and GUARD channels only — never match scoring (no re-score owed)."""
+
+    @staticmethod
+    def _seed(client, db, work_rights=None, description="A Python role.",
+              location="Malmö", country=None):
+        email = f"wo19-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik. Python developer at Svenska Spel."
+        if country is not None:
+            p.country = country
+        if work_rights is not None:
+            p.work_rights = work_rights
+        db.commit()
+        # Unique company per seed (round-2): every earlier WO-19 test
+        # seeded Dev/Acme/Malmö — one dedupe key — and the group-best
+        # eligibility rule correctly reads the group's FULLEST copy,
+        # so a longer citizenship seed in one test gated the welcome
+        # seed in the next. Each test's job gets its own key.
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev",
+                         company=f"co{uuid.uuid4().hex[:8]}",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}",
+                         status="new", description=description,
+                         location=location)
+        db.add(job)
+        db.commit()
+        return p, job, uid
+
+    @staticmethod
+    def _script_match(monkeypatch):
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        calls = {"n": 0}
+
+        def fake_match(self, profile_context, cv_text, job_description):
+            calls["n"] += 1
+            calls.setdefault("descs", []).append(job_description)
+            calls["ctx"] = profile_context
+            return {"score": 80, "reasoning": "ok", "recommendation": "apply",
+                    "confidence": "high", "matched_skills": ["Python"],
+                    "missing_skills": [], "transferable_skills": []}
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "match_job", fake_match)
+        return calls
+
+    def _run(self, db, p, uid):
+        from app.services import matcher_service
+
+        return matcher_service.run_matching(db, profile=p, user_id=uid)
+
+    def test_hard_stop_never_scored_never_shown(self, client, db, monkeypatch):
+        p, job, uid = self._seed(
+            client, db, work_rights="needs_sponsorship",
+            description="Candidates must be Swedish citizens. Security "
+                        "clearance is required.")
+        calls = self._script_match(monkeypatch)
+        summary = self._run(db, p, uid)
+        assert summary["status"] == "completed", summary
+        # The shared pool carries earlier tests' jobs — those may score;
+        # the CITIZENSHIP posting itself must never reach the AI.
+        scored = "\n".join(calls.get("descs", []))
+        assert "Swedish citizenship" not in scored, (
+            "a categorically disqualifying posting consumed an AI call"
+        )
+        rows = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == job.id).all()
+        assert not rows, (
+            "a hard-stopped job must never reach a card — no match row, "
+            "no dismissal row (re-evaluated free each run, like the scope "
+            "gate: the user's answer can change)"
+        )
+
+    def test_sponsoring_posting_is_verified_with_note(self, client, db, monkeypatch):
+        p, job, uid = self._seed(
+            client, db, work_rights="needs_sponsorship",
+            description="We sponsor work visas and welcome international "
+                        "applicants.")
+        self._script_match(monkeypatch)
+        self._run(db, p, uid)
+        m = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == job.id).first()
+        assert m and m.eligibility == "verified", (
+            f"sponsorship-welcoming wording must record verified: "
+            f"{m.eligibility if m else 'no row'}"
+        )
+        assert m.eligibility_note
+
+    def test_silent_posting_stores_unverified_without_note(self, client, db, monkeypatch):
+        p, job, uid = self._seed(client, db, work_rights="citizen_or_pr")
+        self._script_match(monkeypatch)
+        self._run(db, p, uid)
+        m = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == job.id).first()
+        assert m and m.eligibility == "unverified"
+        assert m.eligibility_note is None
+
+    def test_prefer_not_say_default_is_unverified_and_rendered(self, client, db, monkeypatch):
+        p, job, uid = self._seed(client, db)  # column default
+        self._script_match(monkeypatch)
+        self._run(db, p, uid)
+        m = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == job.id).first()
+        assert m and m.eligibility == "unverified"
+        r = client.get("/api/v1/matches/")
+        body = next(x for x in r.json() if x["id"] == m.id)
+        assert body["eligibility"] == "unverified", (
+            "the card API must carry the verdict"
+        )
+
+    def test_work_rights_reach_tailor_and_guard_not_matching(self, client, db, monkeypatch):
+        from app.services.cv_service import build_profile_context
+
+        p, _pool_job, uid = self._seed(client, db, work_rights="eu_right")
+        job = JobPosting(
+            source="manual", source_id=str(uuid.uuid4())[:8],
+            title="Dev", company=f"co{uuid.uuid4().hex[:8]}",
+            url=f"https://x/{uuid.uuid4().hex[:6]}",
+            status="new", description="A Python role.", location="Malmö")
+        db.add(job)
+        db.commit()
+        calls = self._script_match(monkeypatch)
+        self._run(db, p, uid)
+        assert calls["n"] >= 1, "setup: matching must run for the capture"
+        assert "work rights" not in calls["ctx"].lower(), (
+            "work rights reached the MATCH prompt — scores would shift "
+            "under one prompt_version (the AI-13 trap)"
+        )
+        # Tailor channel (default call) and guard channel both carry it —
+        # guard source >= generator input, or the truthful statement the
+        # tailor is now licensed to write gets flagged (WO-01's invention
+        # vector closes only if the guard knows the answer too).
+        p.country = "SE"
+        db.commit()
+        ctx_tailor = build_profile_context(p)
+        ctx_guard = build_profile_context(p, include_derived=False)
+        for ctx in (ctx_tailor, ctx_guard):
+            # Round-1 finding 2: the line must be COUNTRY-SCOPED with the
+            # never-elsewhere instruction — an unscoped "of the work
+            # country" claim let a UK letter assert a right the user's
+            # Swedish answer doesn't give, sanctioned by the guard.
+            assert "Work rights (answered for Sweden)" in ctx, (
+                "the scoped work-rights line must reach the tailor AND the guard"
+            )
+            assert "never claim work rights" in ctx.lower(), (
+                "the never-elsewhere instruction is missing"
+            )
+
+    def test_onboarding_and_settings_edit_work_rights(self, client, db):
+        email = f"wo19o-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik. Python."
+        db.commit()
+        r = client.post("/api/v1/profile/onboarding", json={
+            "country": "SE", "region": "Skåne län",
+            "search_queries": ["developer"], "languages": ["Swedish"],
+            "work_rights": "eu_right",
+        })
+        assert r.status_code == 200, r.text
+        db.refresh(p)
+        assert p.work_rights == "eu_right"
+        assert r.json()["work_rights"] == "eu_right"
+
+        r = client.put("/api/v1/profile/me", json={"work_rights": "needs_sponsorship"})
+        assert r.status_code == 200, r.text
+        assert r.json()["work_rights"] == "needs_sponsorship"
+
+        r = client.put("/api/v1/profile/me", json={"work_rights": "not_a_value"})
+        assert r.status_code == 400, "invalid enum values must be rejected"
+
+
+
+
+
+    # --- round-3 review (2026-09-20) ---
+
+    def test_fuzzy_twin_requirement_flags_the_survivor(self, client, db,
+                                                       monkeypatch):
+        """Round-3 finding 1: eligibility grouped by exact dedupe key,
+        but the fuzzy agency/direct twin has a DIFFERENT key by
+        construction. The requirement-carrying original was hidden; the
+        truncated copy won collapse (its live apply URL outranks the
+        original's better source) and was shown with no signal at all.
+        The verdict must travel across the PAIRING: a survivor connected
+        to a blocked copy is flagged, never shown clean."""
+        p, _pool_job, uid = self._seed(client, db,
+                                        work_rights="needs_sponsorship")
+        pair_title = f"Compliance Manager {uuid.uuid4().hex[:4]}"
+        orig = JobPosting(
+            source="jobtech", source_id=str(uuid.uuid4())[:8],
+            title=pair_title, company="PÅGEN AKTIEBOLAG",
+            url=f"https://pb/{uuid.uuid4().hex[:6]}",
+            status="new", location="Malmö",
+            description="Svenskt medborgarskap krävs för denna roll. "
+                        "Ansvar för efterlevnad, policy och rutiner.")
+        agg = JobPosting(
+            source="careerjet", source_id=str(uuid.uuid4())[:8],
+            title=pair_title, company="Pågen AB",
+            url=f"https://cj/{uuid.uuid4().hex[:6]}",
+            application_url=f"https://pb/apply/{uuid.uuid4().hex[:4]}",
+            status="new", location="Malmö",
+            description="Compliance Manager at Pågen. Apply now.")
+        db.add(orig)
+        db.add(agg)
+        db.commit()
+        calls = self._script_match(monkeypatch)
+        summary = self._run(db, p, uid)
+        assert summary["status"] == "completed", summary
+
+        rows = (db.query(MatchResult)
+                .filter(MatchResult.user_id == uid,
+                        MatchResult.job_id.in_([orig.id, agg.id]))
+                .all())
+        visible = [m for m in rows if m.dismissed_reason is None]
+        # the pair collapses (fuzzy gate) and the APPLY-URL copy wins;
+        # the original must never be shown clean
+        assert len(visible) == 1, (
+            f"expected one survivor, got "
+            f"{[(m.job_id, m.dismissed_reason) for m in rows]}"
+        )
+        survivor = visible[0]
+        assert survivor.eligibility == "unverified"
+        assert survivor.eligibility_note and "citizenship" in (
+            survivor.eligibility_note.lower()
+            .replace("medborgarskap", "citizenship")), (
+            f"the survivor of a requirement-carrying pair was shown "
+            f"clean: {survivor.eligibility_note!r}"
+        )
+        scored = "\n".join(calls.get("descs", []))
+        assert "medborgarskap krävs" not in scored, (
+            "the requirement-carrying original consumed an AI call"
+        )
+
+    # --- round-2 review (2026-09-19) ---
+
+    def test_stats_agree_with_the_hidden_ineligible_list(self, client, db,
+                                                         monkeypatch):
+        """Round-2 finding 5: get_stats' FILTER aggregate still counted
+        rows list_matches hides — Hunt Pulse and the sidebar said 5
+        while the Awaiting page showed 3."""
+        # eu_right is EEA-established for an SE job with no home country
+        # needed, so the citizenship posting MATCHES (the flip below is
+        # what turns it ineligible) — and no country means no scope
+        # context, matching how the round-1 tests seed
+        p, _pool_job, uid = self._seed(client, db, work_rights="eu_right")
+        # unique company: _seed's Dev/Acme/Malmö key collides with the
+        # pool's earlier WO-19 seeds and the job dies in cross-board
+        # dedupe before it can match — the verdict path needs THIS job
+        job_ban = JobPosting(
+            source="manual", source_id=str(uuid.uuid4())[:8],
+            title="Dev", company=f"co{uuid.uuid4().hex[:8]}",
+            url=f"https://x/{uuid.uuid4().hex[:6]}",
+            status="new",
+            description="Candidates must be Swedish citizens. Python role.",
+            location="Malmö")
+        db.add(job_ban)
+        db.commit()
+        self._script_match(monkeypatch)
+        summary = self._run(db, p, uid)
+        assert summary["status"] == "completed", summary
+
+        def pending_and_listed():
+            stats = client.get("/api/v1/pipeline/status").json()["stats"]
+            listed = client.get("/api/v1/matches").json()
+            pending = stats["matches_pending_decision"]
+            listed_undecided = [m for m in listed if m["decision"] is None]
+            return pending, listed_undecided
+
+        pending, listed_undecided = pending_and_listed()
+        assert any(m["job_id"] == job_ban.id for m in listed_undecided), (
+            "precondition: the citizenship match is pending before the flip"
+        )
+        # flip to needs_sponsorship: the row becomes ineligible and is
+        # hidden — the count must move WITH the list, not past it
+        r = client.put("/api/v1/profile/me",
+                       json={"work_rights": "needs_sponsorship"})
+        assert r.status_code == 200, r.text
+        pending_after, listed_after = pending_and_listed()
+        assert all(m["job_id"] != job_ban.id for m in listed_after), (
+            "precondition failed: list_matches must hide the ineligible row"
+        )
+        assert pending_after == len(listed_after), (
+            f"stats say {pending_after} pending but the list shows "
+            f"{len(listed_after)} — Hunt Pulse counts cards the user "
+            f"cannot reach"
+        )
+
+    def test_gate_hides_the_job_not_just_the_fuller_copy(self, client, db,
+                                                         monkeypatch):
+        """Round-2 finding 6, updated to the round-3 contract: the
+        eligibility verdict travels across the EXACT-KEY collapse too.
+        The requirement-carrying copy is hidden (its own text convicts
+        it); the surviving twin is FLAGGED with a note — one job,
+        conflicting evidence, the human is the tiebreaker (flag, never
+        drop — and never a stale-copy veto of a newer one)."""
+        p, _pool_job, uid = self._seed(client, db,
+                                        work_rights="needs_sponsorship")
+        # unique company so the PAIR collapses with each other, not with
+        # the pool's earlier Dev/Acme/Malmö seeds
+        pair_co = f"co{uuid.uuid4().hex[:8]}"
+        direct = JobPosting(
+            source="manual", source_id=str(uuid.uuid4())[:8],
+            title="Dev", company=pair_co,
+            url=f"https://x/{uuid.uuid4().hex[:6]}",
+            status="new",
+            description="Candidates must be Swedish citizens. Python "
+                        "developer at Acme, Malmö.",
+            location="Malmö")
+        agg = JobPosting(
+            source="manual", source_id=str(uuid.uuid4())[:8],
+            title="Dev", company=pair_co,
+            url=f"https://x/{uuid.uuid4().hex[:6]}",
+            status="new", description="Python developer.",
+            location="Malmö")
+        db.add(direct)
+        db.add(agg)
+        db.commit()
+        calls = self._script_match(monkeypatch)
+        summary = self._run(db, p, uid)
+        assert summary["status"] == "completed", summary
+
+        rows = (db.query(MatchResult)
+                .filter(MatchResult.user_id == uid,
+                        MatchResult.job_id.in_([direct.id, agg.id]))
+                .all())
+        visible = [m for m in rows if m.dismissed_reason is None]
+        assert len(visible) == 1, (
+            f"expected one flagged survivor, got "
+            f"{[(m.job_id, m.dismissed_reason) for m in rows]}"
+        )
+        survivor = visible[0]
+        assert survivor.eligibility == "unverified"
+        assert survivor.eligibility_note and "citizenship" in (
+            survivor.eligibility_note.lower()), (
+            f"truncating the requirement sentence laundered the job "
+            f"clean: {survivor.eligibility_note!r}"
+        )
+        scored = "\n".join(calls.get("descs", []))
+        assert "Swedish citizens" not in scored, (
+            "the requirement-carrying copy consumed an AI call"
+        )
+
+    def test_unchanged_work_rights_save_does_not_reevaluate(self, client, db,
+                                                            monkeypatch):
+        """Round-2 finding 7: the Profile editor sends work_rights on
+        EVERY save, so editing a phone number re-ran eligibility over
+        every undecided match. An unchanged answer must not touch the
+        rows (the sentinel note survives); a real change still does."""
+        p, job, uid = self._seed(client, db, work_rights="eu_right")
+        self._script_match(monkeypatch)
+        summary = self._run(db, p, uid)
+        assert summary["status"] == "completed", summary
+        m = (db.query(MatchResult)
+             .filter(MatchResult.user_id == uid, MatchResult.job_id == job.id)
+             .first())
+        assert m is not None, "precondition: the job matched"
+        m.eligibility_note = "sentinel-note"
+        db.commit()
+
+        r = client.put("/api/v1/profile/me", json={
+            "work_rights": "eu_right", "preferred_locations": "Malmö"})
+        assert r.status_code == 200, r.text
+        db.refresh(m)
+        assert m.eligibility_note == "sentinel-note", (
+            "an unchanged work_rights answer re-ran eligibility"
+        )
+
+        # round-1 finding 5 still stands: a real change re-evaluates
+        r = client.put("/api/v1/profile/me",
+                       json={"work_rights": "needs_sponsorship"})
+        assert r.status_code == 200, r.text
+        db.refresh(m)
+        assert m.eligibility_note != "sentinel-note", (
+            "a changed work_rights answer must re-evaluate existing matches"
+        )
+
+
+class TestWO19EligibilityR1Fixes:
+    """Round-1 review on part B: per-jurisdiction gating and the
+    work-rights re-evaluation of EXISTING matches (finding 5)."""
+
+    @staticmethod
+    def _seed(client, db, description="A Python role.", location="Malmö"):
+        email = f"wo19r1-{uuid.uuid4().hex[:6]}@test.example"
+        uid = uuid.UUID(_register(client, email))
+        _auth_client(client, email)
+        p = db.query(Profile).filter(Profile.user_id == uid).first()
+        p.cv_text = "Erik. Python developer at Svenska Spel."
+        db.commit()
+        job = JobPosting(source="manual", source_id=str(uuid.uuid4())[:8],
+                         title="Dev", company="Acme",
+                         url=f"https://x/{uuid.uuid4().hex[:6]}",
+                         status="new", description=description,
+                         location=location)
+        db.add(job)
+        db.commit()
+        return p, job, uid
+
+    @staticmethod
+    def _script_match(monkeypatch):
+        from app.services import matcher_service
+        from app.services.ai_service import AIService
+
+        def fake_match(self, profile_context, cv_text, job_description):
+            return {"score": 80, "reasoning": "ok", "recommendation": "apply",
+                    "confidence": "high", "matched_skills": ["Python"],
+                    "missing_skills": [], "transferable_skills": []}
+
+        svc = AIService.__new__(AIService)
+        svc.model = "glm-test"
+        monkeypatch.setattr(matcher_service, "get_ai_service", lambda: svc)
+        monkeypatch.setattr(matcher_service, "ai_service_available", lambda: True)
+        monkeypatch.setattr(AIService, "match_job", fake_match)
+
+    def test_eu_right_user_gated_on_gb_citizenship_job(self, client, db, monkeypatch):
+        from app.services import matcher_service
+
+        p, job, uid = self._seed(
+            client, db,
+            description="Candidates must be British citizens.",
+            location="London")
+        p.work_rights = "eu_right"
+        p.country = "SE"
+        db.commit()
+        self._script_match(monkeypatch)
+        matcher_service.run_matching(db, profile=p, user_id=uid)
+        rows = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == job.id).all()
+        assert not rows, (
+            "an EU work right does not establish GB rights — the posting "
+            "must hard-stop, not score"
+        )
+
+    def test_changing_work_rights_revises_existing_matches(self, client, db, monkeypatch):
+        from app.services import matcher_service
+
+        # Matched while the answer was prefer_not_say (today's default)
+        p, job, uid = self._seed(
+            client, db,
+            description="Candidates must be British citizens.",
+            location="London")
+        self._script_match(monkeypatch)
+        matcher_service.run_matching(db, profile=p, user_id=uid)
+        m = db.query(MatchResult).filter(
+            MatchResult.user_id == uid, MatchResult.job_id == job.id).first()
+        assert m and m.eligibility == "unverified", (
+            "pre-migration/unknown rows surface as unverified until revised"
+        )
+        r = client.get("/api/v1/matches/")
+        assert any(x["id"] == m.id for x in r.json())
+
+        # The answer changes — the existing card must follow it
+        r = client.put("/api/v1/profile/me",
+                       json={"work_rights": "needs_sponsorship"})
+        assert r.status_code == 200, r.text
+        db.refresh(m)
+        assert m.eligibility == "ineligible", (
+            "the citizenship card stayed visible to a sponsorship seeker"
+        )
+        r = client.get("/api/v1/matches/")
+        assert not any(x["id"] == m.id for x in r.json()), (
+            "ineligible rows must be hidden from the queue"
+        )
+
+        # Flipping the answer back resurfaces it — the row was hidden,
+        # never deleted, and an eligibility verdict is not a decision
+        client.put("/api/v1/profile/me", json={"work_rights": "prefer_not_say"})
+        db.refresh(m)
+        assert m.eligibility == "unverified"
+        r = client.get("/api/v1/matches/")
+        assert any(x["id"] == m.id for x in r.json()), (
+            "the row did not come back after the answer changed"
+        )
+

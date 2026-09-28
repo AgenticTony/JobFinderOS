@@ -206,6 +206,7 @@ export const updateProfile = async (prefs: Partial<{
   min_salary: string;
   exclude_keywords: string[];
   vouched_facts: string[];
+  work_rights?: string;
 }>): Promise<Profile> => {
   const response = await api.put<Profile>('/api/v1/profile/me', prefs);
   return response.data;

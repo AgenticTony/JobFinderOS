@@ -220,6 +220,16 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   background matcher, hunt-lock sessions) stays service-level because
   it also mutates the shared pool — discipline-enforced there
   (keyword-only user_id + the isolation suite), not RLS.
+- **Supabase Oct-30 Data API auto-grant removal (2026-09-23 triage):
+  a non-event for us.** supabase-js is auth-only (no `.from()` data
+  queries anywhere in the frontend); all data flows through the API on
+  direct Postgres. The one real touchpoint — new tables + the
+  `authenticated` request path — is already covered by
+  `rls_sql.py`'s `ALTER DEFAULT PRIVILEGES` (2026-09-09). House rule
+  when a migration ever needs explicit grants: authenticated only —
+  NEVER grant to `anon` (its grants were deliberately revoked;
+  Supabase's own boilerplate template includes anon and must not be
+  copied).
   Policies/grants/the vanilla-PG auth.uid() shim live in
   `app/core/rls_sql.py` (single source: the migration AND conftest's
   stamp_alembic_head apply it — create_all-built schemas skip

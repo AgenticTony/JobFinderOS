@@ -65,6 +65,13 @@ class MatchResult(Base):
     # anchors landed and re-running the SAME model on the SAME job moved
     # scores by up to 26 points. NULL = pre-versioning (stale).
     prompt_version = Column(String(32), nullable=True, index=True)
+    # WO-19 part B: the deterministic eligibility verdict computed at
+    # gate time (verified | unverified; 'ineligible' never reaches a
+    # row — hard-stopped pre-AI). note carries WHY (welcoming wording
+    # quoted, or the high-risk-sector warning); NULL note = silent-plain,
+    # stored for stats, rendered nowhere.
+    eligibility = Column(String(20), nullable=True)
+    eligibility_note = Column(String(500), nullable=True)
     processing_time_ms = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=utc_now, nullable=False)

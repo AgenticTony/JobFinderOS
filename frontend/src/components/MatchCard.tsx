@@ -129,6 +129,22 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
               </span>
             )}
             <span>matched {timeAgo(match.created_at)}</span>
+            {match.eligibility === 'verified' && (
+              <span
+                className="rounded bg-ok/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ok"
+                title={match.eligibility_note ?? undefined}
+              >
+                work rights verified
+              </span>
+            )}
+            {match.eligibility === 'unverified' && match.eligibility_note && (
+              <span
+                className="rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal"
+                title={match.eligibility_note}
+              >
+                work rights unverified
+              </span>
+            )}
             {postedAgeDays !== null && (
               <span className={cn('num rounded px-1.5 py-0.5', postedStale ? 'bg-bad/10 text-bad' : '')}>
                 posted {postedAgeDays === 0 ? 'today' : `${postedAgeDays}d ago`}

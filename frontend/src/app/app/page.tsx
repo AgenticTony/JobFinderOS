@@ -1939,6 +1939,7 @@ function ProfileView({
   const [excludeKeywords, setExcludeKeywords] = useState('');
   // WO-23: newline-separated — facts contain commas ("Stockholm, Sweden")
   const [vouchedFacts, setVouchedFacts] = useState('');
+  const [workRights, setWorkRights] = useState('prefer_not_say');
   const [fullName, setFullName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -1952,6 +1953,7 @@ function ProfileView({
     setPreferredRoles(profile?.preferred_roles?.join(', ') ?? '');
     setExcludeKeywords(profile?.exclude_keywords?.join(', ') ?? '');
     setVouchedFacts(profile?.vouched_facts?.join('\n') ?? '');
+    setWorkRights(profile?.work_rights ?? 'prefer_not_say');
     setFullName(profile?.full_name ?? '');
     setContactEmail(profile?.email ?? '');
     setPhone(profile?.phone ?? '');
@@ -1965,6 +1967,7 @@ function ProfileView({
         preferred_roles: preferredRoles.split(',').map((s) => s.trim()).filter(Boolean),
         exclude_keywords: excludeKeywords.split(',').map((s) => s.trim()).filter(Boolean),
         vouched_facts: vouchedFacts.split('\n').map((s) => s.trim()).filter(Boolean),
+        work_rights: workRights,
         full_name: fullName.trim() || undefined,
         email: contactEmail.trim() || undefined,
         phone: phone.trim() || undefined,
@@ -2126,6 +2129,30 @@ function ProfileView({
                   className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                 />
               </label>
+            </div>
+
+            {/* WO-19 part B: the eligibility gate's answer — changes which
+                postings are hidden (citizenship/clearance for sponsorship
+                seekers) and what the tailor may state. */}
+            <div className="mt-4">
+              <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
+                Work rights
+              </span>
+              <select
+                value={workRights}
+                onChange={(e) => { prefsDirty.current = true; setWorkRights(e.target.value); }}
+                className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors focus:border-signal"
+              >
+                <option value="citizen_or_pr">Citizen / permanent resident</option>
+                <option value="permanent_resident">Permanent resident</option>
+                <option value="eu_right">EU/EEA work right</option>
+                <option value="needs_sponsorship">Need visa sponsorship</option>
+                <option value="prefer_not_say">Prefer not to say</option>
+              </select>
+              <p className="mt-1 text-xs text-low">
+                Sponsorship seekers never see postings that require citizenship or
+                security clearance.
+              </p>
             </div>
 
             {/* WO-23 Part B: "Things I can vouch for" — one fact per line.

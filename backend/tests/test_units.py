@@ -4060,7 +4060,9 @@ class TestWO18DuplicateCollapse:
         from app.services.matcher_service import _apply_cheap_gates
         svc = AIService.__new__(AIService)
         svc.model = "glm-test"
-        return _apply_cheap_gates(db, owner, jobs, svc, [])
+        # round-3: the gate returns (survivors, conflict_notes) now —
+        # WO-18's tests exercise the dedupe half only
+        return _apply_cheap_gates(db, owner, jobs, svc, [])[0]
 
     def _undecided_match(self, db, owner, job, score=68):
         from app.core.timeutil import utc_now
@@ -4637,7 +4639,7 @@ class TestTailorPromptLanguageRule:
 #: If the prompt text changes, AIService.tailoring_prompt_version()
 #: changes and the pinned test fails — bump DELIBERATELY and re-run
 #: RUN_FABRICATION before/after (WO-02).
-TAILORED_PROMPT_VERSION = "t2-2f8f4e86"  # WO-23: input-composition v2 (vouched facts)
+TAILORED_PROMPT_VERSION = "t2-e399d106"  # WO-19 B: input-composition v3 (work-rights line)
 
 
 class TestTailorPromptCraft:
@@ -4831,3 +4833,248 @@ class TestFabricationBlockMessage:
         assert out[0] == "Kompetenser: Microsoft Office, daglig användning", (
             f"the 3-token line must outrank the 1-token one: {out}"
         )
+
+
+class TestWO19EligibilityLexicon:
+    """WO-19 part B (round-1 hardened): the deterministic eligibility
+    verdict. A job hides ONLY on an explicit affirmative requirement in
+    a negation-free sentence AND unestablished rights for the job's
+    countries; everything else flags. Every case below is a sentence the
+    round-1 review ran against the real checker."""
+
+    def _ev(self, text, work_rights, home=None, countries=None):
+        from app.services.eligibility_lexicon import evaluate_eligibility
+
+        return evaluate_eligibility(text, work_rights, home, countries)
+
+    # --- the round-1 false hides (were: silently ineligible) ---
+
+    def test_negated_citizenship_with_sponsorship_verifies(self):
+        verdict, _ = self._ev(
+            "Citizenship is not required - we sponsor visas.",
+            "needs_sponsorship", "SE", {"SE"})
+        assert verdict == "verified", "the posting says the opposite of a ban"
+
+    def test_negated_clearance_is_not_a_requirement(self):
+        for sentence in ("No security clearance needed.",
+                         # the gap pattern CAN absorb "is not" — only the
+                         # negation guard keeps this sentence from hiding
+                         "Security clearance is not required."):
+            verdict, note = self._ev(
+                sentence, "needs_sponsorship", "SE", {"SE"})
+            assert verdict == "unverified", sentence
+            assert note is None, sentence
+
+    def test_corporate_citizenship_is_not_citizenship(self):
+        verdict, note = self._ev(
+            "We value corporate citizenship and sustainability.",
+            "needs_sponsorship", "SE", {"SE"})
+        assert (verdict, note) == ("unverified", None)
+
+    def test_cleared_backlog_is_not_clearance(self):
+        verdict, note = self._ev(
+            "We cleared a 2-year backlog of tickets.",
+            "needs_sponsorship", "SE", {"SE"})
+        assert (verdict, note) == ("unverified", None)
+
+    # --- the round-1 false passes (were: unverified) ---
+
+    def test_must_be_british_citizens_hard_stops(self):
+        verdict, note = self._ev(
+            "Candidates must be British citizens.",
+            "needs_sponsorship", "SE", {"GB"})
+        assert verdict == "ineligible", (verdict, note)
+
+    def test_must_be_british_hard_stops(self):
+        verdict, _ = self._ev(
+            "You must be British.", "needs_sponsorship", "SE", {"GB"})
+        assert verdict == "ineligible"
+
+    def test_swedish_security_clearance_required_hard_stops(self):
+        verdict, _ = self._ev(
+            "Krav: svenskt medborgarskap samt godkänd säkerhetsprövning.",
+            "needs_sponsorship", "SE", {"SE"})
+        assert verdict == "ineligible"
+
+    def test_uk_sc_required_hard_stops(self):
+        verdict, _ = self._ev(
+            "Eligibility for security clearance (SC) is required.",
+            "needs_sponsorship", "SE", {"GB"})
+        assert verdict == "ineligible"
+
+    # --- per-jurisdiction rights (round-1 finding 2, gate half) ---
+
+    def test_eu_right_does_not_cover_gb_postings(self):
+        verdict, _ = self._ev(
+            "Candidates must be British citizens.",
+            "eu_right", "SE", {"GB"})
+        assert verdict == "ineligible", (
+            "post-Brexit: an EU right does not establish GB rights"
+        )
+
+    def test_citizen_of_home_country_covers_home_job(self):
+        verdict, _ = self._ev(
+            "Candidates must be Swedish citizens.",
+            "citizen_or_pr", "SE", {"SE"})
+        assert verdict == "unverified", "home-country citizen: no ban"
+
+    def test_home_citizen_does_not_cover_foreign_job(self):
+        verdict, _ = self._ev(
+            "Candidates must be British citizens.",
+            "citizen_or_pr", "SE", {"GB"})
+        assert verdict == "ineligible"
+
+    def test_unresolvable_country_never_drops(self):
+        verdict, _ = self._ev(
+            "Candidates must be British citizens.",
+            "needs_sponsorship", "SE", set())
+        assert verdict == "unverified", (
+            "remote/global: unknown country flags, never silently drops"
+        )
+
+    def test_no_country_argument_never_drops(self):
+        verdict, _ = self._ev(
+            "Candidates must be British citizens.", "needs_sponsorship")
+        assert verdict == "unverified"
+
+    # --- welcome / relocation / high-risk (round-1 findings 3+4) ---
+
+    def test_sponsorship_wording_verifies_sponsorship_seeker(self):
+        verdict, note = self._ev(
+            "We sponsor work visas and welcome international applicants.",
+            "needs_sponsorship", "SE", {"SE"})
+        assert verdict == "verified" and note
+
+    def test_relocation_package_is_not_verification(self):
+        verdict, _ = self._ev(
+            "25 days holiday plus bank holidays. Relocation package "
+            "available.", "needs_sponsorship", "GB", {"GB"})
+        assert verdict == "unverified", (
+            "relocation support routinely assumes an existing right to work"
+        )
+
+    def test_bank_holidays_is_not_a_high_risk_sector(self):
+        verdict, note = self._ev(
+            "Salary £55k, 25 days holiday plus bank holidays, hybrid.",
+            "needs_sponsorship", "GB", {"GB"})
+        assert (verdict, note) == ("unverified", None)
+
+    def test_framed_bank_sector_flags_sponsorship_seeker(self):
+        verdict, note = self._ev(
+            "Join a leading investment bank in the City.",
+            "needs_sponsorship", "GB", {"GB"})
+        assert verdict == "unverified" and note
+
+    def test_high_risk_note_only_for_sponsorship_seekers(self):
+        verdict, note = self._ev(
+            "Defence systems engineer for a government agency.",
+            "citizen_or_pr", "SE", {"SE"})
+        assert verdict == "unverified"
+        assert note is None, "a home-country citizen needs no warning"
+
+    def test_sponsorship_wording_does_not_verify_others(self):
+        verdict, _ = self._ev(
+            "We sponsor work visas.", "citizen_or_pr", "SE", {"SE"})
+        assert verdict == "unverified"
+
+    # --- round-2 review (2026-09-19): refusals read as welcomes,
+    # --- compounds read as citizenship, Swedish idiom, discarded notes
+
+    def test_sponsorship_refusal_never_verifies(self):
+        # Standard UK boilerplate refusals — round-2 finding 1: the
+        # welcome patterns matched inside the refusal, handing a
+        # sponsorship seeker a green chip on the posting that rules
+        # them out (the worst inversion this gate can produce)
+        for sentence in ("No visa sponsorship available for this role.",
+                         "Please note: no sponsorship available."):
+            verdict, note = self._ev(
+                sentence, "needs_sponsorship", "GB", {"GB"})
+            assert verdict == "unverified", (sentence, verdict, note)
+
+    def test_refusal_clause_kills_only_its_own_welcome(self):
+        # A welcome in one clause must not survive a refusal in the
+        # sentence's other clause (per-clause discipline, both ways)
+        verdict, _ = self._ev(
+            "We offer relocation. Unfortunately no visa sponsorship "
+            "is available for this position.",
+            "needs_sponsorship", "GB", {"GB"})
+        assert verdict == "unverified"
+
+    def test_nationality_compound_is_not_citizenship(self):
+        # round-2 finding 2: "Swedish-speaking"/"British-based" are
+        # language/location requirements — the hyphen boundary is the
+        # difference between a hard stop and nothing (bare "must be
+        # British." stays a hard stop, pinned above)
+        verdict, _ = self._ev(
+            "You must be Swedish-speaking to join our Malmö team.",
+            "needs_sponsorship", "GB", {"SE"})
+        assert verdict == "unverified", "language requirement, not citizenship"
+        verdict, _ = self._ev(
+            "Candidates must be British-based.", "needs_sponsorship",
+            "SE", {"GB"})
+        assert verdict == "unverified", "location requirement, not citizenship"
+
+    def test_swedish_negated_requirement_idiom_is_not_a_requirement(self):
+        # round-2 finding 3: "är inte ett krav" / "inget krav på" — the
+        # idiomatic Swedish negation was invisible, so a posting that
+        # says citizenship is NOT required hard-stopped
+        for sentence in ("Svenskt medborgarskap är inte ett krav.",
+                         "Inget krav på svenskt medborgarskap."):
+            verdict, note = self._ev(
+                sentence, "needs_sponsorship", "GB", {"SE"})
+            assert verdict == "unverified", (sentence, verdict, note)
+
+    def test_refusal_carries_its_note(self):
+        # Round-3: the refusal patterns stopped the false "verified"
+        # but the matched clause was discarded — ('unverified', None)
+        # renders NO chip (MatchCard gates on the note). A posting that
+        # explicitly refuses sponsorship is the single most actionable
+        # signal this gate has for a sponsorship seeker.
+        for sentence in ("No visa sponsorship available for this role.",
+                         "Please note: no sponsorship available."):
+            verdict, note = self._ev(
+                sentence, "needs_sponsorship", "GB", {"GB"})
+            assert verdict == "unverified", (sentence, verdict)
+            assert note and "sponsorship" in note.lower(), (
+                f"{sentence!r}: refusal detected then discarded — {note!r}"
+            )
+
+    def test_detected_requirement_with_unknown_rights_carries_a_note(self):
+        # round-2 finding 4: prefer_not_say (every existing profile's
+        # default) and an unresolvable job country must not DISCARD a
+        # detected requirement — the note is the flag the card renders
+        for wr, countries in (("prefer_not_say", {"GB"}),
+                              ("needs_sponsorship", set())):
+            verdict, note = self._ev(
+                "Must hold British citizenship.", wr, "SE", countries)
+            assert verdict == "unverified", (wr, countries, verdict)
+            assert note, (
+                f"{wr}/{countries}: detected requirement silently "
+                f"discarded — the card renders no chip without a note"
+            )
+
+    def test_prefer_not_say_is_unverified_everywhere(self):
+        verdict, _ = self._ev(
+            "We sponsor work visas and welcome international applicants.",
+            "prefer_not_say", "SE", {"SE"})
+        assert verdict == "unverified"
+
+    def test_unknown_work_rights_value_fails_closed(self):
+        verdict, _ = self._ev("We sponsor visas.", "", "SE", {"SE"})
+        assert verdict == "unverified"
+
+    # --- the scoped prompt line (round-1 finding 2, prompt half) ---
+
+    def test_work_rights_line_is_country_scoped(self):
+        from app.services.eligibility_lexicon import work_rights_line
+
+        line = work_rights_line("citizen_or_pr", "SE")
+        assert "Sweden" in line
+        assert "ONLY" in line or "only" in line
+        assert "never claim" in line.lower()
+
+    def test_work_rights_line_never_asserts_when_unstated(self):
+        from app.services.eligibility_lexicon import work_rights_line
+
+        line = work_rights_line("prefer_not_say", None)
+        assert "Never assert" in line
