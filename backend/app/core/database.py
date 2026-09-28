@@ -133,6 +133,13 @@ def get_db():
         db.close()
 
 
+def _read_current_heads(connection) -> tuple[str, ...]:
+    """The revision(s) the database is stamped at (empty = never migrated)."""
+    from alembic.runtime.migration import MigrationContext
+
+    return tuple(MigrationContext.configure(connection).get_current_heads())
+
+
 def _guarded_upgrade(cfg, connection, env=None) -> None:
     """WO-25: `upgrade head`, but only after the drift guard agrees.
 
@@ -143,7 +150,6 @@ def _guarded_upgrade(cfg, connection, env=None) -> None:
     """
     import os
 
-    from alembic.runtime.migration import MigrationContext
     from alembic.script import ScriptDirectory
 
     from alembic import command
@@ -151,8 +157,7 @@ def _guarded_upgrade(cfg, connection, env=None) -> None:
 
     env = os.environ if env is None else env
     script = ScriptDirectory.from_config(cfg)
-    current = MigrationContext.configure(connection).get_current_heads()
-    state = revision_state(script, current)
+    state = revision_state(script, _read_current_heads(connection))
     assert_may_migrate(state, env, _settings.MIGRATION_BRANCH)
     if state.pending:
         logger.info("Applying %d pending migration(s): %s",

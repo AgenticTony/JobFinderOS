@@ -238,3 +238,81 @@ class TestDeployIdentity:
 
     def test_local_none(self):
         assert deploy_identity(LOCAL) is None
+
+
+# --- layer 2: the CI drift script (scripts/check_migration_drift.py) -------
+
+def _drift():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "check_migration_drift",
+        Path(__file__).resolve().parent.parent / "scripts" / "check_migration_drift.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestDriftScript:
+    def test_no_url_skips_but_still_checks_heads(self):
+        ok, msg = _drift().check(None)
+        assert ok and "SKIPPED" in msg and HEAD in msg
+
+    def test_at_head_passes(self, scratch_db):
+        cfg, eng = scratch_db
+        command.upgrade(cfg, "head")
+        ok, msg = _drift().check(cfg.get_main_option("sqlalchemy.url"))
+        assert ok and "at head" in msg
+
+    def test_behind_head_passes_with_pending_note(self, scratch_db):
+        cfg, _ = scratch_db
+        ok, msg = _drift().check(cfg.get_main_option("sqlalchemy.url"))
+        assert ok and "1 pending" in msg and HEAD in msg
+
+    def test_unknown_stamp_fails_naming_it(self, scratch_db):
+        cfg, eng = scratch_db
+        with eng.begin() as c:
+            c.execute(text("UPDATE alembic_version SET version_num = :v"),
+                      {"v": FOREIGN})
+        ok, msg = _drift().check(cfg.get_main_option("sqlalchemy.url"))
+        assert not ok, "production is ahead of main and the drift job passed"
+        assert FOREIGN in msg and "AHEAD of this build" in msg
+
+    def test_zero_rows_fails_closed(self, scratch_db):
+        # Under RLS a policy-less reader sees an EMPTY alembic_version —
+        # that must never read as "fresh database, behind head".
+        cfg, eng = scratch_db
+        with eng.begin() as c:
+            c.execute(text("DELETE FROM alembic_version"))
+        ok, msg = _drift().check(cfg.get_main_option("sqlalchemy.url"))
+        assert not ok and "ZERO rows" in msg and "RLS" in msg
+
+    def test_unreadable_target_fails(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'empty.db'}"  # no alembic_version table
+        ok, msg = _drift().check(url)
+        assert not ok and "cannot read alembic_version" in msg
+
+    def test_url_credentials_never_printed(self, tmp_path):
+        url = "postgresql://reader:s3cret-pw@127.0.0.1:1/postgres"
+        ok, msg = _drift().check(url)
+        assert not ok and "s3cret-pw" not in msg
+
+    def test_forked_graph_fails_before_any_db_read(self, tmp_path):
+        versions = tmp_path / "versions"
+        versions.mkdir()
+        _write_rev(versions, "aaaa00000001", None)
+        _write_rev(versions, "bbbb00000002", "aaaa00000001")
+        _write_rev(versions, "cccc00000003", "aaaa00000001")
+        ok, msg = _drift().check("sqlite://", script=ScriptDirectory(str(tmp_path)))
+        assert not ok and "single head" in msg
+
+    def test_locate_revision_finds_the_introducing_commit(self):
+        import subprocess
+
+        shallow = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            capture_output=True, text=True).stdout.strip() == "true"
+        where = _drift().locate_revision(HEAD)
+        if not shallow:  # CI's default checkout is depth-1: history absent
+            assert where and where.startswith("introduced in "), where
+        assert _drift().locate_revision("zzzz-not-a-rev-zzzz") is None
