@@ -1,6 +1,6 @@
 # WO-25 — Migration drift guard: a branch migration must never strand main
 
-> Priority: P1 · Depends on: — · Status: designed, not started
+> Priority: P1 · Depends on: — · Status: built 2026-09-29 (all code layers); owner steps open — see execution record
 > Origin: 2026-09-28 hunt-cron outage. (WO-24 is held by the ad-URL
 > ingest sketch — not yet written up — so this takes the next number.)
 
@@ -157,3 +157,65 @@ migration off the same parent merge into a two-head graph, and
   (the 2026-09-28 follow-up).
 - Consider setting `SENTRY_DSN` on both services: this outage paged
   nobody.
+
+## Execution record — 2026-09-29
+
+Branch `feat/wo25-migration-drift-guard`. All three code layers plus the
+single-head check are built; the owner steps below are what's left.
+
+**Layer 1 + 3 (boot):** `app/core/migration_guard.py` (pure: revision
+state, branch rule, single head, diagnosis) + `database._guarded_upgrade`,
+now the ONLY place `init_db` calls `command.upgrade` (all three paths:
+Postgres under the advisory lock, fresh SQLite, legacy SQLite). The stamp
+is read AFTER the lock is taken, so a concurrent winner's upgrade is
+visible. `MIGRATION_BRANCH` setting (default `main`). Boot logs
+`Deploy build: <branch>@<sha7>` on Render.
+
+**Layer 2 (CI):** `scripts/check_migration_drift.py` +
+`.github/workflows/migration-drift.yml` (push main, PRs into main, every
+6h, manual; `contents: read`). **Design change found while building:**
+`alembic_version` carries RLS with NO policies (`rls_sql.py`
+`LOCKED_SERVICE_TABLES`), so a plain read-only role sees ZERO rows — a
+naive check would read that as "fresh DB, behind head" and PASS. The
+script fails closed on zero rows, and `ops/sql/ci_revision_reader.sql`
+gives the role its own `revision_reader` SELECT policy (`ensure_rls`
+only ENABLEs RLS there, never drops foreign policies — verified).
+
+**Verification:**
+- `tests/test_migration_guard.py` (32) — asserts on the schema of a
+  scratch DB (stamp + full column snapshot), not on return values; head
+  and parent are DERIVED from the graph so future migrations need no
+  edits. `test_units.py` advisory-lock tests gained a stamp-read seam and
+  a new test: lock released + no upgrade on a guard refusal.
+- Revert-proof: guard call removed, Postgres path bypassing the guard,
+  missing branch failing open, unknown stamp undiagnosed, zero rows
+  passing, unlock outside `finally` — each turned its tests red; restored.
+- Real Postgres 16 (docker): branch build refused (stamp + column
+  unchanged), main build migrated; reader role saw the stamp, was denied
+  `profiles` and writes; dropping its policy turned the script red;
+  a main boot re-ran `ensure_rls` and the policy survived; foreign stamp
+  → drift exit 1 + boot diagnosis; advisory lock free after a refusal
+  in-process.
+- Suites: 577 passed / 14 skipped (SQLite), 589 / 2 (Postgres 16).
+
+**Deviation:** the single-head check lives in the drift workflow (runs
+even without the secret) and in the pytest suite
+(`TestSingleHead::test_repo_graph_has_one_head`, so ci.yml's backend job
+enforces it too) rather than as a separate ci.yml step.
+
+**Owner steps (not buildable by a session):**
+1. After this deploys: confirm the boot log shows
+   `Deploy build: main@<sha>` on BOTH `jobfinderos-api` and
+   `jobfinderos-hunt`. Render documents `RENDER_GIT_BRANCH` at runtime
+   for all service types; if the log says `<unknown branch>`, the next
+   migration from main will be REFUSED (fail-closed) — fix before merging
+   any migration. This PR ships no migration, so its own deploy boots
+   either way.
+2. Run `ops/sql/ci_revision_reader.sql` in the Supabase SQL editor
+   (fresh password), add `PROD_REVISION_READER_URL` as a GitHub Actions
+   secret, then run the workflow manually: expect `OK … at head`.
+   Until then the job runs the single-head check and skips the read.
+3. GitHub disables scheduled workflows after 60 days without repo
+   activity — the push/PR triggers still run; re-enable if it lapses.
+4. Set `jobfinderos-api`'s deploy branch to `main` if it isn't.
+5. Consider `SENTRY_DSN` on both services — this outage paged nobody.

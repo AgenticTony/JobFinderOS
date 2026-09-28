@@ -32,9 +32,18 @@ from app.core.migration_guard import (
 
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
-# The WO-19b migration adds profiles.work_rights on top of its parent.
-HEAD = "d94f2a6c8e1b"
-PARENT = "b7e2d4f8a1c3"
+
+def _repo_head_and_parent() -> tuple[str, str]:
+    """Derived, not pinned: a new migration must not force edits here."""
+    script = ScriptDirectory.from_config(Config(str(ALEMBIC_INI)))
+    (head,) = script.get_heads()
+    parent = script.get_revision(head).down_revision
+    assert isinstance(parent, str), (
+        f"head {head} is a merge revision; these tests need a single parent")
+    return head, parent
+
+
+HEAD, PARENT = _repo_head_and_parent()
 FOREIGN = "deadbeef0000"  # a revision no branch of this repo ever had
 
 RENDER_BRANCH = {"RENDER": "true", "RENDER_GIT_BRANCH": "feat/x",
@@ -70,19 +79,16 @@ def _stamp(eng) -> list[str]:
         return [r[0] for r in c.execute(text("SELECT version_num FROM alembic_version"))]
 
 
-def _profile_columns(eng) -> set[str]:
-    return {c["name"] for c in sa_inspect(eng).get_columns("profiles")}
+def _schema(eng) -> dict[str, frozenset[str]]:
+    """Every table's column set — the whole schema, not one column."""
+    insp = sa_inspect(eng)
+    return {t: frozenset(c["name"] for c in insp.get_columns(t))
+            for t in insp.get_table_names()}
 
 
 # --- revision_state: the arithmetic the guard stands on -------------------
 
 class TestRevisionState:
-    def test_repo_head_is_what_this_file_assumes(self):
-        # If a new migration lands, bump HEAD/PARENT here — the integration
-        # tests below need "PARENT has exactly one pending revision".
-        assert _script().get_heads() == [HEAD]
-        assert _script().get_revision(HEAD).down_revision == PARENT
-
     def test_at_head_nothing_pending(self):
         s = revision_state(_script(), (HEAD,))
         assert s.unknown == () and s.pending == ()
@@ -153,19 +159,19 @@ class TestBranchRule:
 class TestGuardedUpgradeIntegration:
     def test_branch_build_applies_nothing(self, scratch_db):
         cfg, eng = scratch_db
+        before = _schema(eng)
         with eng.connect() as conn, pytest.raises(MigrationGuardError):
             database._guarded_upgrade(cfg, conn, env=RENDER_BRANCH)
         # The outbound artifact is the schema: untouched.
         assert _stamp(eng) == [PARENT], (
             "a branch build moved the production stamp — the 2026-09-28 outage")
-        assert "work_rights" not in _profile_columns(eng)
+        assert _schema(eng) == before, "a branch build altered the schema"
 
     def test_main_build_applies_pending(self, scratch_db):
         cfg, eng = scratch_db
         with eng.connect() as conn:
             database._guarded_upgrade(cfg, conn, env=RENDER_MAIN)
         assert _stamp(eng) == [HEAD]
-        assert "work_rights" in _profile_columns(eng)
 
     def test_local_unaffected(self, scratch_db):
         cfg, eng = scratch_db

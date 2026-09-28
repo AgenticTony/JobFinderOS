@@ -246,6 +246,14 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   CI installs from `requirements.dev.lock` (74 pins = prod lock + pytest/ruff);
   the production Docker images install `requirements.lock` (70 pins) only.
   Dependabot (.github/dependabot.yml) covers pip/npm/github-actions drift.
+- **Migration drift guard (WO-25)**: `init_db` refuses to boot when the DB
+  is stamped at a revision this build lacks (diagnosis, not a bare hash),
+  and on Render only `MIGRATION_BRANCH` (main) builds may apply pending
+  migrations — a branch build with pending revisions refuses to boot
+  (missing RENDER_GIT_BRANCH fails closed). `.github/workflows/migration-drift.yml`
+  (push/PR/every 6h) checks production's stamp via the least-privilege
+  `ci_revision_reader` role (`ops/sql/ci_revision_reader.sql` — it needs
+  its own RLS policy: alembic_version is deny-all) and the single-head rule.
 - **Dockerfile**: python:3.12-slim, non-root user, lockfile-only install,
   ships Alembic for boot migrations.
 - **launchd agent**: `com.jobfinderos.backend` — RunAtLoad + KeepAlive.
@@ -331,6 +339,15 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
       root logger to WARN after init_db (both processes log-blind at
       INFO since boot migrations landed) — fixed in env.py with a
       regression test (red-verified).
+- [ ] **WO-25 owner steps (2026-09-28 branch-migration outage)**: a
+      WO-19b branch build migrated production ahead of main; every
+      main-built hunt died on "Can't locate revision" until PR #116
+      merged. Code guard built (see WO-25 execution record). Still to do:
+      (1) after deploy, confirm boot logs show `Deploy build: main@<sha>`
+      on BOTH services — `<unknown branch>` means the next migration from
+      main will be refused; (2) run ops/sql/ci_revision_reader.sql +
+      add the PROD_REVISION_READER_URL GitHub secret; (3) point
+      jobfinderos-api's deploy branch at main; (4) consider SENTRY_DSN.
 - [ ] **Cron env hygiene (2026-09-11 incident follow-up)**: on
       jobfinderos-hunt's Environment tab, still to verify/set:
       TRIAL_DAILY_SCORE_CAP + TRIAL_DAY1_SCORE_CAP (the beta lift was
