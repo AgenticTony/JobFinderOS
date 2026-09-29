@@ -214,6 +214,10 @@ class Settings(BaseSettings):
     # /api/v1/pipeline/status uses it to report an honest next-run time;
     # empty = cadence unknown (dashboard shows "manual hunts only").
     HUNT_TIMES_UTC: str = ""
+    # WO-25: on Render, only builds from this branch may apply pending
+    # migrations at boot (RENDER_GIT_BRANCH is compared against it). A
+    # build from any other branch with pending revisions refuses to boot.
+    MIGRATION_BRANCH: str = "main"
 
     # CORS
     # Explicit origins ONLY. With allow_credentials=True a wildcard origin is

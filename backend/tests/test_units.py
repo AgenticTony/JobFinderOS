@@ -3062,8 +3062,23 @@ class TestMigrationAdvisoryLock:
                             "postgresql+psycopg://u:p@host:5432/db")
         monkeypatch.setattr(dbmod, "engine", fake_engine)
         monkeypatch.setattr(command, "upgrade", fake_upgrade)
+        # WO-25: the drift guard reads the stamp first — at head here, so
+        # it allows the upgrade and the lock sequence is what's under test.
+        read_on = []
+        monkeypatch.setattr(dbmod, "_read_current_heads",
+                            lambda conn: read_on.append(conn) or tuple(_script_heads()))
+        # A separate connection for the stamp read: reading on lock_conn
+        # holds ACCESS SHARE on alembic_version through the migration.
+        read_conn = MagicMock()
+        read_ctx = MagicMock()
+        read_ctx.__enter__.return_value = read_conn
+        fake_engine.connect.side_effect = [lock_ctx, read_ctx]
 
         dbmod.init_db()
+
+        assert read_on == [read_conn], (
+            "stamp read on the advisory-lock connection — it would hold "
+            "ACCESS SHARE on alembic_version for the whole migration")
 
         assert len(calls) == 4, f"expected timeout/lock/upgrade/unlock, got {calls}"
         assert "lock_timeout" in calls[0][1], calls[0]
@@ -3099,6 +3114,8 @@ class TestMigrationAdvisoryLock:
                             "postgresql+psycopg://u:p@host:5432/db")
         monkeypatch.setattr(dbmod, "engine", fake_engine)
         monkeypatch.setattr(command, "upgrade", boom)
+        monkeypatch.setattr(dbmod, "_read_current_heads",
+                            lambda conn: tuple(_script_heads()))
 
         import pytest
         with pytest.raises(RuntimeError):
@@ -3107,6 +3124,52 @@ class TestMigrationAdvisoryLock:
         assert any("pg_advisory_unlock" in c[1] for c in calls), (
             f"unlock missing after failure: {calls}"
         )
+
+    def test_unlock_runs_when_drift_guard_refuses(self, monkeypatch):
+        """WO-25: a refused boot (DB stamped ahead of this build) must
+        release the lock too — and must never reach `upgrade`."""
+        from unittest.mock import MagicMock
+
+        import pytest
+
+        import app.core.database as dbmod
+        from alembic import command
+        from app.core.migration_guard import MigrationGuardError
+
+        calls = []
+        lock_conn = MagicMock()
+        lock_conn.execute.side_effect = (
+            lambda sql, *a, **k: calls.append(("conn", str(sql)))
+        )
+        lock_ctx = MagicMock()
+        lock_ctx.__enter__.return_value = lock_conn
+        fake_engine = MagicMock()
+        fake_engine.connect.return_value = lock_ctx
+
+        monkeypatch.setattr(dbmod, "DATABASE_URL",
+                            "postgresql+psycopg://u:p@host:5432/db")
+        monkeypatch.setattr(dbmod, "engine", fake_engine)
+        monkeypatch.setattr(command, "upgrade",
+                            lambda cfg, rev: calls.append(("upgrade", rev)))
+        monkeypatch.setattr(dbmod, "_read_current_heads",
+                            lambda conn: ("deadbeef0000",))
+
+        with pytest.raises(MigrationGuardError):
+            dbmod.init_db()
+
+        assert ("upgrade", "head") not in calls, calls
+        assert "pg_advisory_unlock" in calls[-1][1], (
+            f"lock leaked after a refused boot: {calls}")
+
+
+def _script_heads():
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+    return ScriptDirectory.from_config(Config(str(ini))).get_heads()
 
 
 class TestWorkerOnceMode:

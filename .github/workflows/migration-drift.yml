@@ -1,0 +1,60 @@
+# WO-25 layer 2 — is production's alembic stamp a revision main knows?
+#
+# The 2026-09-28 outage: an unmerged branch's build migrated production,
+# and every main-built boot died on "Can't locate revision". This job
+# fails when production is stamped at a revision this checkout lacks.
+#
+# Own workflow (not a ci.yml job) so the schedule trigger re-runs ONLY
+# this check, never the full suite.
+#
+# Credential: PROD_REVISION_READER_URL is the ci_revision_reader role
+# (ops/sql/ci_revision_reader.sql) — SELECT on alembic_version, nothing
+# else, read-only transactions. Absent (fork/Dependabot PRs, or before
+# the owner creates it) → the drift read is SKIPPED and the single-head
+# check still runs.
+name: Migration drift
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 */6 * * *"  # catches drift made outside Git between merges
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Production migration stamp is known to this build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history + all branches: on failure the script names the
+          # remote branch that introduced the unknown revision.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+
+      - name: Install dependencies (prod lock)
+        run: pip install -r requirements.lock
+
+      - name: Single head + production stamp check
+        env:
+          DRIFT_CHECK_DATABASE_URL: ${{ secrets.PROD_REVISION_READER_URL }}
+        run: python scripts/check_migration_drift.py

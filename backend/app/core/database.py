@@ -133,10 +133,52 @@ def get_db():
         db.close()
 
 
+def _read_current_heads(connection) -> tuple[str, ...]:
+    """The revision(s) the database is stamped at (empty = never migrated)."""
+    from alembic.runtime.migration import MigrationContext
+
+    return tuple(MigrationContext.configure(connection).get_current_heads())
+
+
+def _guarded_upgrade(cfg, bind, env=None) -> None:
+    """WO-25: `upgrade head`, but only after the drift guard agrees.
+
+    Reads the stamped revision, then refuses (MigrationGuardError) when the
+    stamp is unknown to this build, or when a non-MIGRATION_BRANCH Render
+    build has pending revisions. The ONLY place init_db runs
+    `command.upgrade` — a structural test pins that.
+
+    The read uses a SHORT-LIVED connection from `bind`, closed before
+    upgrading. Reading on the advisory-lock connection would hold ACCESS
+    SHARE on alembic_version for the whole migration, so any DDL on that
+    table would wait on this very boot until lock_timeout (reproduced on
+    PG16). The advisory lock is session-level on its own connection, so
+    boots stay serialized.
+    """
+    import os
+
+    from alembic.script import ScriptDirectory
+
+    from alembic import command
+    from app.core.migration_guard import assert_may_migrate, revision_state
+
+    env = os.environ if env is None else env
+    script = ScriptDirectory.from_config(cfg)
+    with bind.connect() as conn:
+        current = _read_current_heads(conn)
+    state = revision_state(script, current)
+    assert_may_migrate(state, env, _settings.MIGRATION_BRANCH)
+    if state.pending:
+        logger.info("Applying %d pending migration(s): %s",
+                    len(state.pending), ", ".join(state.pending))
+    command.upgrade(cfg, "head")
+
+
 def init_db():
     """Initialize/migrate the schema — Alembic owns BOTH backends now.
 
-    - Postgres: upgrade head directly.
+    - Postgres: upgrade head under an advisory lock.
+    - Every upgrade goes through _guarded_upgrade (WO-25 drift guard).
     - SQLite: fresh DB -> upgrade head from scratch; legacy create_all DB ->
       stamp at the initial revision (its historical shape) then upgrade, so
       local databases migrate into the per-user schema automatically.
@@ -145,12 +187,20 @@ def init_db():
     from sqlalchemy import inspect as sa_inspect
     from sqlalchemy import text as sa_text
 
-    from alembic import command
-
     ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
     cfg = Config(str(ini))
     # DATABASE_URL is already the sync psycopg URL — asyncpg is gone
     cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+
+    import os
+
+    from app.core.migration_guard import deploy_identity
+
+    identity = deploy_identity(os.environ)
+    if identity:
+        # WO-25: which build is booting — the 2026-09-28 outage needed a
+        # manual search to learn a branch build had migrated production.
+        logger.info("Deploy build: %s", identity)
 
     if DATABASE_URL.startswith("postgres"):
         # Serialize boots across processes (WO-07): on a Render blueprint
@@ -177,7 +227,9 @@ def init_db():
             lock_conn.execute(sa_text(
                 f"SELECT pg_advisory_lock({_MIGRATION_LOCK_KEY})"))
             try:
-                command.upgrade(cfg, "head")
+                # Read the stamp AFTER taking the lock: a concurrent winner's
+                # upgrade is committed by now, so the guard sees the truth.
+                _guarded_upgrade(cfg, engine)
             finally:
                 lock_conn.execute(sa_text(
                     f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_KEY})"))
@@ -201,7 +253,7 @@ def init_db():
     has_version = "alembic_version" in insp.get_table_names()
 
     if not has_tables:
-        command.upgrade(cfg, "head")
+        _guarded_upgrade(cfg, engine)
         logger.info("Fresh SQLite database created via Alembic")
         return
     if not has_version:
@@ -218,6 +270,6 @@ def init_db():
             )
             conn.commit()
         logger.info("Stamped legacy SQLite schema at ab219adaba28")
-    command.upgrade(cfg, "head")
+    _guarded_upgrade(cfg, engine)
     logger.info("SQLite migrated to head via Alembic")
 
