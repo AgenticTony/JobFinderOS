@@ -9,9 +9,10 @@
 #
 # Credential: PROD_REVISION_READER_URL is the ci_revision_reader role
 # (ops/sql/ci_revision_reader.sql) — SELECT on alembic_version, nothing
-# else, read-only transactions. Absent (fork/Dependabot PRs, or before
-# the owner creates it) → the drift read is SKIPPED and the single-head
-# check still runs.
+# else, read-only transactions. Absent → the job FAILS ("not armed") on
+# push, schedule and manual runs. Only fork and Dependabot PRs, which
+# never receive secrets, may skip the read (DRIFT_CHECK_OPTIONAL below);
+# the single-head check runs everywhere.
 name: Migration drift
 
 on:
@@ -57,4 +58,5 @@ jobs:
       - name: Single head + production stamp check
         env:
           DRIFT_CHECK_DATABASE_URL: ${{ secrets.PROD_REVISION_READER_URL }}
+          DRIFT_CHECK_OPTIONAL: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]') }}
         run: python scripts/check_migration_drift.py

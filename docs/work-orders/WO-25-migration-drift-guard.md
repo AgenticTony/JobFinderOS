@@ -230,3 +230,23 @@ enforces it too) rather than as a separate ci.yml step.
    activity — the push/PR triggers still run; re-enable if it lapses.
 4. Set `jobfinderos-api`'s deploy branch to `main` if it isn't.
 5. Consider `SENTRY_DSN` on both services — this outage paged nobody.
+
+## Review fix — 2026-09-30: the drift check was not armed
+
+Post-merge review: with `PROD_REVISION_READER_URL` unset, the script
+treated a missing secret as "skip and pass" on EVERY trigger — all five
+post-merge runs (push to main + the 6-hourly schedule, e.g. run
+`36716374209`) were green while never reading production. The skip was
+designed for fork/Dependabot PRs; it silently covered main too.
+
+Fix: a missing URL now FAILS ("NOT ARMED") unless `DRIFT_CHECK_OPTIONAL`
+is exactly `true`, which the workflow sets only for PRs whose head repo
+is a fork or whose author is `dependabot[bot]` (keyed on the PR author,
+not `github.actor`, so a human re-run of a Dependabot job still skips).
+An empty or malformed flag fails closed. Tests red-first: default-fails,
+exit codes per flag value, and the workflow's flag expression pinned.
+
+**Consequence, intended:** until the owner runs
+`ops/sql/ci_revision_reader.sql` and adds the secret, the "Migration
+drift" workflow is RED on main, on the schedule and on same-repo PRs.
+That red is the truthful state — the check cannot see production.
