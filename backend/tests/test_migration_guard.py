@@ -258,9 +258,38 @@ def _drift():
 
 
 class TestDriftScript:
-    def test_no_url_skips_but_still_checks_heads(self):
-        ok, msg = _drift().check(None)
+    def test_no_url_skips_only_when_explicitly_optional(self):
+        ok, msg = _drift().check(None, required=False)
         assert ok and "SKIPPED" in msg and HEAD in msg
+
+    def test_no_url_fails_by_default(self):
+        # Review 2026-09-30: "skip when the secret is absent" made every
+        # push-to-main and scheduled run green while checking nothing.
+        ok, msg = _drift().check(None)
+        assert not ok, "drift check passed without reading production"
+        assert "NOT ARMED" in msg and "PROD_REVISION_READER_URL" in msg
+
+    def test_main_exit_code_follows_optional_flag(self, monkeypatch, capsys):
+        mod = _drift()
+        monkeypatch.delenv(mod.URL_ENV, raising=False)
+        monkeypatch.delenv(mod.OPTIONAL_ENV, raising=False)
+        assert mod.main() == 1, "unset secret on push/schedule must go red"
+        monkeypatch.setenv(mod.OPTIONAL_ENV, "true")
+        assert mod.main() == 0
+        monkeypatch.setenv(mod.OPTIONAL_ENV, "false")
+        assert mod.main() == 1
+        monkeypatch.setenv(mod.OPTIONAL_ENV, "")  # a broken expression
+        assert mod.main() == 1, "an empty flag must fail closed"
+
+    def test_workflow_marks_only_fork_and_dependabot_prs_optional(self):
+        import yaml
+
+        wf = Path(__file__).resolve().parents[2] / ".github/workflows/migration-drift.yml"
+        steps = yaml.safe_load(wf.read_text())["jobs"]["drift"]["steps"]
+        (step,) = [s for s in steps if "check_migration_drift.py" in s.get("run", "")]
+        flag = step["env"][_drift().OPTIONAL_ENV]
+        assert "github.event_name == 'pull_request'" in flag
+        assert "head.repo.fork" in flag and "dependabot[bot]" in flag
 
     def test_at_head_passes(self, scratch_db):
         cfg, eng = scratch_db

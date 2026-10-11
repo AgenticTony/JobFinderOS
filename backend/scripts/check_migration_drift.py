@@ -13,7 +13,10 @@ caught between merges).
    is fine (the next main deploy applies it). ZERO rows fails too: under
    RLS a reader without a policy sees an empty table, and treating that
    as "fresh database" would pass exactly when the check can't see.
-   Unset (fork/dependabot PRs have no secrets) -> skipped, exit 0.
+   Unset -> FAIL ("not armed"), unless DRIFT_CHECK_OPTIONAL=true, which the
+   workflow sets ONLY for fork and Dependabot PRs (they never receive
+   secrets). Review 2026-09-30: the first cut skipped on every missing
+   secret, so push-to-main and scheduled runs went green checking nothing.
 
 Standalone by design: no app settings import (their production guards
 would demand SUPABASE_URL etc. from a CI step that only has a URL). The
@@ -42,6 +45,7 @@ from app.core.migration_guard import (  # noqa: E402
 )
 
 URL_ENV = "DRIFT_CHECK_DATABASE_URL"
+OPTIONAL_ENV = "DRIFT_CHECK_OPTIONAL"  # exactly "true" to allow skipping
 
 
 def script_directory() -> ScriptDirectory:
@@ -83,7 +87,12 @@ def locate_revision(rev: str, repo: Path = BACKEND.parent) -> str | None:
         return None
 
 
-def check(url: str | None, script: ScriptDirectory | None = None) -> tuple[bool, str]:
+def check(
+    url: str | None,
+    script: ScriptDirectory | None = None,
+    *,
+    required: bool = True,
+) -> tuple[bool, str]:
     """(ok, message). Pure enough to test against a scratch database."""
     script = script or script_directory()
     try:
@@ -91,8 +100,14 @@ def check(url: str | None, script: ScriptDirectory | None = None) -> tuple[bool,
     except MigrationGuardError as e:
         return False, f"FAIL single head: {e}"
     if not url:
+        if required:
+            return False, (
+                f"FAIL drift check NOT ARMED: {URL_ENV} is empty, so production "
+                "was never read. Set the PROD_REVISION_READER_URL repository "
+                "secret (ops/sql/ci_revision_reader.sql). Single head "
+                f"{head} is fine.")
         return True, (f"single head {head}; drift check SKIPPED "
-                      f"({URL_ENV} not set — no secret on this run)")
+                      f"({URL_ENV} not set — fork/Dependabot PR, no secrets)")
     host = url.split("@")[-1].split("?")[0]
     try:
         stamp = read_stamp(url)
@@ -116,7 +131,8 @@ def check(url: str | None, script: ScriptDirectory | None = None) -> tuple[bool,
 
 
 def main() -> int:
-    ok, message = check(os.environ.get(URL_ENV) or None)
+    optional = os.environ.get(OPTIONAL_ENV) == "true"  # anything else: required
+    ok, message = check(os.environ.get(URL_ENV) or None, required=not optional)
     print(message)
     return 0 if ok else 1
 
