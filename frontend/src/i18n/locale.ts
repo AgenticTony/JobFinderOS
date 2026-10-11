@@ -59,3 +59,26 @@ export function switchLocale(to: Locale, currentPath: string): void {
       ? `/sv${currentPath === '/' ? '' : currentPath}${query}`
       : `${currentPath.replace(/^\/sv(?=\/|$)/, '') || '/'}${query}`;
 }
+
+// The console's locale (2026-10-12): the console has no /sv route, so it
+// resolves from the saved choice first, then the browser's language list
+// (same rule as shouldRedirectToSv). Pure, so it is unit-testable.
+export function resolveLocale(
+  stored: Locale | null,
+  languages: readonly string[]
+): Locale {
+  if (stored) return stored;
+  return languages.some((l) => l.toLowerCase().startsWith('sv')) ? 'sv' : 'en';
+}
+
+export function consoleLocale(): Locale {
+  const langs =
+    typeof navigator !== 'undefined'
+      ? navigator.languages?.length
+        ? navigator.languages
+        : navigator.language
+          ? [navigator.language]
+          : []
+      : [];
+  return resolveLocale(storedLocale(), langs);
+}
