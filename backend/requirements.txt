@@ -15,7 +15,7 @@ fpdf2>=2.7.9
 
 # MIG-WO2: auth verifies Supabase JWTs (ES256 via JWKS) — no auth
 # framework; migrations, storage as before
-PyJWT>=2.13.0
+PyJWT>=2.15.1
 cryptography>=50.0.1
 alembic>=1.19.1
 psycopg[binary]>=3.3.4
