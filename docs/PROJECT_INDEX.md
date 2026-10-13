@@ -1,7 +1,7 @@
 # JobFinderOS — Complete Project Index
 
 > Purpose: file-by-file map of this repo, same format as `docs/TALENTHIVE_INDEX.md` (which indexes the
-> `talenthive/` reference clone). Read this to find where anything lives before grepping.
+> TalentHive reference clone at `~/Desktop/talenthive/`). Read this to find where anything lives before grepping.
 > Indexed: 2026-08-30 · HEAD `79dcfcb` · post-WO-07 deploy, MIG-WO1 executed, MIG-WO2/WO-03 remaining.
 > Verified stats: `backend/app` 8,840 lines (69 files) · `frontend/src` 4,981 lines TS (19 files) + 143 CSS ·
 > 217 test functions · 11 Alembic migrations · 8 registered scrapers.
@@ -49,7 +49,6 @@ Scheduler is deliberately OUT of the API process (WO-04): the cron worker claims
 | `ops/` | Deploy/backup/verify scripts + launchd plists (§6) |
 | `docs/` | Work orders, deploy runbook, marketing research, source notes, indexes (§7) |
 | `agent/skills/`, `.agents/skills/` | Vendored Supabase skill packs, pinned by `skills-lock.json` (gitignored tooling) |
-| `talenthive/` | Read-only reference clone; indexed in `docs/TALENTHIVE_INDEX.md` instead |
 | `.remember/`, `.playwright-mcp/` | Agent-session memory + browser-automation artifacts (ephemeral, gitignored) |
 
 ---
@@ -264,7 +263,7 @@ Design system "The Hunting Console": ink `#0c0e12`, one amber accent `#f5a524`, 
 | `deploy/WO-07-runbook.md` | Deploy runbook (Render + CF Pages + Supabase). | DEPLOYED 2026-08-28, verifier 6/6; records the sync:false secrets incident. |
 | `marketing/competitive-positioning.md` | Landing research: competitor billing pain, anti-volume stats, copy rules (never name competitors), must-not-claim-yet list. | Research backing WO-16. |
 | `sources/fantastic-jobs-future-note.md` | Fantastic.jobs ATS feed evaluation: pricing, cautions, build-vs-buy (direct public ATS adapters first). | Noted 2026-08-30, revisit at real-user volume. |
-| `TALENTHIVE_INDEX.md` | Full index of the talenthive/ reference clone. | 2026-08-24. |
+| `TALENTHIVE_INDEX.md` | Full index of the TalentHive reference clone (`~/Desktop/talenthive/`). | 2026-08-24. |
 
 ---
 
@@ -286,7 +285,7 @@ Design system "The Hunting Console": ink `#0c0e12`, one amber accent `#f5a524`, 
 
 ## 9. Excluded from this index by design
 
-`talenthive/` (own index), `.remember/` + `.playwright-mcp/` (ephemeral agent artifacts),
+`.remember/` + `.playwright-mcp/` (ephemeral agent artifacts),
 `agent/` + `.agents/` (gitignored skill packs), `backend/uploads/` (CVs = personal data),
 `*.db` files, build outputs (`node_modules/`, `.next/`, `out/`, `.venv/`, caches).
 

@@ -82,7 +82,7 @@ a snapshot — it only knows what has been synced.
 
 **JobFinderOS** — an operating system for job hunting. The job-seeker inversion of
 [TalentHive](https://github.com/AgenticTony/TalentHiv) (Anthony's recruiter-side AI screening
-tool, cloned read-only at `talenthive/`). One CV on file → many scraped jobs → AI match →
+tool, cloned read-only at `~/Desktop/talenthive/` — outside this repo since 2026-10-13). One CV on file → many scraped jobs → AI match →
 approve → AI-tailored CV & cover letter → review → send.
 
 **Owner:** Anthony Foran (GitHub: AgenticTony). Solo project, personal use, two-country

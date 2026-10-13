@@ -137,7 +137,6 @@ Dashboard: http://localhost:3000
 JobFinderOS/
 ├── docs/
 │   └── TALENTHIVE_INDEX.md      # ⭐ complete index of the TalentHive foundation
-├── talenthive/                  # cloned reference repo (read-only foundation)
 ├── backend/                     # FastAPI app
 │   ├── app/
 │   │   ├── api/v1/              # profile, pipeline, jobs, matches, applications
