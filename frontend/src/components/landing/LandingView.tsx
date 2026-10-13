@@ -4,8 +4,8 @@
 // (src/app/page.tsx = EN, src/app/sv/page.tsx = SV) passes the locale
 // and every word comes from the dictionary, so the page itself is never
 // duplicated. Links stay inside the visitor's language scope where a
-// translated page exists (/sv/login); /app and /privacy are English
-// surfaces for beta and linked the same from both.
+// translated page exists (/sv/login, /sv/privacy); /app has no /sv
+// route — the console reads the saved language (i18n/locale.ts).
 
 import { useEffect } from 'react';
 import Link from 'next/link';
@@ -39,6 +39,7 @@ export default function LandingView({ locale }: { locale: Locale }) {
   }, [locale]);
 
   const loginPath = locale === 'sv' ? '/sv/login' : '/login';
+  const privacyPath = locale === 'sv' ? '/sv/privacy' : '/privacy';
   const registerPath = locale === 'sv' ? '/sv/login?mode=register' : '/login?mode=register';
   const otherLocale: Locale = locale === 'en' ? 'sv' : 'en';
 
@@ -325,7 +326,7 @@ export default function LandingView({ locale }: { locale: Locale }) {
                 <p className="mt-10 text-sm leading-relaxed text-paper/50">
                   {t.sourcesSec.privacyA}{' '}
                   <Link
-                    href="/privacy"
+                    href={privacyPath}
                     className="font-medium text-paper/80 underline underline-offset-4 transition hover:text-paper"
                   >
                     {t.sourcesSec.privacyLink}
@@ -418,7 +419,7 @@ export default function LandingView({ locale }: { locale: Locale }) {
                 hosted" tagline (stored data is EU-hosted, but CV text
                 reaches Z.ai outside the EU — the /privacy notice says both). */}
             <Link
-              href="/privacy"
+              href={privacyPath}
               className="transition hover:text-paper/70"
             >
               {t.footer.privacy}

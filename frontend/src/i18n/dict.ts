@@ -1,7 +1,15 @@
-// The marketing surface's two languages (owner decision 2026-09-01):
-// landing + login are localized; the app console stays English for beta.
-// `sv` is typed as the exact shape of `en`, so a missing key is a
-// type error — adding a string means adding both translations.
+// The platform's two languages. Landing + login + reset (owner decision
+// 2026-09-01) and — since 2026-10-12 — the console, the onboarding
+// wizard and the privacy notice. `sv` is typed as the exact shape of
+// `en`, so a missing key is a type error — adding a string means adding
+// both translations. The console/wizard/privacy copy lives in sibling
+// modules (./console.ts, ./wizard.ts, ./privacy.ts) to keep this file
+// navigable; tests/i18n.test.ts checks deep key parity, including the
+// Record-typed maps the compiler can't.
+
+import { consoleEn, consoleSv } from './console.ts';
+import { privacyEn, privacySv } from './privacy.ts';
+import { wizardEn, wizardSv } from './wizard.ts';
 
 export type Dict = typeof en;
 
@@ -191,6 +199,9 @@ const en = {
     errShort: 'Password must be at least 8 characters',
     errGeneric: 'Could not update the password — try again',
   },
+  console: consoleEn,
+  wizard: wizardEn,
+  privacy: privacyEn,
 };
 
 const sv: Dict = {
@@ -381,6 +392,9 @@ const sv: Dict = {
     errShort: 'Lösenordet måste vara minst 8 tecken',
     errGeneric: 'Kunde inte uppdatera lösenordet — försök igen',
   },
+  console: consoleSv,
+  wizard: wizardSv,
+  privacy: privacySv,
 };
 
 export const dicts = { en, sv } as const;

@@ -21,7 +21,7 @@ import { track } from '@/lib/analytics';
 import { apiErrorMessage } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { dicts, type Locale } from '@/i18n/dict';
-import { shouldRedirectToSv, switchLocale } from '@/i18n/locale';
+import { shouldRedirectToSv, storeLocale, switchLocale } from '@/i18n/locale';
 
 type Mode = 'signin' | 'register' | 'forgot';
 
@@ -87,6 +87,12 @@ export default function LoginView({ locale }: { locale: Locale }) {
         });
         if (signUpError) throw signUpError;
         track('signup_completed', { locale });
+        // The console has no /sv route: it reads the saved choice. The
+        // language the user signed up in IS their choice — a Swedish
+        // signup must land in a Swedish console (2026-10-12). Saved
+        // before the confirm-email branch: same-device confirmation
+        // links then open the console in this language too.
+        storeLocale(locale);
         // Confirmation emails are ON: no session until the email click.
         // Tell the user instead of falling through to a failed sign-in.
         if (!data.session) {
@@ -102,6 +108,7 @@ export default function LoginView({ locale }: { locale: Locale }) {
         password,
       });
       if (signInError) throw signInError;
+      storeLocale(locale); // same rule as signup: the page they signed in on
       router.push('/app');
     } catch (err) {
       setError(
@@ -294,7 +301,7 @@ export default function LoginView({ locale }: { locale: Locale }) {
 
         <p className='mt-2 text-center text-xs text-low'>
           {t.footerLine} ·{' '}
-          <Link href='/privacy' className='underline underline-offset-2 transition hover:text-mid'>
+          <Link href={locale === 'sv' ? '/sv/privacy' : '/privacy'} className='underline underline-offset-2 transition hover:text-mid'>
             {t.privacy}
           </Link>
         </p>

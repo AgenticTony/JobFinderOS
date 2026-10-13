@@ -22,6 +22,7 @@ import ScoreRing from './ScoreRing';
 import TierBadge from './TierBadge';
 import AdzunaAttribution from './AdzunaAttribution';
 import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
+import { useT } from '@/i18n/LocaleContext';
 
 interface Props {
   match: Match;
@@ -32,6 +33,8 @@ interface Props {
 }
 
 export default function MatchCard({ match, onDecision, onPrepare, onReview, prepared }: Props) {
+  const tc = useT().console;
+  const t = tc.matchCard;
   const [expanded, setExpanded] = useState(false);
   // FE-9: keyboard-operable accordion — real <button> header (Enter/Space
   // toggle natively) wired to the detail panel via aria-expanded/aria-controls.
@@ -90,29 +93,29 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
                 inside this flex-wrap row, and it sizes whole ancestor
                 grids to its full one-line width (sideways page scroll). */}
             <h3 className="min-w-0 truncate font-semibold text-hi">
-              {match.job?.title ?? 'Unknown job'}
+              {match.job?.title ?? t.unknownJob}
             </h3>
             <TierBadge tier={match.tier} />
             {match.recommendation === 'apply' && (
               <span className="inline-flex items-center gap-1 rounded-full bg-signal/15 px-2 py-0.5 text-xs font-medium text-signal">
-                <Sparkles className="h-3 w-3" /> AI says: apply
+                <Sparkles className="h-3 w-3" /> {t.aiApply}
               </span>
             )}
             {match.decision === 'approved' && (
-              <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs text-ok">approved</span>
+              <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs text-ok">{t.approved}</span>
             )}
             {match.decision === 'rejected' && (
-              <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-mid">rejected</span>
+              <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-mid">{t.rejected}</span>
             )}
             {prepared && (
               <span className="rounded-full bg-info/15 px-2 py-0.5 text-xs text-info">
                 <FileText className="mr-1 inline h-3 w-3" />
-                application drafted
+                {t.drafted}
               </span>
             )}
           </div>
           <p className="mt-0.5 truncate text-sm text-mid">
-            {[match.job?.company, match.job?.location, match.job?.remote ? 'Remote' : null, match.job?.source]
+            {[match.job?.company, match.job?.location, match.job?.remote ? t.remote : null, match.job?.source]
               .filter(Boolean)
               .join(' · ')}
             {match.job?.source === 'adzuna' && <AdzunaAttribution />}
@@ -125,16 +128,16 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
             )}
             {isNew && (
               <span className="rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal">
-                new
+                {t.new}
               </span>
             )}
-            <span>matched {timeAgo(match.created_at)}</span>
+            <span>{t.matched(timeAgo(match.created_at, tc.time))}</span>
             {match.eligibility === 'verified' && (
               <span
                 className="rounded bg-ok/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ok"
                 title={match.eligibility_note ?? undefined}
               >
-                work rights verified
+                {t.rightsVerified}
               </span>
             )}
             {match.eligibility === 'unverified' && match.eligibility_note && (
@@ -142,12 +145,12 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
                 className="rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal"
                 title={match.eligibility_note}
               >
-                work rights unverified
+                {t.rightsUnverified}
               </span>
             )}
             {postedAgeDays !== null && (
               <span className={cn('num rounded px-1.5 py-0.5', postedStale ? 'bg-bad/10 text-bad' : '')}>
-                posted {postedAgeDays === 0 ? 'today' : `${postedAgeDays}d ago`}
+                {t.posted(postedAgeDays)}
               </span>
             )}
           </p>
@@ -181,9 +184,9 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
               )}
 
               <div className="grid gap-3 sm:grid-cols-3">
-                <SkillChips label="You have" skills={match.matched_skills} tone="ok" />
-                <SkillChips label="They want (gaps)" skills={match.missing_skills} tone="bad" />
-                <SkillChips label="Transferable" skills={match.transferable_skills} tone="info" />
+                <SkillChips label={t.youHave} skills={match.matched_skills} tone="ok" />
+                <SkillChips label={t.theyWant} skills={match.missing_skills} tone="bad" />
+                <SkillChips label={t.transferable} skills={match.transferable_skills} tone="info" />
               </div>
 
               {/* Actions */}
@@ -195,14 +198,14 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
                       disabled={busy !== null}
                       className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
                     >
-                      <Check className="h-4 w-4" /> Approve
+                      <Check className="h-4 w-4" /> {t.approve}
                     </button>
                     <button
                       onClick={() => handleDecision('rejected')}
                       disabled={busy !== null}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-50"
                     >
-                      <X className="h-4 w-4" /> Pass
+                      <X className="h-4 w-4" /> {t.pass}
                     </button>
                   </>
                 )}
@@ -214,7 +217,7 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
                     className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
                   >
                     <FileText className="h-4 w-4" />
-                    {busy === 'prepare' ? 'Tailoring your CV & cover letter…' : 'Prepare application'}
+                    {busy === 'prepare' ? t.tailoring : t.prepare}
                   </button>
                 )}
 
@@ -223,7 +226,7 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
                     onClick={onReview}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98]"
                   >
-                    Review & send <ArrowRight className="h-4 w-4" />
+                    {t.reviewSend} <ArrowRight className="h-4 w-4" />
                   </button>
                 )}
 
@@ -234,7 +237,7 @@ export default function MatchCard({ match, onDecision, onPrepare, onReview, prep
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-low transition-colors hover:text-mid"
                   >
-                    <ExternalLink className="h-4 w-4" /> View posting
+                    <ExternalLink className="h-4 w-4" /> {t.viewPosting}
                   </a>
                 )}
               </div>

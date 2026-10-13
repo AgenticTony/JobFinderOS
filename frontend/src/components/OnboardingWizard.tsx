@@ -32,6 +32,7 @@ import CvUpload from '@/components/CvUpload';
 import { apiErrorMessage, getGeo, suggestQueries } from '@/lib/api';
 import type { GeoData, OnboardingPayload, OccupationSuggestion, SearchMode } from '@/types';
 import { cn } from '@/lib/utils';
+import { useT } from '@/i18n/LocaleContext';
 
 interface Props {
   onComplete: (payload: OnboardingPayload) => Promise<void>;
@@ -58,39 +59,32 @@ interface Props {
   initialQueries?: string[];
 }
 
-const STEPS = ['Your CV', 'Country', 'Location', 'Languages', 'Job titles', 'Confirm'] as const;
+// Step labels: wizard.steps (dict); six steps, the index is the step.
+const STEP_COUNT = 6;
 
-// WO-19 part B — mirrors the backend's WORK_RIGHTS_VALUES / LINES
-const WORK_RIGHTS_OPTIONS: [string, string][] = [
-  ['citizen_or_pr', 'Citizen / permanent resident'],
-  ['eu_right', 'EU/EEA work right'],
-  ['needs_sponsorship', 'Need sponsorship'],
-  ['prefer_not_say', 'Prefer not to say'],
-];
-const workRightsLabel = (v: string) =>
-  WORK_RIGHTS_OPTIONS.find(([value]) => value === v)?.[1] ?? v;
+// WO-19 part B — mirrors the backend's WORK_RIGHTS_VALUES / LINES.
+// Codes are stored; labels come from console.workRights.
+const WORK_RIGHTS_OPTIONS = ['citizen_or_pr', 'eu_right', 'needs_sponsorship', 'prefer_not_say'] as const;
 
+// STORED values — the backend language filter reads these exact English
+// names. Display labels: console.languageNames[value].
 const LANGUAGE_OPTIONS = [
-  'English',
-  'Swedish',
-  'German',
-  'French',
-  'Spanish',
-  'Danish/Norwegian',
-  'Finnish',
-  'Italian',
-  'Dutch',
+  'English', // i18n-ok: stored value
+  'Swedish', // i18n-ok: stored value
+  'German', // i18n-ok: stored value
+  'French', // i18n-ok: stored value
+  'Spanish', // i18n-ok: stored value
+  'Danish/Norwegian', // i18n-ok: stored value
+  'Finnish', // i18n-ok: stored value
+  'Italian', // i18n-ok: stored value
+  'Dutch', // i18n-ok: stored value
 ];
 
-const MODES: { id: SearchMode; label: string; hint: string; icon: typeof Target }[] = [
-  { id: 'field', label: 'Stay in my field', hint: 'Job titles from my CV', icon: Target },
-  { id: 'adjacent', label: 'Open to adjacent roles', hint: 'My field, plus near-neighbours', icon: Search },
-  {
-    id: 'widen',
-    label: 'Widen my options',
-    hint: 'My field is shrinking or I\u2019m changing direction — use my transferable skills',
-    icon: Compass,
-  },
+// Labels/hints: wizard.titles.modes[id].
+const MODES: { id: SearchMode; icon: typeof Target }[] = [
+  { id: 'field', icon: Target },
+  { id: 'adjacent', icon: Search },
+  { id: 'widen', icon: Compass },
 ];
 
 // FE-10: minimal modal machinery for the wizard dialog — focus trap,
@@ -197,6 +191,9 @@ export default function OnboardingWizard({
   initialOccupations,
   initialQueries,
 }: Props) {
+  const dict = useT();
+  const t = dict.wizard;
+  const tc = dict.console;
   const [step, setStep] = useState(0);
   // Step 1 (Your CV): true once a CV is on file — seeded from
   // initialHasCv for "Edit setup" re-runs, set by this run's upload.
@@ -230,7 +227,7 @@ export default function OnboardingWizard({
     initialSearchRadiusKm ?? 0
   );
   const [includeRemote, setIncludeRemote] = useState(Boolean(initialIncludeRemote));
-  const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']);
+  const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']); // i18n-ok: stored value
   // WO-19 part B: one question, no AI. prefer_not_say = jobs show as
   // unverified until answered (never dropped, never counted as verified).
   const [workRights, setWorkRights] = useState('prefer_not_say');
@@ -429,11 +426,11 @@ export default function OnboardingWizard({
             <Radar className="h-5 w-5 text-signal" aria-hidden />
           </div>
           <div className="flex-1">
-            <h2 id={titleId} className="font-semibold text-hi">Set up your job hunt</h2>
-            <p className="text-xs text-low">Takes a minute — makes everything after it personal</p>
+            <h2 id={titleId} className="font-semibold text-hi">{t.title}</h2>
+            <p className="text-xs text-low">{t.subtitle}</p>
           </div>
           {onClose && (
-            <button onClick={onClose} aria-label="Close" className="text-low transition-colors hover:text-mid">
+            <button onClick={onClose} aria-label={t.close} className="text-low transition-colors hover:text-mid">
               <X className="h-5 w-5" />
             </button>
           )}
@@ -442,8 +439,8 @@ export default function OnboardingWizard({
         {/* Stepper — bars only below sm (six 11px labels don't fit one
             phone row); "Step N of 6" in the footer carries the position. */}
         <div className="flex shrink-0 gap-1 px-5 pt-4">
-          {STEPS.map((label, i) => (
-            <div key={label} className="flex-1">
+          {t.steps.map((label, i) => (
+            <div key={i} className="flex-1">
               <div
                 className={cn(
                   'h-1 rounded-full',
@@ -471,18 +468,15 @@ export default function OnboardingWizard({
             >
               {step === 0 && (
                 <div>
-                  <StepTitle icon={<FileText className="h-4 w-4" />} title="First — your CV" />
-                  <p className="mt-3 text-sm leading-relaxed text-mid">
-                    Every job you see is scored against your CV — it&apos;s the
-                    source of truth for your whole hunt. Have it ready as a PDF or Word (.docx).
-                  </p>
+                  <StepTitle icon={<FileText className="h-4 w-4" />} title={t.cv.title} />
+                  <p className="mt-3 text-sm leading-relaxed text-mid">{t.cv.body}</p>
                   <div className="mt-4">
                     <CvUpload onUploaded={handleCvUpload} hasExistingCv={cvReady} />
                   </div>
                   {cvReady && (
                     <p className="mt-3 flex items-center gap-1.5 text-sm text-ok">
                       <Check className="h-4 w-4" aria-hidden />
-                      CV on file — continue when ready (or drop a new one to replace it).
+                      {t.cv.ready}
                     </p>
                   )}
                 </div>
@@ -490,7 +484,7 @@ export default function OnboardingWizard({
 
               {step === 1 && (
                 <div>
-                  <StepTitle icon={<Globe2 className="h-4 w-4" />} title="Where are you job hunting?" />
+                  <StepTitle icon={<Globe2 className="h-4 w-4" />} title={t.country.title} />
                   <div className="mt-5 grid grid-cols-2 gap-3">
                     {(geo?.countries ?? []).map((c) => (
                       <button
@@ -514,10 +508,10 @@ export default function OnboardingWizard({
                         )}
                       >
                         <span className="text-3xl" aria-hidden>{c.flag}</span>
-                        <p className="mt-2 font-medium text-hi">{c.name}</p>
-                        <p className="text-xs text-low">
-                          {c.code === 'SE' ? 'Platsbanken — every public listing' : 'Reed.co.uk — every sector'}
-                        </p>
+                        <p className="mt-2 font-medium text-hi">{tc.countries[c.code] ?? c.name}</p>
+                        {t.country.sourceHint[c.code] && (
+                          <p className="text-xs text-low">{t.country.sourceHint[c.code]}</p>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -526,14 +520,10 @@ export default function OnboardingWizard({
 
               {step === 1 && (
                 <div>
-                  <StepTitle icon={<IdCard className="h-4 w-4" />} title="Do you need visa sponsorship to work here?" />
-                  <p className="mt-2 text-sm text-low">
-                    Postings that require citizenship or security clearance are hidden for
-                    sponsorship seekers; everything else is shown with an eligibility note. You
-                    can change this anytime in Profile.
-                  </p>
+                  <StepTitle icon={<IdCard className="h-4 w-4" />} title={t.rights.title} />
+                  <p className="mt-2 text-sm text-low">{t.rights.body}</p>
                   <div className="mt-5 flex flex-wrap gap-2">
-                    {WORK_RIGHTS_OPTIONS.map(([value, label]) => (
+                    {WORK_RIGHTS_OPTIONS.map((value) => (
                       <button
                         key={value}
                         onClick={() => setWorkRights(value)}
@@ -546,7 +536,7 @@ export default function OnboardingWizard({
                         )}
                       >
                         {workRights === value && <Check className="h-3.5 w-3.5" />}
-                        {label}
+                        {tc.workRights[value]}
                       </button>
                     ))}
                   </div>
@@ -555,10 +545,10 @@ export default function OnboardingWizard({
 
               {step === 2 && (
                 <div>
-                  <StepTitle icon={<MapPin className="h-4 w-4" />} title="Which area should we search?" />
+                  <StepTitle icon={<MapPin className="h-4 w-4" />} title={t.area.title} />
                   <div className="mt-5 space-y-4">
                     <label className="block">
-                      <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">Region</span>
+                      <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">{t.area.region}</span>
                       <select
                         value={region}
                         onChange={(e) => {
@@ -567,7 +557,7 @@ export default function OnboardingWizard({
                         }}
                         className="w-full rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-hi outline-none transition-colors focus:border-signal"
                       >
-                        <option value="">Select a region…</option>
+                        <option value="">{t.area.selectRegion}</option>
                         {Object.keys(geo?.geo[country] ?? {}).map((r) => (
                           <option key={r} value={r}>{r}</option>
                         ))}
@@ -575,19 +565,17 @@ export default function OnboardingWizard({
                     </label>
                     <div>
                       <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
-                        Cities / municipalities{' '}
-                        <span className="normal-case">
-                          (pick one or several — none selected means all of {region || 'the region'})
-                        </span>
+                        {t.area.municipalities}{' '}
+                        <span className="normal-case">{t.area.municipalitiesHint(region || null)}</span>
                       </span>
                       {!region ? (
                         <p className="rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-low">
-                          Select a region first…
+                          {t.area.selectRegionFirst}
                         </p>
                       ) : (
                         <div
                           role="group"
-                          aria-label="Municipalities"
+                          aria-label={t.area.municipalitiesAria}
                           className="flex max-h-40 flex-wrap gap-2 overflow-y-auto overscroll-contain rounded-lg border border-line bg-ink p-2.5"
                         >
                           {municipalities.map((m) => {
@@ -619,17 +607,15 @@ export default function OnboardingWizard({
                     {radiusAnchorSupported && (
                       <div>
                         <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
-                          Commute radius around {municipalityList[0]}{' '}
-                          <span className="normal-case">
-                            (catches nearby towns without picking them)
-                          </span>
+                          {t.area.radius(municipalityList[0])}{' '}
+                          <span className="normal-case">{t.area.radiusHint}</span>
                         </span>
-                        <div className="flex flex-wrap gap-2" role="group" aria-label="Commute radius">
+                        <div className="flex flex-wrap gap-2" role="group" aria-label={t.area.radiusAria}>
                           {[
-                            { km: 0, label: 'Selected towns only' },
-                            { km: 15, label: '+15 km' },
-                            { km: 30, label: '+30 km' },
-                            { km: 50, label: '+50 km' },
+                            { km: 0, label: t.area.radiusExact },
+                            { km: 15, label: t.area.radiusKm(15) },
+                            { km: 30, label: t.area.radiusKm(30) },
+                            { km: 50, label: t.area.radiusKm(50) },
                           ].map(({ km, label }) => (
                             <button
                               key={km}
@@ -649,8 +635,7 @@ export default function OnboardingWizard({
                         </div>
                         {(searchRadiusKm ?? 0) > 0 && (
                           <p className="mt-1.5 text-xs text-low">
-                            Jobs within {searchRadiusKm} km of {municipalityList[0]} — the
-                            neighbouring towns come to you.
+                            {t.area.radiusNote(searchRadiusKm, municipalityList[0])}
                           </p>
                         )}
                       </div>
@@ -661,11 +646,8 @@ export default function OnboardingWizard({
                       className="flex w-full items-center justify-between rounded-lg border border-line p-3 text-left transition-colors hover:border-line-2"
                     >
                       <div>
-                        <p className="text-sm font-medium text-hi">Include remote jobs</p>
-                        <p className="text-xs text-low">
-                          Also search worldwide remote boards (remotive, jobicy…). Leave off to
-                          search strictly your area.
-                        </p>
+                        <p className="text-sm font-medium text-hi">{t.area.includeRemote}</p>
+                        <p className="text-xs text-low">{t.area.includeRemoteHint}</p>
                       </div>
                       <span
                         className={cn(
@@ -691,8 +673,8 @@ export default function OnboardingWizard({
                       className="flex w-full items-center justify-between rounded-lg border border-line p-3 text-left transition-colors hover:border-line-2"
                     >
                       <div>
-                        <p className="text-sm font-medium text-hi">Remote jobs only</p>
-                        <p className="text-xs text-low">Skip anything that requires being on-site</p>
+                        <p className="text-sm font-medium text-hi">{t.area.remoteOnly}</p>
+                        <p className="text-xs text-low">{t.area.remoteOnlyHint}</p>
                       </div>
                       <span
                         className={cn(
@@ -714,11 +696,8 @@ export default function OnboardingWizard({
 
               {step === 3 && (
                 <div>
-                  <StepTitle icon={<Languages className="h-4 w-4" />} title="Which languages do you work in?" />
-                  <p className="mt-2 text-sm text-low">
-                    Jobs posted in other languages are filtered out before matching — English
-                    always passes. You can change this anytime under Edit setup.
-                  </p>
+                  <StepTitle icon={<Languages className="h-4 w-4" />} title={t.languages.title} />
+                  <p className="mt-2 text-sm text-low">{t.languages.body}</p>
                   <div className="mt-5 flex flex-wrap gap-2">
                     {LANGUAGE_OPTIONS.map((lang) => {
                       const on = languages.includes(lang);
@@ -735,7 +714,7 @@ export default function OnboardingWizard({
                           )}
                         >
                           {on && <Check className="h-3.5 w-3.5" />}
-                          {lang}
+                          {tc.languageNames[lang] ?? lang}
                         </button>
                       );
                     })}
@@ -745,7 +724,7 @@ export default function OnboardingWizard({
 
               {step === 4 && (
                 <div>
-                  <StepTitle title="What roles should we hunt for?" />
+                  <StepTitle title={t.titles.title} />
                   {/* Strategy — always the user's own choice, never inferred */}
                   <div className="mt-4 space-y-2">
                     {MODES.map((m) => (
@@ -761,8 +740,8 @@ export default function OnboardingWizard({
                       >
                         <m.icon className="h-5 w-5 shrink-0 text-mid" aria-hidden />
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-hi">{m.label}</p>
-                          <p className="text-xs text-low">{m.hint}</p>
+                          <p className="text-sm font-medium text-hi">{t.titles.modes[m.id].label}</p>
+                          <p className="text-xs text-low">{t.titles.modes[m.id].hint}</p>
                         </div>
                         {mode === m.id && <Check className="h-4 w-4 text-signal" />}
                       </button>
@@ -772,7 +751,7 @@ export default function OnboardingWizard({
                   {!loadingQueries && directQueries.length === 0 && selected.size > 0 && (
                     <div className="mt-5 rounded-lg border border-line bg-ink/60 p-3">
                       <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-                        Your current search titles ({selected.size})
+                        {t.titles.current(selected.size)}
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {[...selected].map((q) => (
@@ -785,15 +764,15 @@ export default function OnboardingWizard({
                         onClick={() => { fetchedKeyRef.current = null; loadSuggestions(); }}
                         className="mt-3 text-xs text-signal transition-colors hover:text-signal/80"
                       >
-                        Get fresh AI suggestions for this strategy →
+                        {t.titles.fresh}
                       </button>
                     </div>
                   )}
                   {suggestError && (
                     <div className="mt-5 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
-                      Couldn&apos;t load AI suggestions.{' '}
+                      {t.titles.suggestFailed}{' '}
                       <button onClick={loadSuggestions} className="font-semibold text-signal hover:underline">
-                        Try again
+                        {t.titles.tryAgain}
                       </button>
                     </div>
                   )}
@@ -801,18 +780,16 @@ export default function OnboardingWizard({
                     <div className="flex flex-col items-center py-10 text-low" role="status">
                       <Loader2 className="mb-3 h-6 w-6 animate-spin text-signal" />
                       <p className="text-sm">
-                        {mode === 'widen'
-                          ? 'Reading your CV\u2019s transferable skills…'
-                          : 'AI is reading your CV…'}
+                        {mode === 'widen' ? t.titles.readingWiden : t.titles.reading}
                       </p>
-                      <p className="text-xs">usually 10-45 seconds</p>
+                      <p className="text-xs">{t.titles.usually}</p>
                     </div>
                   ) : (
                     <>
                       {directQueries.length > 0 && (
                         <div className="mt-5">
                           <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-                            From your experience
+                            {t.titles.fromExperience}
                           </p>
                           <div className="flex flex-wrap gap-2">
                             {directQueries.map((q) => (
@@ -825,10 +802,8 @@ export default function OnboardingWizard({
                       {occupationSuggestions.length > 0 && (
                         <div className="mt-5">
                           <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-ok/90">
-                            Your professions — official job taxonomy{' '}
-                            <span className="normal-case">
-                              (catches jobs whose title uses other words)
-                            </span>
+                            {t.titles.professions}{' '}
+                            <span className="normal-case">{t.titles.professionsHint}</span>
                           </p>
                           <div className="flex flex-wrap gap-2">
                             {occupationSuggestions.map((o) => (
@@ -861,9 +836,7 @@ export default function OnboardingWizard({
                       {pivotSuggestions.length > 0 && (
                         <div className="mt-5">
                           <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-info/90">
-                            {mode === 'widen'
-                              ? 'Jobs your skills open up'
-                              : 'Worth a look — you might not have thought of these'}
+                            {mode === 'widen' ? t.titles.widenHeading : t.titles.worthALook}
                           </p>
                           <div className="space-y-2">
                             {pivotSuggestions.map((p) => (
@@ -904,12 +877,12 @@ export default function OnboardingWizard({
                           value={customInput}
                           onChange={(e) => setCustomInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && addCustom()}
-                          placeholder="Add your own search title…"
+                          placeholder={t.titles.addPlaceholder}
                           className="flex-1 rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                         />
                         <button
                           onClick={addCustom}
-                          aria-label="Add search title"
+                          aria-label={t.titles.addAria}
                           className="rounded-lg border border-line px-3 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
                         >
                           <Plus className="h-4 w-4" />
@@ -922,23 +895,38 @@ export default function OnboardingWizard({
 
               {step === 5 && (
                 <div>
-                  <StepTitle title="Ready — here's your setup" />
+                  <StepTitle title={t.confirm.title} />
                   <div className="mt-5 space-y-2.5 rounded-xl border border-line bg-ink/60 p-4 text-sm">
-                    <SummaryRow label="Country" value={`${flagFor(country)} ${nameFor(geo, country)}`} />
                     <SummaryRow
-                      label="Area"
+                      label={t.confirm.country}
+                      value={`${flagFor(country)} ${tc.countries[country] ?? nameFor(geo, country)}`}
+                    />
+                    <SummaryRow
+                      label={t.confirm.area}
                       value={
                         (municipalityList.length
                           ? [...municipalityList]
-                          : [`All of ${region}`]
-                        ).join(', ') || 'everywhere'
+                          : [t.confirm.allOf(region)]
+                        ).join(', ') || t.confirm.everywhere
                       }
                     />
-                    <SummaryRow label="Remote" value={remoteOnly ? 'remote jobs only' : includeRemote ? 'local + remote' : 'strictly local'} />
-                    <SummaryRow label="Languages" value={languages.join(', ')} />
-                    <SummaryRow label="Work rights" value={workRightsLabel(workRights)} />
-                    <SummaryRow label="Strategy" value={MODES.find((m) => m.id === mode)?.label ?? mode} />
-                    <SummaryRow label="Job titles" value={`${selected.size} search queries`} />
+                    <SummaryRow
+                      label={t.confirm.remote}
+                      value={
+                        remoteOnly
+                          ? t.confirm.remoteOnly
+                          : includeRemote
+                            ? t.confirm.localRemote
+                            : t.confirm.strictlyLocal
+                      }
+                    />
+                    <SummaryRow
+                      label={t.confirm.languages}
+                      value={languages.map((l) => tc.languageNames[l] ?? l).join(', ')}
+                    />
+                    <SummaryRow label={t.confirm.workRights} value={tc.workRights[workRights] ?? workRights} />
+                    <SummaryRow label={t.confirm.strategy} value={t.titles.modes[mode]?.label ?? mode} />
+                    <SummaryRow label={t.confirm.jobTitles} value={t.confirm.queries(selected.size)} />
                   </div>
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {[...selected].map((q) => (
@@ -947,10 +935,7 @@ export default function OnboardingWizard({
                       </span>
                     ))}
                   </div>
-                  <p className="mt-5 text-sm text-low">
-                    Your first targeted hunt starts automatically — jobs will be scraped from
-                    your country&apos;s boards, filtered to your area, and ranked against your CV.
-                  </p>
+                  <p className="mt-5 text-sm text-low">{t.confirm.firstHunt}</p>
                 </div>
               )}
             </motion.div>
@@ -962,7 +947,7 @@ export default function OnboardingWizard({
             className="mx-4 mt-2 shrink-0 rounded-lg bg-bad/10 p-3 text-sm text-bad"
             role="alert"
           >
-            Couldn&apos;t save your setup — nothing was lost, try again: {finishError}
+            {t.finishFailed(finishError)}
           </p>
         )}
 
@@ -973,18 +958,18 @@ export default function OnboardingWizard({
             disabled={step === 0}
             className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-mid transition-colors hover:text-hi disabled:opacity-30"
           >
-            <ArrowLeft className="h-4 w-4" /> Back
+            <ArrowLeft className="h-4 w-4" /> {t.back}
           </button>
           <p className="num text-xs text-low">
-            Step {step + 1} of {STEPS.length}
+            {t.stepOf(step + 1, STEP_COUNT)}
           </p>
-          {step < STEPS.length - 1 ? (
+          {step < STEP_COUNT - 1 ? (
             <button
               onClick={() => canProceed && setStep((s) => s + 1)}
               disabled={!canProceed || (step === 3 && loadingQueries)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-40"
             >
-              Continue <ArrowRight className="h-4 w-4" />
+              {t.continue} <ArrowRight className="h-4 w-4" />
             </button>
           ) : (
             <button
@@ -993,7 +978,7 @@ export default function OnboardingWizard({
               className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Radar className="h-4 w-4" />}
-              Start hunting
+              {t.start}
             </button>
           )}
         </div>
