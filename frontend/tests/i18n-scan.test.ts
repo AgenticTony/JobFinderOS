@@ -27,6 +27,8 @@ export const FILES = [
   'components/CvUpload.tsx',
   'components/TierBadge.tsx',
   'components/OnboardingWizard.tsx',
+  'components/ScoreRing.tsx',
+  'components/AdzunaAttribution.tsx',
 ];
 
 // Tokens that read the same in both languages.
@@ -57,9 +59,12 @@ export function scan(source: string): string[] {
 
     const where = `L${i + 1}: ${raw.trim().slice(0, 90)}`;
     // 1. JSX text between tags on one line: >Some text<
-    for (const m of line.matchAll(/(?<![=-])>([^<>{}]*[A-Za-z]{2,}[^<>{}]*)</g)) {
-      const txt = m[1].trim();
-      if (txt && !ALLOWED_TEXT.has(txt) && !/=>|&&|\|\||\?\s|^\w+\.\w+/.test(txt)) findings.push(where);
+    // Text may interleave {expressions} ("match score {n} out of 100"):
+    // strip balanced single-level braces, then look for words.
+    for (const m of line.matchAll(/(?<![=-])>([^<>]*)</g)) {
+      const txt = m[1].replace(/\{[^{}]*\}/g, ' ').trim();
+      if (/[{}]/.test(txt) || !/[A-Za-z]{2,}/.test(txt)) continue;
+      if (!ALLOWED_TEXT.has(txt) && !/=>|&&|\|\||\?\s|^\w+\.\w+/.test(txt)) findings.push(where);
     }
     // 2. A line that is ONLY prose (multi-line JSX text node)
     if (/^\s*[A-Z][A-Za-z&;'’]*(\s+[A-Za-z0-9&;'’,.—–()-]+){2,}[.…:]?\s*$/.test(line) && !/[=;{}]|^\s*[A-Z_]+\s*$/.test(line.replace(/&\w+;/g, ''))) {
@@ -90,11 +95,12 @@ test('scanner flags hard-coded English (proof it can fail)', () => {
     "setError('Retry failed');",
     '        Couldn&apos;t reach the server — your lists may be missing.',
     '<span>{t.ok}</span>',
+    '<span className="sr-only">match score {score} out of 100</span>',
     "const brand = 'JobFinderOS';",
     "<b>Fine</b> // i18n-ok: test",
   ].join('\n');
   const f = scan(sample);
-  assert.equal(f.length, 4, f.join('\n'));
+  assert.equal(f.length, 5, f.join('\n'));
 });
 
 for (const file of FILES) {

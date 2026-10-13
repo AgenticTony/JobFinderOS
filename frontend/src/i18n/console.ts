@@ -296,6 +296,7 @@ export const consoleEn = {
     prepare: "Prepare application",
     reviewSend: "Review & send",
     viewPosting: "View posting",
+    scoreSr: (n: number) => `match score ${n} out of 100`,
   },
   pulse: {
     aria: "Hunt pulse — your pipeline at a glance",
@@ -651,6 +652,7 @@ export const consoleSv: ConsoleDict = {
     prepare: "Förbered ansökan",
     reviewSend: "Granska & skicka",
     viewPosting: "Visa annonsen",
+    scoreSr: (n) => `matchningspoäng ${n} av 100`,
   },
   pulse: {
     aria: "Jaktpulsen — ditt flöde i en överblick",
