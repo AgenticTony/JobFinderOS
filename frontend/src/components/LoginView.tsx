@@ -170,13 +170,26 @@ export default function LoginView({ locale }: { locale: Locale }) {
   return (
     <div className='console-backdrop flex min-h-dvh items-center justify-center bg-ink px-4'>
       <div className='w-full max-w-sm'>
-        <Link
-          href={homePath}
-          className='mb-3 inline-flex items-center gap-1.5 text-sm text-low transition hover:text-hi'
-        >
-          <ArrowLeft className='h-3.5 w-3.5' aria-hidden />
-          {t.backHome}
-        </Link>
+        {/* Back-home and the language toggle share the row above the
+            card: the language choice is above the fold, not only at
+            the form's end (kept there too — expected, costs nothing). */}
+        <div className='mb-3 flex items-center justify-between'>
+          <Link
+            href={homePath}
+            className='inline-flex items-center gap-1.5 text-sm text-low transition hover:text-hi'
+          >
+            <ArrowLeft className='h-3.5 w-3.5' aria-hidden />
+            {t.backHome}
+          </Link>
+          <button
+            type='button'
+            onClick={() => switchLocale(otherLocale, window.location.pathname)}
+            lang={otherLocale}
+            className='text-sm text-mid underline underline-offset-2 transition hover:text-hi'
+          >
+            {dicts[locale].langToggle}
+          </button>
+        </div>
         <form
           onSubmit={submit}
           className='w-full rounded-2xl border border-line bg-surface p-8'

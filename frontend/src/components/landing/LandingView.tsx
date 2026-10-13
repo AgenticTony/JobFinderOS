@@ -71,6 +71,18 @@ export default function LandingView({ locale }: { locale: Locale }) {
             </a>
           </nav>
           <div className="flex items-center gap-4">
+            {/* Language toggle in the header, not only the footer: the
+                auto-redirect covers sv browsers, but a Swede on an
+                en-locale browser (or via a shared link) meets an all-
+                English page — "Svenska" must be visible above the fold. */}
+            <button
+              type="button"
+              onClick={() => switchLocale(otherLocale, '/')}
+              lang={otherLocale}
+              className="text-sm font-medium text-paper/60 transition hover:text-paper"
+            >
+              {t.langToggle}
+            </button>
             <Link
               href={loginPath}
               className="hidden text-sm font-medium text-paper/60 transition hover:text-paper sm:block"
