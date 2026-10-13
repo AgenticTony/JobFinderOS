@@ -4,8 +4,10 @@
 
 import { motion } from 'framer-motion';
 import { scoreColor } from '@/lib/utils';
+import { useT } from '@/i18n/LocaleContext';
 
 export default function ScoreRing({ score, size = 64 }: { score: number; size?: number }) {
+  const t = useT().console.matchCard;
   const stroke = size >= 60 ? 6 : 4;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -38,7 +40,7 @@ export default function ScoreRing({ score, size = 64 }: { score: number; size?: 
         />
       </svg>
       <span className={`num absolute text-sm font-semibold ${scoreColor(score)}`}>{score}</span>
-      <span className="sr-only">match score {score} out of 100</span>
+      <span className="sr-only">{t.scoreSr(score)}</span>
     </div>
   );
 }

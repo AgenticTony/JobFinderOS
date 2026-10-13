@@ -2,6 +2,7 @@
 // long-running instance for the scrape+match pipeline.
 
 import axios from 'axios';
+import { consoleLocale } from '@/i18n/locale';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
   Application,
@@ -49,7 +50,11 @@ export async function logout(): Promise<void> {
   // (e.g. a backend-side JWKS blip) must not sign them out everywhere
   // (review finding 2026-09-08).
   await supabase.auth.signOut({ scope: 'local' });
-  if (typeof window !== 'undefined') window.location.href = '/login';
+  // Land on the login page in the user's language (sign-out, expired
+  // session, any 401) — no English hop before LoginView's sv redirect.
+  if (typeof window !== 'undefined') {
+    window.location.href = consoleLocale() === 'sv' ? '/sv/login' : '/login';
+  }
 }
 
 // OPS-1: the API lives on a Render free-tier web service that spins down
@@ -159,6 +164,7 @@ for (const instance of [api, slowApi]) {
       if (
         error?.response?.status === 401 &&
         window.location.pathname !== '/login' &&
+        window.location.pathname !== '/sv/login' &&
         window.location.pathname !== '/reset-password' &&
         window.location.pathname !== '/sv/reset-password'
       ) {

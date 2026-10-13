@@ -339,6 +339,13 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
 
+      # i18n invariants (2026-10-12): sv/en dictionary parity (incl. the
+      # Record maps tsc can't check), locale resolution, and the
+      # leftover-English scanner over the console/wizard/privacy surfaces.
+      # Node 24 runs the .ts tests natively (type stripping) — no runner dep.
+      - name: i18n tests
+        run: node --test 'tests/**/*.test.ts'
+
       - name: Build (static export — WO-07 Cloudflare Pages shape)
         env:
           NEXT_PUBLIC_API_URL: https://jobfinderos-api.onrender.com

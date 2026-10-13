@@ -82,7 +82,7 @@ a snapshot — it only knows what has been synced.
 
 **JobFinderOS** — an operating system for job hunting. The job-seeker inversion of
 [TalentHive](https://github.com/AgenticTony/TalentHiv) (Anthony's recruiter-side AI screening
-tool, cloned read-only at `talenthive/`). One CV on file → many scraped jobs → AI match →
+tool, cloned read-only at `~/Desktop/talenthive/` — outside this repo since 2026-10-13). One CV on file → many scraped jobs → AI match →
 approve → AI-tailored CV & cover letter → review → send.
 
 **Owner:** Anthony Foran (GitHub: AgenticTony). Solo project, personal use, two-country
@@ -298,7 +298,23 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 - PDF downloads: axios blob fetch (not window.open — carries no Bearer header).
 - Error display: `apiErrorMessage(err)` interceptor unwraps backend `detail`.
 - Background refresh protection: dirty-ref guard on Profile inputs.
-- localStorage keys: `jfos-token` (JWT), `jfos-rail-collapsed` (sidebar state).
+- localStorage keys: `jfos-token` (JWT), `jfos-rail-collapsed` (sidebar state),
+  `jfos-lang` (en|sv — written by every language toggle and at sign-in).
+- **i18n (EN + SV everywhere a user looks, since 2026-10-12)**: landing,
+  login/reset, the console, the onboarding wizard and the privacy notice
+  (`/privacy` + `/sv/privacy`). Copy lives in `src/i18n/` — `dict.ts`
+  composes `console.ts`, `wizard.ts`, `privacy.ts`; `sv` is typed as
+  `en`'s shape. The console has no /sv route: `consoleLocale()` = saved
+  `jfos-lang`, else the browser; `useT()`/`useLocale()` from
+  `LocaleContext`. Interpolation = dict functions; emphasis = `**x**` via
+  `rich()`. Stored API values (language names, work-rights codes,
+  feedback categories) stay English — only labels are translated.
+  NOT translated: backend error text, AI-written content (match
+  reasoning, drafts). Adding UI text means adding BOTH languages —
+  `node --test 'tests/**/*.test.ts'` (frontend/, CI step "i18n tests")
+  fails on missing/empty sv keys, dropped interpolation args, and
+  hard-coded English in the console/wizard/privacy files (opt-out:
+  `// i18n-ok: why`).
 
 ## Hard-won lessons (don't re-learn these)
 
@@ -362,6 +378,12 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
       of record and stays linked from the login footer. Restore
       `<PrivacyNotice context="cv" />` in CvUpload and the account-box
       placement in login/page.tsx when beta ends — component kept.
+      BEFORE restoring: PrivacyNotice is English-only (not in the
+      2026-10-12 i18n pass — it renders nowhere) and its processor list
+      is stale (says Resend "delivers the applications you approve";
+      applications go from the user's own Gmail, Resend only sends
+      onboarding mail). Move its copy into i18n/privacy.ts, fix the
+      claim, link /sv/privacy for sv, and add it to the scanner FILES.
 - [ ] **Beta trial caps are env-lifted** — set TRIAL_DAILY_SCORE_CAP and
       TRIAL_DAY1_SCORE_CAP high on Render (BOTH services) so testers are
       effectively uncapped on the flat-rate GLM subscription key; remove

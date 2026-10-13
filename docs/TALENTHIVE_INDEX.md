@@ -1,6 +1,6 @@
 # TalentHive — Complete Project Index
 
-> Source: https://github.com/AgenticTony/TalentHiv.git (cloned to `talenthive/`)
+> Source: https://github.com/AgenticTony/TalentHiv.git (cloned to `~/Desktop/talenthive/` — a sibling of this repo, not inside it; moved 2026-10-13 so repo-wide scans stop reading its fixtures. Paths below are relative to that clone.)
 > Purpose of this index: full reference of what exists in TalentHive so JobFinderOS can reuse it as a foundation.
 > Indexed: 2026-08-24
 
@@ -42,7 +42,7 @@ Infra    (Bicep templates: postgres, key-vault, storage, web-app, app-service-pl
 
 ## 3. File-by-File Index (source only, build artifacts excluded)
 
-### 3.1 Backend — `talenthive/backend/`
+### 3.1 Backend — `backend/`
 
 | File | Role | Key contents / reuse value for JobFinderOS |
 |---|---|---|
@@ -70,7 +70,7 @@ Infra    (Bicep templates: postgres, key-vault, storage, web-app, app-service-pl
 | `requirements.txt` | Pins | fastapi 0.68, sqlalchemy 2.0.25, openai 1.12, pdfplumber 0.10.3, resend 2.0.0, pydantic 1.10 (JobFinderOS uses pydantic v2 on Python 3.13) |
 | `tests/` | Pytest suite | API + CRUD + service tests with conftest |
 
-### 3.2 Frontend — `talenthive/frontend/`
+### 3.2 Frontend — `frontend/`
 
 | File | Role | Reuse value |
 |---|---|---|
@@ -91,7 +91,7 @@ Infra    (Bicep templates: postgres, key-vault, storage, web-app, app-service-pl
 | `src/types/index.ts` | TS types | extended for JobFinderOS |
 | `package.json` | next 16.2, react 19, tailwind 4.2, zustand 5, framer-motion 12, axios, lucide-react | **same stack reused** |
 
-### 3.3 Infrastructure — `talenthive/infrastructure/`
+### 3.3 Infrastructure — `infrastructure/`
 
 Azure Bicep: `main.bicep` + modules (postgres, key-vault + access, storage, app-service-plan, web-app). `azure.yaml` (AZD config), `scripts/deploy-infra.sh`, `vercel.json` (frontend deploy). JobFinderOS v1 runs locally / single service — infra deferred.
 
@@ -157,7 +157,7 @@ Robustness handling worth keeping: markdown-fence JSON extraction, GLM-5 `reason
 ## 6. Running TalentHive Locally (for reference)
 
 ```bash
-cd talenthive/backend
+cd ~/Desktop/talenthive/backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # set DATABASE_URL, GLM_API_KEY

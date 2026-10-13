@@ -12,6 +12,7 @@ import { motion } from 'framer-motion';
 import {
   ChevronDown,
   Crosshair,
+  Languages,
   LayoutDashboard,
   LogOut,
   MessageSquarePlus,
@@ -26,6 +27,8 @@ import type { Profile } from '@/types';
 import { cn } from '@/lib/utils';
 import NextHunt, { useNextRunLabel } from './NextHunt';
 import { logout } from '@/lib/api';
+import type { ConsoleDict } from '@/i18n/console';
+import { useLocale, useT } from '@/i18n/LocaleContext';
 
 export type View =
   | 'dashboard'
@@ -37,36 +40,40 @@ export type View =
   | 'settings'
   | 'feedback';
 
+// Labels are keys into the console dict's `nav` section — translated at
+// render time (useT().console.nav[label]).
+type NavLabel = keyof ConsoleDict['nav'];
+
 export const NAV: {
   id: View;
-  label: string;
+  label: NavLabel;
   icon: typeof Radar;
-  children?: { id: View; label: string }[];
+  children?: { id: View; label: NavLabel }[];
 }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'dashboard', label: 'dashboard', icon: LayoutDashboard },
   {
     id: 'matches',
-    label: 'Matches',
+    label: 'matches',
     icon: Crosshair,
     children: [
-      { id: 'matches', label: 'Awaiting you' },
-      { id: 'matches-approved', label: 'Approved' },
+      { id: 'matches', label: 'matchesAwaiting' },
+      { id: 'matches-approved', label: 'matchesApproved' },
     ],
   },
   {
     id: 'apps-review',
-    label: 'Applications',
+    label: 'applications',
     icon: Send,
     children: [
-      { id: 'apps-review', label: 'Review & send' },
-      { id: 'apps-sent', label: 'Sent' },
+      { id: 'apps-review', label: 'appsReview' },
+      { id: 'apps-sent', label: 'appsSent' },
     ],
   },
-  { id: 'profile', label: 'Profile', icon: User },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'profile', label: 'profile', icon: User },
+  { id: 'settings', label: 'settings', icon: Settings },
   // Beta-only page (owner decision 2026-09-01): the one-box feedback
   // form. Drops off the nav when beta ends.
-  { id: 'feedback', label: 'Beta feedback', icon: MessageSquarePlus },
+  { id: 'feedback', label: 'feedback', icon: MessageSquarePlus },
 ];
 
 export default function Sidebar({
@@ -96,11 +103,18 @@ export default function Sidebar({
   onToggleCollapsed: () => void;
   children?: React.ReactNode; // slot under the nav (e.g. hunt trigger)
 }) {
-  // Which group is unfolded; the group owning the active page stays open
-  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const dict = useT();
+  const tc = dict.console;
+  const t = tc.sidebar;
+  // The OTHER language's name, in that language (same as the landing toggle)
+  const langToggle = dict.langToggle;
+  const { locale, setLocale } = useLocale();
+  // Which group is unfolded (by id — labels are translated); the group
+  // owning the active page stays open
+  const [openGroup, setOpenGroup] = useState<View | null>(null);
   useEffect(() => {
     const group = NAV.find((n) => n.children?.some((c) => c.id === view));
-    setOpenGroup(group ? group.label : null);
+    setOpenGroup(group ? group.id : null);
   }, [view]);
 
   const countFor = (id: View) =>
@@ -131,12 +145,12 @@ export default function Sidebar({
         </div>
         <div className={cn('min-w-0 flex-1', showLabels ? 'hidden lg:block' : 'hidden')}>
           <p className="truncate font-semibold tracking-tight text-hi">JobFinderOS</p>
-          <p className="num text-[10px] uppercase tracking-widest text-low">TalentHive engine</p>
+          <p className="num text-[10px] uppercase tracking-widest text-low">TalentHive engine</p>{/* i18n-ok: brand tagline */}
         </div>
         <button
           onClick={onToggleCollapsed}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? t.expand : t.collapse}
+          title={collapsed ? t.expand : t.collapse}
           className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-low transition-colors hover:bg-surface-2 hover:text-hi md:flex"
         >
           {collapsed ? (
@@ -148,19 +162,20 @@ export default function Sidebar({
       </div>
 
       {/* Nav */}
-      <nav className="flex flex-col gap-1" aria-label="Main">
-        {NAV.map(({ id, label, icon: Icon, children: navChildren }) => {
+      <nav className="flex flex-col gap-1" aria-label={tc.shell.mainNav}>
+        {NAV.map(({ id, label: labelKey, icon: Icon, children: navChildren }) => {
+          const label = tc.nav[labelKey];
           const active =
             view === id || (navChildren?.some((c) => c.id === view) && id !== view) || false;
           const groupActive = Boolean(navChildren?.some((c) => c.id === view));
-          const isOpen = openGroup === label;
+          const isOpen = openGroup === id;
 
           return (
             <div key={id}>
               <button
                 onClick={() => {
                   if (navChildren) {
-                    setOpenGroup(isOpen && !groupActive ? null : label);
+                    setOpenGroup(isOpen && !groupActive ? null : id);
                     if (!groupActive || !isOpen) onNavigate(navChildren[0].id);
                   } else {
                     onNavigate(id);
@@ -221,7 +236,7 @@ export default function Sidebar({
                         {childActive && (
                           <span className="absolute left-[22px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-signal" />
                         )}
-                        <span className="min-w-0 flex-1 text-left">{c.label}</span>
+                        <span className="min-w-0 flex-1 text-left">{tc.nav[c.label]}</span>
                         {count > 0 && (
                           <span className="num rounded-full bg-signal/15 px-1.5 text-[11px] text-signal">
                             {count}
@@ -251,7 +266,7 @@ export default function Sidebar({
         ) : (
           <div className="rounded-lg border border-line bg-ink/60 px-3 py-2.5">
             <p className="hidden text-[10px] font-medium uppercase tracking-widest text-mid lg:block">
-              Hunt cycle
+              {t.huntCycle}
             </p>
             <NextHunt
               nextRunAt={nextRunAt}
@@ -264,7 +279,7 @@ export default function Sidebar({
         {/* User chip */}
         <button
           onClick={onEditSetup}
-          title={collapsed ? (profile?.full_name ?? 'Your profile') : 'Edit your search setup'}
+          title={collapsed ? (profile?.full_name ?? t.yourProfile) : t.editSetupTitle}
           className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2"
         >
           <span className="num flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-xs text-mid">
@@ -272,15 +287,32 @@ export default function Sidebar({
           </span>
           <span className={cn('min-w-0', showLabels ? 'hidden lg:block' : 'hidden')}>
             <span className="block truncate text-sm font-medium text-hi">
-              {profile?.full_name ?? 'Your profile'}
+              {profile?.full_name ?? t.yourProfile}
             </span>
             <span className="block truncate text-xs text-low">
               {profile
-                ? [profile.municipality ?? profile.region, profile.country === 'SE' ? 'Sweden' : profile.country === 'GB' ? 'United Kingdom' : null]
+                ? [profile.municipality ?? profile.region, profile.country ? tc.countries[profile.country] ?? null : null]
                     .filter(Boolean)
-                    .join(' · ') || 'Set your area'
-                : 'Not set up'}
+                    .join(' · ') || t.setArea
+                : t.notSetUp}
             </span>
+          </span>
+        </button>
+
+        {/* Language toggle — mirrors Settings → Language (mobile has no
+            sidebar; Settings is reachable from the mobile nav). */}
+        <button
+          onClick={() => setLocale(locale === 'sv' ? 'en' : 'sv')}
+          className={cn(
+            'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2',
+            collapsed && 'justify-center px-0'
+          )}
+          title={t.languageLabel}
+          aria-label={`${t.languageLabel}: ${langToggle}`}
+        >
+          <Languages className="h-4 w-4 shrink-0 text-low" aria-hidden />
+          <span className={cn('text-xs text-low', showLabels ? 'hidden lg:block' : 'hidden')}>
+            {langToggle}
           </span>
         </button>
 
@@ -290,11 +322,11 @@ export default function Sidebar({
             'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2',
             collapsed && 'justify-center px-0'
           )}
-          title='Sign out'
+          title={t.signOut}
         >
           <LogOut className='h-4 w-4 shrink-0 text-low' aria-hidden />
           <span className={cn('text-xs text-low', showLabels ? 'hidden lg:block' : 'hidden')}>
-            Sign out
+            {t.signOut}
           </span>
         </button>
       </div>

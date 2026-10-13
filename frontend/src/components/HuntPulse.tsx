@@ -10,7 +10,8 @@ import { memo } from 'react';
 import { Crosshair, FileText, Radar, Scale, Send } from 'lucide-react';
 import type { Stats } from '@/types';
 import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
-import { LiveDot, useCountdown } from './NextHunt';
+import { clockTime, LiveDot, useCountdown } from './NextHunt';
+import { useLocale, useT } from '@/i18n/LocaleContext';
 
 interface Stage {
   id: string;
@@ -31,6 +32,7 @@ function PulseStage({
   live?: boolean;
   onClick?: () => void;
 }) {
+  const t = useT().console.pulse;
   const Tag = onClick ? 'button' : 'div';
   return (
     <Tag
@@ -43,7 +45,7 @@ function PulseStage({
       <span className="flex items-center gap-2 self-center text-mid sm:self-start">
         <stage.icon className="h-3.5 w-3.5" aria-hidden />
         <span className="text-[10px] font-medium uppercase tracking-[0.14em]">{stage.label}</span>
-        {live && <span className="num text-[10px] text-signal">live</span>}
+        {live && <span className="num text-[10px] text-signal">{t.live}</span>}
       </span>
       <span className="flex items-center gap-2 self-center sm:self-start">
         {stage.attention && <LiveDot />}
@@ -77,6 +79,10 @@ function PulseSchedule({
   intervalMinutes: number;
   lastHuntAt: string | null;
 }) {
+  const { locale } = useLocale();
+  const tc = useT().console;
+  const t = tc.pulse;
+  const tn = tc.nextHunt;
   const countdown = useCountdown(schedulerEnabled ? nextRunAt : null);
   const at = nextRunAt ? parseUtcDate(nextRunAt) : null;
   const overdue =
@@ -84,17 +90,17 @@ function PulseSchedule({
     Date.now() - parseUtcDate(lastHuntAt).getTime() > intervalMinutes * 60_000 * 1.5;
 
   if (!schedulerEnabled) {
-    return <p className="text-xs text-low">Manual hunts only</p>;
+    return <p className="text-xs text-low">{tn.manualOnly}</p>;
   }
 
   return (
     <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
       {lastHuntAt && (
         <span className="text-low">
-          Last hunt {timeAgo(lastHuntAt)}
+          {t.lastHunt(timeAgo(lastHuntAt, tc.time))}
           {overdue && (
             <span className="ml-1.5 rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal">
-              overdue
+              {t.overdue}
             </span>
           )}
         </span>
@@ -102,14 +108,12 @@ function PulseSchedule({
       <span className="flex items-center gap-2 text-mid">
         <LiveDot />
         <span>
-          next hunt in{' '}
+          <span aria-hidden>{t.nextHuntIn} </span>
           <span className="num text-hi" aria-hidden>
-            {countdown ?? `every ${intervalMinutes}m`}
+            {countdown ?? tn.every(intervalMinutes)}
           </span>
           <span className="sr-only">
-            {at
-              ? `next automatic hunt at ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-              : `hunts every ${intervalMinutes} minutes`}
+            {at ? tn.nextAt(clockTime(at, locale)) : tn.huntsEvery(intervalMinutes)}
           </span>
         </span>
       </span>
@@ -148,13 +152,14 @@ function HuntPulseBase({
   onOpenReview: () => void;
   onOpenSent: () => void;
 }) {
+  const t = useT().console.pulse;
   const pending = stats?.matches_pending_decision ?? 0;
   const last24 = stats?.jobs_last_24h ?? 0;
   const stages: Stage[] = [
     {
       id: 'hunted',
-      label: 'Hunted',
-      hint: last24 ? `+${last24} in the last 24h` : 'jobs found so far',
+      label: t.hunted,
+      hint: last24 ? t.huntedHint(last24) : t.huntedHintZero,
       count: stats?.jobs_total ?? 0,
       icon: Radar,
       attention: false,
@@ -162,32 +167,32 @@ function HuntPulseBase({
     },
     {
       id: 'matched',
-      label: 'Matched',
-      hint: 'ranked against your CV',
+      label: t.matched,
+      hint: t.matchedHint,
       count: stats?.jobs_matched ?? 0,
       icon: Crosshair,
       attention: false,
     },
     {
       id: 'awaiting',
-      label: 'Awaiting you',
-      hint: pending > 0 ? 'your move — approve or pass' : 'nothing to decide',
+      label: t.awaiting,
+      hint: pending > 0 ? t.awaitingHint : t.awaitingHintZero,
       count: pending,
       icon: Scale,
       attention: pending > 0,
     },
     {
       id: 'drafts',
-      label: 'In drafts',
-      hint: openDrafts > 0 ? 'review before sending' : 'no drafts waiting',
+      label: t.drafts,
+      hint: openDrafts > 0 ? t.draftsHint : t.draftsHintZero,
       count: openDrafts,
       icon: FileText,
       attention: openDrafts > 0,
     },
     {
       id: 'sent',
-      label: 'Sent',
-      hint: 'applications out the door',
+      label: t.sent,
+      hint: t.sentHint,
       count: stats?.jobs_applied ?? 0,
       icon: Send,
       attention: false,
@@ -196,23 +201,23 @@ function HuntPulseBase({
 
   return (
     <section
-      aria-label="Hunt pulse — your pipeline at a glance"
+      aria-label={t.aria}
       className="rounded-xl border border-line bg-surface/80"
     >
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-line px-4 py-3 sm:px-5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-hi">Hunt pulse</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-hi">{t.title}</h2>
           {matchingRunning ? (
             <p className="flex items-center gap-2 text-xs text-signal">
-              <LiveDot /> AI is ranking jobs for you — new matches stream in live
+              <LiveDot /> {t.aiRanking}
             </p>
           ) : (
             <p className="text-xs text-mid">
               {pending > 0
-                ? `${pending} ${pending === 1 ? 'match needs' : 'matches need'} your decision`
+                ? t.needDecision(pending)
                 : openDrafts > 0
-                  ? `${openDrafts} ${openDrafts === 1 ? 'draft is' : 'drafts are'} ready to review`
-                  : 'All quiet — the next automatic hunt is on its way'}
+                  ? t.draftsReady(openDrafts)
+                  : t.allQuiet}
             </p>
           )}
         </div>

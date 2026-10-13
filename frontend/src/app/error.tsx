@@ -12,8 +12,10 @@
 // chunks. Styled purely with the Hunting Console token system so it
 // inherits globals.css from the root layout it renders inside.
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { dicts, type Locale } from '@/i18n/dict';
+import { consoleLocale } from '@/i18n/locale';
 
 export default function RootError({
   error,
@@ -22,6 +24,24 @@ export default function RootError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  // The root boundary sits OUTSIDE the console's LocaleContext (it can
+  // catch the provider itself failing), so it resolves the language on
+  // its own: a /sv page is Swedish, otherwise the console's rule (saved
+  // choice, then browser). English until mounted — static export.
+  const [locale, setLocale] = useState<Locale>('en');
+  useEffect(() => {
+    setLocale(window.location.pathname.startsWith('/sv') ? 'sv' : consoleLocale());
+  }, []);
+  const t = dicts[locale].console.errorPage;
+
+  // Same a11y contract as every other translated surface: the copy's
+  // language must be on <html> (the root layout pins 'en'), or a
+  // Swedish error page is read with an English screen-reader voice.
+  // No cleanup: whatever remounts after reset() declares its own lang.
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   useEffect(() => {
     // The boundary must log — a silently swallowed render error is
     // undiagnosable from user reports alone.
@@ -31,26 +51,21 @@ export default function RootError({
   return (
     <div className="console-backdrop flex min-h-dvh flex-col items-center justify-center gap-4 bg-ink px-6 text-center text-hi">
       <AlertTriangle className="h-8 w-8 text-bad" aria-hidden />
-      <h2 className="font-semibold tracking-tight">Something broke</h2>
-      <p className="max-w-md text-sm text-mid">
-        An unexpected error stopped the console. Nothing was lost — your matches
-        and drafts live on the server. Try again, or reload the page.
-      </p>
-      {error.digest && (
-        <p className="text-xs text-low">reference: {error.digest}</p>
-      )}
+      <h2 className="font-semibold tracking-tight">{t.title}</h2>
+      <p className="max-w-md text-sm text-mid">{t.body}</p>
+      {error.digest && <p className="text-xs text-low">{t.reference(error.digest)}</p>}
       <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
         <button
           onClick={reset}
           className="rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98]"
         >
-          Try again
+          {t.tryAgain}
         </button>
         <a
           href="/app"
           className="rounded-lg border border-line px-4 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
         >
-          Reload console
+          {t.reload}
         </a>
       </div>
     </div>

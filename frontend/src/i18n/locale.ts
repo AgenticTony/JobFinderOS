@@ -27,18 +27,13 @@ export function storeLocale(locale: Locale) {
   }
 }
 
-// True when the browser's own language list leads with Swedish and the
-// user has never expressed a preference here.
+// True when the same rule the console uses (saved choice, then browser
+// languages — consoleLocale) resolves to Swedish. Delegating keeps the
+// marketing redirect and the console from disagreeing; the hand-rolled
+// copy it replaced missed navigator.language when navigator.languages
+// was an empty array.
 export function shouldRedirectToSv(): boolean {
-  if (storedLocale() === 'en') return false;
-  if (storedLocale() === 'sv') return true;
-  const langs =
-    typeof navigator !== 'undefined' && navigator.languages
-      ? navigator.languages
-      : typeof navigator !== 'undefined' && navigator.language
-        ? [navigator.language]
-        : [];
-  return langs.some((l) => l.toLowerCase().startsWith('sv'));
+  return consoleLocale() === 'sv';
 }
 
 // The toggle: remember the choice, then swap the language-scoped path
@@ -58,4 +53,28 @@ export function switchLocale(to: Locale, currentPath: string): void {
     to === 'sv'
       ? `/sv${currentPath === '/' ? '' : currentPath}${query}`
       : `${currentPath.replace(/^\/sv(?=\/|$)/, '') || '/'}${query}`;
+}
+
+// The console's locale (2026-10-12): the console has no /sv route, so it
+// resolves from the saved choice first, then the browser's language list
+// (the same resolveLocale shouldRedirectToSv leans on). Pure, so it is
+// unit-testable.
+export function resolveLocale(
+  stored: Locale | null,
+  languages: readonly string[]
+): Locale {
+  if (stored) return stored;
+  return languages.some((l) => l.toLowerCase().startsWith('sv')) ? 'sv' : 'en';
+}
+
+export function consoleLocale(): Locale {
+  const langs =
+    typeof navigator !== 'undefined'
+      ? navigator.languages?.length
+        ? navigator.languages
+        : navigator.language
+          ? [navigator.language]
+          : []
+      : [];
+  return resolveLocale(storedLocale(), langs);
 }

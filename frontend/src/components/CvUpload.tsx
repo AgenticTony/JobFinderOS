@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FileUp, Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiErrorMessage } from '@/lib/api';
+import { useT } from '@/i18n/LocaleContext';
 
 interface Props {
   onUploaded: (file: File) => Promise<void>;
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
+  const t = useT().console.cvUpload;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -34,7 +36,7 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
     const file = files?.[0];
     if (!file) return;
     if (!/\.(pdf|docx)$/i.test(file.name)) {
-      setError('Please upload a PDF or Word (.docx) file');
+      setError(t.wrongType);
       return;
     }
     setError(null);
@@ -50,9 +52,9 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
 
   const statusLine = (() => {
     if (!uploading) return undefined;
-    if (elapsed < 12) return 'Extracting & analyzing your CV…';
-    if (elapsed < 45) return `Talking to the AI (${elapsed}s) — first-time analysis can take a minute…`;
-    return `Still working (${elapsed}s) — the AI can be slow; the app stays usable, this will finish on its own.`;
+    if (elapsed < 12) return t.extracting;
+    if (elapsed < 45) return t.talking(elapsed);
+    return t.stillWorking(elapsed);
   })();
 
   return (
@@ -87,11 +89,11 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
           <p className="text-sm font-medium text-hi">
             {uploading
               ? statusLine
-              : label ?? (hasExistingCv ? 'Replace your CV' : 'Drop your CV (PDF or Word) here')}
+              : label ?? (hasExistingCv ? t.replace : t.drop)}
           </p>
           {!uploading && (
             <p className="mt-1 text-xs text-low">
-              PDF or Word (.docx) up to 5MB — text is extracted and profiled by AI
+              {t.hint}
             </p>
           )}
         </div>

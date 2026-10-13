@@ -5,7 +5,7 @@
 // Shell: left sidebar (nav + live hunt status) on md+, compact top bar on mobile.
 // Landing view is the Dashboard: Hunt Pulse funnel + next decisions + status rail.
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -66,6 +66,7 @@ import type {
   ProfileStatus,
 } from '@/types';
 import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
+import { PROFILE_WORK_RIGHTS } from '@/lib/workRights';
 import {
   apiErrorMessage,
   connectComposio,
@@ -79,8 +80,40 @@ import {
 } from '@/lib/api';
 import { installGlobalErrorReporter, UNHANDLED_ERROR_EVENT } from '@/lib/globalErrorReporter';
 import type { IntegrationsStatus } from '@/types';
+import { dicts, type Locale } from '@/i18n/dict';
+import { consoleLocale, storeLocale } from '@/i18n/locale';
+import { LocaleContext, useLocale, useT } from '@/i18n/LocaleContext';
+import { rich } from '@/i18n/rich';
 
 export default function Home() {
+  // Console language (2026-10-12): resolved after mount from the saved
+  // choice, else the browser (consoleLocale). The static export
+  // prerenders 'en', but nothing with text renders before the session
+  // check below, so there is no English flash for Swedish users.
+  const [locale, setLocaleState] = useState<Locale>('en');
+  const setLocale = useCallback((next: Locale) => {
+    storeLocale(next);
+    setLocaleState(next);
+  }, []);
+  const localeValue = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
+  const t = dicts[locale].console;
+  // The unhandled-rejection bridge is registered once; it reads the
+  // CURRENT language through this ref, not the one at mount.
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
+  // Declare the rendered language on <html> for assistive tech. The
+  // cleanup restores whatever was there before the console touched it:
+  // routes without their own lang handling (root layout pins 'en')
+  // must not be left marked Swedish after a client-side nav away.
+  useEffect(() => {
+    const prev = document.documentElement.lang;
+    document.documentElement.lang = locale;
+    return () => {
+      document.documentElement.lang = prev;
+    };
+  }, [locale]);
   const [view, setView] = useState<View>('dashboard');
   const [status, setStatus] = useState<ProfileStatus | null>(null);
   const [pipeStatus, setPipeStatus] = useState<PipelineStatusResponse | null>(null);
@@ -147,10 +180,14 @@ export default function Home() {
     let alive = true;
     getSessionToken().then((token) => {
       if (!alive) return;
+      const resolved = consoleLocale();
       if (!token) {
-        window.location.replace('/login?mode=register');
+        window.location.replace(
+          resolved === 'sv' ? '/sv/login?mode=register' : '/login?mode=register'
+        );
         return;
       }
+      setLocaleState(resolved);
       setSessionKnown(true);
     });
     return () => {
@@ -172,7 +209,7 @@ export default function Home() {
   useEffect(() => {
     installGlobalErrorReporter();
     const onUnhandled = (e: Event) => {
-      setActionError(`Something failed: ${(e as CustomEvent<string>).detail}`);
+      setActionError(tRef.current.shell.somethingFailed((e as CustomEvent<string>).detail));
     };
     window.addEventListener(UNHANDLED_ERROR_EVENT, onUnhandled);
     return () => window.removeEventListener(UNHANDLED_ERROR_EVENT, onUnhandled);
@@ -188,15 +225,13 @@ export default function Home() {
       if (next === view) return;
       if (
         Object.keys(draftEdits).length > 0 &&
-        !window.confirm(
-          'You have unsaved draft edits. Leave this view? (Cancel to stay and save them.)'
-        )
+        !window.confirm(t.shell.unsavedLeave)
       ) {
         return;
       }
       setView(next);
     },
-    [view, draftEdits]
+    [view, draftEdits, t]
   );
 
   // P0-4: typed work must also survive an accidental tab close —
@@ -362,7 +397,7 @@ export default function Home() {
           status: 'failed',
           jobs_considered: 0,
           matches_created: 0,
-          error: err instanceof Error ? err.message : 'Pipeline failed',
+          error: err instanceof Error ? err.message : t.shell.pipelineFailed,
         },
         top_matches: [],
       });
@@ -394,7 +429,7 @@ export default function Home() {
       // shows the inline copy the user actually sees; that catch HANDLES
       // this rethrow, so it never becomes an unhandled rejection. The
       // wizard stays open: the user's picks are not lost.
-      setActionError(`Couldn't save your setup: ${apiErrorMessage(err)}`);
+      setActionError(t.shell.saveSetupFailed(apiErrorMessage(err)));
       throw err;
     }
     track('onboarding_completed');
@@ -412,9 +447,7 @@ export default function Home() {
     } catch (err) {
       // FE-21: on a cold-starting free-tier backend this rejection was the
       // norm, and the button just did nothing. Surface it in the banner.
-      setActionError(
-        `Couldn't record your ${decision === 'approved' ? 'approval' : 'rejection'}: ${apiErrorMessage(err)}`
-      );
+      setActionError(t.shell.decisionFailed(decision === 'approved', apiErrorMessage(err)));
     }
   };
 
@@ -428,7 +461,7 @@ export default function Home() {
       // Stay on the current view (switchView above only runs on success,
       // and its P0-4 dirty-confirm is untouched) — dropping the user on an
       // empty review page after a failed prepare would read as data loss.
-      setActionError(`Couldn't prepare the application: ${apiErrorMessage(err)}`);
+      setActionError(t.shell.prepareFailed(apiErrorMessage(err)));
     }
   };
 
@@ -454,7 +487,7 @@ export default function Home() {
       onClick={() => handleRunPipeline()}
       disabled={hunting}
       aria-busy={hunting}
-      title="Scrape all sources and rank new jobs against your CV"
+      title={t.shell.huntTitle}
       className={cn(
         'inline-flex items-center justify-center gap-2 rounded-lg bg-signal font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-60',
         compact ? 'h-9 w-9 shrink-0' : 'w-full px-3 py-2.5 text-sm'
@@ -467,10 +500,10 @@ export default function Home() {
       )}
       {!compact && (
         <span className={railCollapsed ? 'hidden' : 'hidden lg:inline'}>
-          {pipelineBusy ? 'Hunting…' : matchPolling ? 'Matching in background…' : 'Hunt now'}
+          {pipelineBusy ? t.shell.hunting : matchPolling ? t.shell.matchingBackground : t.shell.huntNow}
         </span>
       )}
-      {compact && <span className="sr-only">Hunt now — run the pipeline</span>}
+      {compact && <span className="sr-only">{t.shell.huntNowSr}</span>}
     </button>
   );
 
@@ -487,6 +520,7 @@ export default function Home() {
   }
 
   return (
+    <LocaleContext.Provider value={localeValue}>
     <div className="console-backdrop min-h-dvh bg-ink text-hi">
       {/* Mobile top bar (sidebar takes over from md) */}
       <header className="sticky top-0 z-40 border-b border-line bg-ink/85 backdrop-blur md:hidden">
@@ -503,7 +537,7 @@ export default function Home() {
             without basis-auto they crush and bleed into each other. */}
         <nav
           className="no-scrollbar flex overflow-x-auto border-t border-line"
-          aria-label="Main"
+          aria-label={t.shell.mainNav}
         >
           {NAV.map(({ id, label, icon: Icon }) => {
             const active =
@@ -521,7 +555,7 @@ export default function Home() {
             >
               {active && <span className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-signal" />}
               <Icon className="h-[18px] w-[18px]" aria-hidden />
-              {label}
+              {t.nav[label]}
               {id === 'matches' && pendingCount > 0 && (
                 <span className="num absolute right-3 top-1.5 rounded-full bg-signal/15 px-1.5 text-[10px] text-signal">
                   {pendingCount}
@@ -554,7 +588,7 @@ export default function Home() {
           <div className="mx-auto max-w-5xl">
             {loading ? (
               <div className="flex items-center justify-center py-24 text-low">
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Warming up the console…
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> {t.shell.warmingUp}
               </div>
             ) : loadFailed && nothingLoaded ? (
               <LoadFailure onRetry={retryLoad} />
@@ -667,9 +701,11 @@ export default function Home() {
           initialSearchRadiusKm={profile.search_radius_km ?? 0}
           initialOccupations={profile.occupation_codes ?? []}
           initialQueries={profile.search_queries}
+          initialWorkRights={profile.work_rights}
         />
       )}
     </div>
+    </LocaleContext.Provider>
   );
 }
 
@@ -724,6 +760,7 @@ function DashboardView({
   onPrepare: (jobId: number) => Promise<void>;
   preparedJobIds: Set<number>;
 }) {
+  const t = useT().console.dashboard;
   const DAY_MS = 24 * 60 * 60 * 1000;
   // Fresh arrivals first, then the rest of the decision queue (deduped)
   const newMatches = [...pendingMatches]
@@ -777,9 +814,9 @@ function DashboardView({
             <div>
               <div className="mb-3 flex items-baseline justify-between">
                 <h2 className="text-lg font-semibold tracking-tight text-hi">
-                  Finish applying
+                  {t.finishApplying}
                   <span className="num ml-2 text-sm font-normal text-signal">{finishApplying.length}</span>
-                  <span className="ml-2 text-sm font-normal text-low">approved, not sent yet</span>
+                  <span className="ml-2 text-sm font-normal text-low">{t.approvedNotSent}</span>
                 </h2>
               </div>
               <div className="space-y-3">
@@ -801,7 +838,7 @@ function DashboardView({
             <div>
               <div className="mb-3 flex items-baseline justify-between">
                 <h2 className="text-lg font-semibold tracking-tight text-hi">
-                  New in the last 24h
+                  {t.newLast24h}
                   <span className="num ml-2 text-sm font-normal text-low">{newMatches.length}</span>
                 </h2>
               </div>
@@ -823,7 +860,7 @@ function DashboardView({
             <div>
               <div className="mb-3 flex items-baseline justify-between">
                 <h2 className="text-lg font-semibold tracking-tight text-hi">
-                  Next decisions
+                  {t.nextDecisions}
                   {decisions.length > 0 && (
                     <span className="num ml-2 text-sm font-normal text-low">{decisions.length}</span>
                   )}
@@ -833,7 +870,7 @@ function DashboardView({
                     onClick={onOpenMatches}
                     className="text-sm text-signal transition-colors hover:text-signal/80"
                   >
-                    View all matches →
+                    {t.viewAllMatches}
                   </button>
                 )}
               </div>
@@ -854,17 +891,17 @@ function DashboardView({
                   icon={<Radar className="h-8 w-8" />}
                   title={
                     pipelineBusy
-                      ? 'Scraping job sites…'
+                      ? t.scrapingTitle
                       : matchPolling
-                        ? 'AI is ranking jobs for you…'
-                        : 'Nothing else waiting'
+                        ? t.rankingTitle
+                        : t.nothingElseTitle
                   }
                   body={
                     pipelineBusy
-                      ? 'Fetching new postings from all sources.'
+                      ? t.scrapingBody
                       : matchPolling
-                        ? 'Each job takes ~20-60s to score — matches appear live below as they finish.'
-                        : 'New arrivals appear above; anything still awaiting your decision stays here.'
+                        ? t.rankingBody
+                        : t.nothingElseBody
                   }
                 />
               )}
@@ -878,17 +915,17 @@ function DashboardView({
           <aside className="space-y-4">
             {profileStatus && !profileStatus.has_profile && (
               <Warning>
-                No CV on file — upload your CV in <b>Profile</b> to enable AI matching.
+                {rich(t.noCv, 'font-bold')}
               </Warning>
             )}
             {profileStatus && !profileStatus.ai_enabled && (
               <Warning>
                 <Cpu className="mr-1.5 inline h-4 w-4" />
-                AI matching is temporarily unavailable — please try again later.
+                {t.aiUnavailable}
               </Warning>
             )}
             {matchFailed && pipelineResult?.match?.error && (
-              <Warning>Last hunt failed: {pipelineResult.match.error}</Warning>
+              <Warning>{t.lastHuntFailed(pipelineResult.match.error)}</Warning>
             )}
             {/* WO-14: informational hunt notices — the daily trial cap and
                 the scrape cooldown ("no new jobs since HH:MM") are honest
@@ -914,7 +951,7 @@ function DashboardView({
                 permanently. */}
             {matchPolling && (
               <p className="text-xs text-signal" role="status">
-                Matching now — results stream into “Next decisions”…
+                {t.matchingNow}
               </p>
             )}
           </aside>
@@ -978,6 +1015,7 @@ function MatchesView({
   onSwitch: (v: View) => void;
   subTabsAlways?: boolean;
 }) {
+  const t = useT().console.matches;
   // Approved page = in flight: approved and not yet sent. Once sent, the
   // job's record lives in Applications → Sent — it leaves Matches for good.
   const list = matches.filter((m) =>
@@ -987,33 +1025,23 @@ function MatchesView({
   return (
     <section>
       {approved ? (
-        <ViewHeader
-          title="Approved"
-          sub="Approved and in flight — jobs stay here until they're sent, then move to Applications."
-        />
+        <ViewHeader title={t.approvedTitle} sub={t.approvedSub} />
       ) : (
-        <ViewHeader
-          title="Awaiting you"
-          sub="Every job the AI has ranked against your CV. Approve the ones worth your time."
-        />
+        <ViewHeader title={t.awaitingTitle} sub={t.awaitingSub} />
       )}
       <SubTabs
         onSwitch={onSwitch}
         forceVisible={subTabsAlways}
         options={[
-          { id: 'matches', label: 'Awaiting my decision', active: !approved },
-          { id: 'matches-approved', label: 'Approved', active: approved },
+          { id: 'matches', label: t.tabAwaiting, active: !approved },
+          { id: 'matches-approved', label: t.tabApproved, active: approved },
         ]}
       />
       {list.length === 0 ? (
         <Empty
           icon={<Inbox className="h-8 w-8" />}
-          title={approved ? 'Nothing in flight' : 'No matches waiting'}
-          body={
-            approved
-              ? 'Approve a match and it appears here until its application is sent.'
-              : 'Hunt now to scrape job sites and match them against your CV.'
-          }
+          title={approved ? t.emptyApprovedTitle : t.emptyAwaitingTitle}
+          body={approved ? t.emptyApprovedBody : t.emptyAwaitingBody}
         />
       ) : (
         <div className="space-y-3">
@@ -1066,6 +1094,7 @@ function ApplicationsView({
   onEditDraft: (id: number, patch: DraftEdits) => void;
   onClearDraftEdits: (id: number) => void;
 }) {
+  const t = useT().console.apps;
   const openDrafts = drafts.filter((d) => d.status !== 'submitted');
   // Accordion: one draft open at a time; a single draft opens by itself
   const [openId, setOpenId] = useState<number | null>(() =>
@@ -1079,8 +1108,8 @@ function ApplicationsView({
       onSwitch={onSwitch}
       forceVisible={subTabsAlways}
       options={[
-        { id: 'apps-review', label: 'Review & send', active: page === 'apps-review' },
-        { id: 'apps-sent', label: 'Applications', active: page === 'apps-sent' },
+        { id: 'apps-review', label: t.tabReview, active: page === 'apps-review' },
+        { id: 'apps-sent', label: t.tabSent, active: page === 'apps-sent' },
       ]}
     />
   );
@@ -1088,16 +1117,13 @@ function ApplicationsView({
   if (page === 'apps-sent') {
     return (
       <section>
-        <ViewHeader
-          title="Applications"
-          sub="Sent by email, or handed off to finish on the employer's portal. Open one to re-read the letter or re-download the PDFs."
-        />
+        <ViewHeader title={t.sentTitle} sub={t.sentSub} />
         {subTabs}
         {applications.length === 0 ? (
           <Empty
             icon={<Send className="h-8 w-8" />}
-            title="Nothing sent yet"
-            body="Once you approve a draft, it lands here — sent by email, or handed off to finish on the employer's portal."
+            title={t.emptySentTitle}
+            body={t.emptySentBody}
           />
         ) : (
           <div className="space-y-3">
@@ -1114,16 +1140,13 @@ function ApplicationsView({
 
   return (
     <section>
-      <ViewHeader
-        title="Review & send"
-        sub="AI tailored your CV and cover letter to each approved job. Open one to read and edit it, then send. Nothing goes out without you."
-      />
+      <ViewHeader title={t.reviewTitle} sub={t.reviewSub} />
       {subTabs}
       {openDrafts.length === 0 ? (
         <Empty
           icon={<FileText className="h-8 w-8" />}
-          title="No drafts waiting"
-          body="Approve a match and press “Prepare application” — the AI will tailor your CV and cover letter for that job."
+          title={t.emptyReviewTitle}
+          body={t.emptyReviewBody}
         />
       ) : (
         <div className="space-y-3">
@@ -1153,6 +1176,7 @@ function RetryButton({
   applicationId: number;
   onChanged: () => Promise<void>;
 }) {
+  const t = useT().console.apps;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -1167,7 +1191,7 @@ function RetryButton({
             await retryApplication(applicationId);
             await onChanged();
           } catch (err) {
-            setError(err instanceof Error ? err.message : 'Retry failed');
+            setError(err instanceof Error ? err.message : t.retryFailed);
           } finally {
             setBusy(false);
           }
@@ -1175,7 +1199,7 @@ function RetryButton({
         disabled={busy}
         className="rounded-lg bg-signal px-3 py-1.5 text-sm font-medium text-ink transition hover:bg-signal/90 disabled:opacity-50"
       >
-        {busy ? 'Retrying…' : 'Retry'}
+        {busy ? t.retrying : t.retry}
       </button>
     </span>
   );
@@ -1192,6 +1216,8 @@ function SentApplicationCard({
   draft?: ApplicationDraft;
   onChanged: () => Promise<void>;
 }) {
+  const tc = useT().console;
+  const t = tc.apps;
   const [expanded, setExpanded] = useState(false);
   // FE-9: the header is keyboard-operable (role="button" — a real <button>
   // is impossible here because the header legitimately CONTAINS interactive
@@ -1243,10 +1269,10 @@ function SentApplicationCard({
       >
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-hi">
-            {a.job?.title ?? `Job #${a.job_id}`}
+            {a.job?.title ?? t.jobFallback(a.job_id)}
           </p>
           <p className="text-sm text-low">
-            {a.job?.company} · {a.method} · {timeAgo(a.created_at)}
+            {a.job?.company} · {t.method[a.method] ?? a.method} · {timeAgo(a.created_at, tc.time)}
           </p>
           {a.error && <p className="mt-1 text-sm text-bad">{a.error}</p>}
         </div>
@@ -1259,11 +1285,7 @@ function SentApplicationCard({
             a.status === 'queued' && 'bg-surface-2 text-mid'
           )}
         >
-          {a.status === 'sent'
-            ? 'sent ✓'
-            : a.status === 'manual_pending'
-              ? 'finish on portal'
-              : a.status.replace('_', ' ')}
+          {t.status[a.status] ?? a.status.replace('_', ' ')}
         </span>
         {a.status === 'manual_pending' && a.apply_url && (
           <a
@@ -1273,7 +1295,7 @@ function SentApplicationCard({
             onClick={(e) => e.stopPropagation()}
             className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
           >
-            <ExternalLink className="h-4 w-4" /> Open posting
+            <ExternalLink className="h-4 w-4" /> {t.openPosting}
           </a>
         )}
         {a.status === 'failed' && a.method === 'email' && (
@@ -1305,14 +1327,14 @@ function SentApplicationCard({
                 <div>
                   <div className="mb-1.5 flex items-center justify-between">
                     <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-                      Cover letter
+                      {t.coverLetter}
                     </p>
                     <div className="flex items-center gap-3">
                       <button
                         onClick={() => download(() => downloadDraftCoverLetterPdf(draft.id))}
                         className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                       >
-                        <Download className="h-3.5 w-3.5" /> PDF
+                        <Download className="h-3.5 w-3.5" /> {t.pdf}
                       </button>
                     </div>
                   </div>
@@ -1325,13 +1347,13 @@ function SentApplicationCard({
                 <div>
                   <div className="mb-1.5 flex items-center justify-between">
                     <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-                      CV sent
+                      {t.cvSent}
                     </p>
                     <button
                       onClick={() => download(() => downloadDraftCvPdf(draft.id))}
                       className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                     >
-                      <Download className="h-3.5 w-3.5" /> PDF
+                      <Download className="h-3.5 w-3.5" /> {t.pdf}
                     </button>
                   </div>
                   <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-ink p-3 font-mono text-xs leading-relaxed text-mid">
@@ -1401,6 +1423,8 @@ function DraftCard({
   // mirror the server, the same pristine-sync idea ProfileView uses,
   // achieved structurally instead of via an effect. Only transient
   // busy/error UI state remains local.
+  const tc = useT().console;
+  const t = tc.draft;
   const coverLetter = edits?.coverLetter ?? draft.cover_letter ?? '';
   const tailoredCv = edits?.tailoredCv ?? draft.tailored_cv ?? '';
   const dirty = edits !== undefined;
@@ -1535,9 +1559,7 @@ function DraftCard({
   // (the sentence is now in the guard's source) instead of leaving the
   // draft blocked with the claim still listed.
   const saveSentence = async (sentence: string) => {
-    if (!window.confirm(
-      `Add this whole sentence to your vouched facts?\n\n“${sentence}”\n\nIt will be used in future applications and won't be flagged.`
-    )) {
+    if (!window.confirm(t.confirmSentence(sentence))) {
       return;
     }
     setSubmitError(null);
@@ -1613,26 +1635,26 @@ function DraftCard({
         aria-controls={panelId}
       >
         <h3 className="min-w-0 flex-1 truncate font-semibold text-hi">
-          {job?.title ?? `Job #${draft.job_id}`}
+          {job?.title ?? tc.apps.jobFallback(draft.job_id)}
           <span className="ml-2 text-sm font-normal text-low">{job?.company}</span>
         </h3>
         {dirty && (
           <span className="rounded-full bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-signal">
-            unsaved
+            {t.unsaved}
           </span>
         )}
         {draft.status === 'drafting' && (
           <span className="inline-flex items-center rounded-full bg-surface-2 px-2.5 py-1 text-xs text-mid">
-            <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> tailoring…
+            <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> {t.tailoring}
           </span>
         )}
         {draft.status === 'ready' && (
           <span className="rounded-full bg-signal/15 px-2.5 py-1 text-xs text-signal">
-            ready for your review
+            {t.ready}
           </span>
         )}
         {draft.status === 'failed' && (
-          <span className="rounded-full bg-bad/15 px-2.5 py-1 text-xs text-bad">failed</span>
+          <span className="rounded-full bg-bad/15 px-2.5 py-1 text-xs text-bad">{t.failed}</span>
         )}
         <ChevronDown
           className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
@@ -1652,8 +1674,7 @@ function DraftCard({
               {draft.status === 'drafting' && (
                 <p className="flex items-center gap-2 text-sm text-mid" role="status">
                   <Loader2 className="h-4 w-4 animate-spin text-signal" />
-                  AI is tailoring your CV and cover letter — this box fills in by itself, usually
-                  within a minute.
+                  {t.tailoringBody}
                 </p>
               )}
 
@@ -1668,7 +1689,7 @@ function DraftCard({
               {guardBlocked && unresolvedHigh.length > 0 && (
                 <div className="rounded-lg border border-bad/30 bg-bad/5 p-3">
                   <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-bad">
-                    <ShieldAlert className="h-3.5 w-3.5" /> Why this was blocked
+                    <ShieldAlert className="h-3.5 w-3.5" /> {t.whyBlocked}
                   </p>
                   <ul className="space-y-2.5">
                     {unresolvedHigh.map((f, i) => {
@@ -1693,7 +1714,7 @@ function DraftCard({
                             className="inline-flex items-center gap-1 rounded-lg border border-bad/40 px-2.5 py-1 text-xs text-mid transition-colors hover:border-bad hover:text-hi disabled:opacity-40"
                           >
                             <Check className="h-3 w-3" />
-                            {busy === `attest:${f.value}` ? 'Confirming + checking…' : 'This is true — keep it'}
+                            {busy === `attest:${f.value}` ? t.confirming : t.thisIsTrue}
                           </button>
                         </div>
                         {sentenceSaveable && (
@@ -1702,9 +1723,9 @@ function DraftCard({
                             onClick={() => saveSentence(sentence)}
                             disabled={busy !== null}
                             className="mt-1 text-xs text-low underline underline-offset-2 transition-colors hover:text-mid disabled:opacity-40"
-                            title="Saves the sentence to your profile and re-checks this draft"
+                            title={t.saveSentenceTitle}
                           >
-                            {busy === 'save-sentence' ? 'Saving + re-checking…' : 'This whole sentence is true — save it and re-check'}
+                            {busy === 'save-sentence' ? t.savingSentence : t.saveSentence}
                           </button>
                         )}
                       </li>
@@ -1725,7 +1746,7 @@ function DraftCard({
                     className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-40"
                   >
                     <RefreshCw className={cn('h-4 w-4', busy === 'regenerate' && 'animate-spin')} />
-                    {busy === 'regenerate' ? 'Retrying…' : 'Try again'}
+                    {busy === 'regenerate' ? t.retrying : t.tryAgain}
                   </button>
                 </div>
               )}
@@ -1738,7 +1759,7 @@ function DraftCard({
               {draft.status === 'ready' && advisoryFindings.length > 0 && (
                 <div className="rounded-lg border border-signal/30 bg-signal/5 p-3">
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-signal">
-                    Verify before sending — tech not found in your CV
+                    {t.verifyBefore}
                   </p>
                   <ul className="space-y-1">
                     {advisoryFindings.map((f, i) => (
@@ -1758,14 +1779,14 @@ function DraftCard({
               {draft.status === 'ready' && (draft.fabrication_attested?.length ?? 0) > 0 && (
                 <div className="rounded-lg border border-line bg-surface-2/50 p-3">
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-                    Confirmed by you
+                    {t.confirmedByYou}
                   </p>
                   <ul className="space-y-1">
                     {draft.fabrication_attested.map((a, i) => (
                       <li key={i} className="text-sm text-mid">
                         • <span className="font-medium text-hi">{a.claim}</span>
                         {a.saved_to_profile ? (
-                          <span className="text-low"> — added to your profile</span>
+                          <span className="text-low">{t.addedToProfile}</span>
                         ) : null}
                       </li>
                     ))}
@@ -1777,7 +1798,7 @@ function DraftCard({
               {draft.status === 'ready' && draft.changes_summary.length > 0 && (
                 <div className="rounded-lg border border-line bg-ink/60 p-3">
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-                    What the AI changed for this application
+                    {t.aiChanged}
                   </p>
                   <ul className="space-y-1">
                     {draft.changes_summary.map((c, i) => (
@@ -1795,20 +1816,20 @@ function DraftCard({
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-                Cover letter (sent to the employer)
+                {t.coverLetterLabel}
               </p>
               <div className="flex items-center gap-3">
                 <button
                   onClick={copyCoverLetter}
                   className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                 >
-                  <Copy className="h-3.5 w-3.5" /> Copy
+                  <Copy className="h-3.5 w-3.5" /> {t.copy}
                 </button>
                 <button
                   onClick={() => download('cover-letter')}
                   className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
                 >
-                  <Download className="h-3.5 w-3.5" /> PDF
+                  <Download className="h-3.5 w-3.5" /> {tc.apps.pdf}
                 </button>
               </div>
             </div>
@@ -1824,13 +1845,13 @@ function DraftCard({
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-low">
-                Your CV, tailored for this job
+                {t.tailoredCvLabel}
               </p>
               <button
                 onClick={() => download('cv')}
                 className="inline-flex items-center gap-1 text-xs text-low transition-colors hover:text-mid"
               >
-                <Download className="h-3.5 w-3.5" /> PDF
+                <Download className="h-3.5 w-3.5" /> {tc.apps.pdf}
               </button>
             </div>
             <textarea
@@ -1854,7 +1875,7 @@ function DraftCard({
               disabled={!dirty || busy !== null}
               className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-40"
             >
-              <Save className="h-4 w-4" /> {busy === 'save' ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
+              <Save className="h-4 w-4" /> {busy === 'save' ? t.saving : dirty ? t.saveChanges : t.saved}
             </button>
 
             {/* WO-23: the recovery actions — the primary exit for a
@@ -1868,7 +1889,7 @@ function DraftCard({
                   className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
                 >
                   <ShieldAlert className="h-4 w-4" />
-                  {busy === 'recheck' ? 'Checking…' : 'Check again'}
+                  {busy === 'recheck' ? t.checking : t.checkAgain}
                 </button>
                 <button
                   onClick={regenerate}
@@ -1876,7 +1897,7 @@ function DraftCard({
                   className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-40"
                 >
                   <RefreshCw className={cn('h-4 w-4', busy === 'regenerate' && 'animate-spin')} />
-                  {busy === 'regenerate' ? 'Regenerating…' : 'Regenerate without these claims'}
+                  {busy === 'regenerate' ? t.regenerating : t.regenerate}
                 </button>
               </>
             )}
@@ -1888,13 +1909,13 @@ function DraftCard({
             {canEmail ? (
               <span
                 className="inline-flex items-center gap-1.5 rounded-lg border border-line px-4 py-2 text-sm text-low"
-                title="Email apply is being retooled to send from your own connected Gmail and returns at the end of beta"
+                title={t.emailReturnsTitle}
               >
                 <Mail className="h-4 w-4" />
-                Email apply returns at end of beta (from your own Gmail)
+                {t.emailReturns}
               </span>
             ) : (
-              <span className="text-xs text-low">no application email published</span>
+              <span className="text-xs text-low">{t.noEmail}</span>
             )}
             <button
               onClick={() => submit('browser')}
@@ -1902,7 +1923,7 @@ function DraftCard({
               className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
             >
               <MousePointerClick className="h-4 w-4" />
-              {busy === 'submit-browser' ? 'Opening…' : 'Approve & apply in browser'}
+              {busy === 'submit-browser' ? t.opening : t.applyBrowser}
             </button>
               </>
             )}
@@ -1930,6 +1951,8 @@ function ProfileView({
   onSaved: () => Promise<void>;
   onEditSetup: () => void;
 }) {
+  const tc = useT().console;
+  const t = tc.profile;
   const [saving, setSaving] = useState(false);
   // FE-21: profile save used to reject through the onClick silently —
   // the button spun down and the inputs looked saved. Same panel pattern
@@ -1985,10 +2008,7 @@ function ProfileView({
 
   return (
     <section className="space-y-6">
-      <ViewHeader
-        title="Profile"
-        sub="Your CV is the source of truth — the original file is never modified. Tailored copies live with each application."
-      />
+      <ViewHeader title={t.title} sub={t.sub} />
       <CvUpload onUploaded={onUpload} hasExistingCv={!!profile?.cv_file_name} />
 
       {profile && (
@@ -1996,33 +2016,35 @@ function ProfileView({
           {/* Search setup — the onboarding result, always visible/editable */}
           <div className="rounded-xl border border-line bg-surface/80 p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="font-semibold text-hi">Your search setup</h3>
+              <h3 className="font-semibold text-hi">{t.setupTitle}</h3>
               <button
                 onClick={onEditSetup}
                 className="rounded-lg border border-line px-3 py-1.5 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
               >
-                Edit setup
+                {t.editSetup}
               </button>
             </div>
             {profile.onboarded ? (
               <div className="grid gap-3 text-sm sm:grid-cols-2">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-low">Where</p>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-low">{t.where}</p>
                   <p className="mt-1 text-hi">
-                    {profile.country === 'SE' ? 'Sweden' : profile.country === 'GB' ? 'United Kingdom' : profile.country}
+                    {profile.country ? (tc.countries[profile.country] ?? profile.country) : ''}
                     {profile.municipality ? ` · ${profile.municipality}` : profile.region ? ` · ${profile.region}` : ''}
-                    {profile.remote_only ? ' · remote only' : profile.include_remote ? ' · local + remote' : ' · strictly local'}
+                    {` · ${profile.remote_only ? t.remoteOnly : profile.include_remote ? t.localRemote : t.strictlyLocal}`}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-low">Languages</p>
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-low">{t.languages}</p>
                   <p className="mt-1 text-hi">
-                    {profile.languages?.length ? profile.languages.join(' · ') : 'not set — jobs in other languages still pass'}
+                    {profile.languages?.length
+                      ? profile.languages.map((l) => tc.languageNames[l] ?? l).join(' · ')
+                      : t.languagesUnset}
                   </p>
                 </div>
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.14em] text-low">
-                    Hunting for ({profile.search_queries.length} titles)
+                    {t.huntingFor(profile.search_queries.length)}
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {profile.search_queries.map((q) => (
@@ -2035,14 +2057,14 @@ function ProfileView({
               </div>
             ) : (
               <p className="text-sm text-low">
-                Not set up yet — the wizard sets your country, area, and job titles from your CV.
+                {t.notSetUp}
               </p>
             )}
           </div>
 
           <div className="rounded-xl border border-line bg-surface/80 p-5">
             <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-lg font-semibold text-hi">{profile.full_name ?? 'Your profile'}</h2>
+              <h2 className="text-lg font-semibold text-hi">{profile.full_name ?? t.yourProfile}</h2>
               {profile.professional_title && (
                 <span className="rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-sm text-mid">
                   {profile.professional_title}
@@ -2071,14 +2093,13 @@ function ProfileView({
           </div>
 
           <div className="rounded-xl border border-line bg-surface/80 p-5">
-            <h3 className="mb-1 font-semibold text-hi">Contact details</h3>
+            <h3 className="mb-1 font-semibold text-hi">{t.contactTitle}</h3>
             <p className="mb-3 text-xs text-low">
-              Extracted from your CV — correct anything the AI misread. This name and
-              email go on your applications and both PDFs.
+              {t.contactBody}
             </p>
             <div className="grid gap-4 sm:grid-cols-3">
               <label className="block">
-                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">Full name</span>
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">{t.fullName}</span>
                 <input
                   value={fullName}
                   onChange={(e) => { prefsDirty.current = true; setFullName(e.target.value); }}
@@ -2086,7 +2107,7 @@ function ProfileView({
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">Email</span>
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">{t.email}</span>
                 <input
                   value={contactEmail}
                   onChange={(e) => { prefsDirty.current = true; setContactEmail(e.target.value); }}
@@ -2094,7 +2115,7 @@ function ProfileView({
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">Phone</span>
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">{t.phone}</span>
                 <input
                   value={phone}
                   onChange={(e) => { prefsDirty.current = true; setPhone(e.target.value); }}
@@ -2105,27 +2126,27 @@ function ProfileView({
           </div>
 
           <div className="rounded-xl border border-line bg-surface/80 p-5">
-            <h3 className="mb-3 font-semibold text-hi">Job search preferences</h3>
+            <h3 className="mb-3 font-semibold text-hi">{t.prefsTitle}</h3>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
-                  Preferred roles (comma separated)
+                  {t.preferredRoles}
                 </span>
                 <input
                   value={preferredRoles}
                   onChange={(e) => { prefsDirty.current = true; setPreferredRoles(e.target.value); }}
-                  placeholder="Backend Developer, Python Developer"
+                  placeholder={t.preferredRolesPh}
                   className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                 />
               </label>
               <label className="block">
                 <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
-                  Exclude keywords (jobs skipped)
+                  {t.exclude}
                 </span>
                 <input
                   value={excludeKeywords}
                   onChange={(e) => { prefsDirty.current = true; setExcludeKeywords(e.target.value); }}
-                  placeholder="senior, scala, on-site"
+                  placeholder={t.excludePh}
                   className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
                 />
               </label>
@@ -2136,22 +2157,21 @@ function ProfileView({
                 seekers) and what the tailor may state. */}
             <div className="mt-4">
               <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
-                Work rights
+                {t.workRights}
               </span>
               <select
                 value={workRights}
                 onChange={(e) => { prefsDirty.current = true; setWorkRights(e.target.value); }}
                 className="w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors focus:border-signal"
               >
-                <option value="citizen_or_pr">Citizen / permanent resident</option>
-                <option value="permanent_resident">Permanent resident</option>
-                <option value="eu_right">EU/EEA work right</option>
-                <option value="needs_sponsorship">Need visa sponsorship</option>
-                <option value="prefer_not_say">Prefer not to say</option>
+                {PROFILE_WORK_RIGHTS.map((v) => (
+                  <option key={v} value={v}>
+                    {tc.workRights[v]}
+                  </option>
+                ))}
               </select>
               <p className="mt-1 text-xs text-low">
-                Sponsorship seekers never see postings that require citizenship or
-                security clearance.
+                {t.workRightsNote}
               </p>
             </div>
 
@@ -2161,18 +2181,17 @@ function ProfileView({
                 blocks again. */}
             <div className="mt-4">
               <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">
-                Things I can vouch for (one per line)
+                {t.vouched}
               </span>
               <textarea
                 value={vouchedFacts}
                 onChange={(e) => { prefsDirty.current = true; setVouchedFacts(e.target.value); }}
                 rows={3}
-                placeholder={'Microsoft Office, daily use for 20 years\nEU citizen with full work rights'}
+                placeholder={t.vouchedPh}
                 className="w-full rounded-lg border border-line bg-ink p-3 font-mono text-sm leading-relaxed text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
               />
               <p className="mt-1 text-xs text-low">
-                Skills and facts that are true but aren't on your CV. We'll use them, and we won't
-                flag them.
+                {t.vouchedNote}
               </p>
             </div>
             <button
@@ -2180,7 +2199,7 @@ function ProfileView({
               disabled={saving}
               className="mt-4 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save preferences'}
+              {saving ? t.saving : t.savePrefs}
             </button>
             {saveError && (
               <p className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" role="alert">
@@ -2203,6 +2222,8 @@ function ProfileView({
 // the profile + CV file, matches, drafts, applications and the account;
 // job postings (shared scraped data) stay.
 function YourDataCard() {
+  const t = useT().console.data;
+  const { locale } = useLocale();
   const [busy, setBusy] = useState<'export' | 'delete' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -2212,7 +2233,7 @@ function YourDataCard() {
     try {
       await exportAccountData();
     } catch (err) {
-      setError(`Couldn't export your data: ${apiErrorMessage(err)}`);
+      setError(t.exportFailed(apiErrorMessage(err)));
     } finally {
       setBusy(null);
     }
@@ -2221,12 +2242,7 @@ function YourDataCard() {
   const erase = async () => {
     // Same weight class as the P0-4 unsaved-edits confirm — the design
     // system has no dialog component and this destroys everything.
-    const confirmed = window.confirm(
-      'Delete your account and ALL personal data?\n\n' +
-        'This permanently removes your profile, the CV file itself, every ' +
-        'match, draft and application, and your account. It cannot be undone. ' +
-        'Export first if you want a copy.'
-    );
+    const confirmed = window.confirm(t.deleteConfirm);
     if (!confirmed) return;
     setBusy('delete');
     setError(null);
@@ -2237,22 +2253,17 @@ function YourDataCard() {
       // page (not /login — there is nothing left to sign in to, and the
       // background pollers would 401-redirect anyway).
       await logout();
-      window.location.replace('/');
+      window.location.replace(locale === 'sv' ? '/sv' : '/');
     } catch (err) {
-      setError(`Couldn't delete your account: ${apiErrorMessage(err)} — nothing was deleted.`);
+      setError(t.deleteFailed(apiErrorMessage(err)));
       setBusy(null);
     }
   };
 
   return (
     <div className="rounded-xl border border-line bg-surface/80 p-5">
-      <h3 className="font-semibold text-hi">Your data</h3>
-      <p className="mt-1 max-w-md text-sm text-low">
-        Everything we hold about you, and the controls the privacy notice
-        promises: export a copy, or delete it all. Deletion removes your
-        profile, the CV file itself, every match, draft and application, your
-        AI usage logs, and your account.
-      </p>
+      <h3 className="font-semibold text-hi">{t.title}</h3>
+      <p className="mt-1 max-w-md text-sm text-low">{t.body}</p>
       <div className="mt-4 flex flex-wrap items-center gap-2.5">
         <button
           onClick={exportData}
@@ -2260,20 +2271,20 @@ function YourDataCard() {
           className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-40"
         >
           <Download className="h-4 w-4" />
-          {busy === 'export' ? 'Exporting…' : 'Export my data (JSON)'}
+          {busy === 'export' ? t.exporting : t.export}
         </button>
         <button
           onClick={erase}
           disabled={busy !== null}
           className="inline-flex items-center gap-1.5 rounded-lg border border-bad/40 px-3.5 py-2 text-sm text-bad transition-colors hover:bg-bad/10 disabled:opacity-40"
         >
-          {busy === 'delete' ? 'Deleting…' : 'Delete my account and data'}
+          {busy === 'delete' ? t.deleting : t.delete}
         </button>
         <a
-          href="/privacy"
+          href={locale === 'sv' ? '/sv/privacy' : '/privacy'}
           className="text-sm text-signal underline underline-offset-4 transition-colors hover:text-signal/80"
         >
-          Privacy notice
+          {t.privacy}
         </a>
       </div>
       {error && (
@@ -2285,18 +2296,15 @@ function YourDataCard() {
   );
 }
 
-const FEEDBACK_CATEGORIES: { id: string; label: string }[] = [
-  { id: 'bug', label: 'Bug' },
-  { id: 'confusing', label: 'Confusing' },
-  { id: 'missing', label: 'Missing feature' },
-  { id: 'idea', label: 'Idea' },
-  { id: 'love_it', label: 'Love it' },
-];
+// Stored category codes (backend feedback schema); labels are translated
+// (console.feedback.categories).
+const FEEDBACK_CATEGORIES = ['bug', 'confusing', 'missing', 'idea', 'love_it'] as const;
 
 function FeedbackView() {
   // The beta one-box (owner decision 2026-09-01): chips + text, no
   // fields. Rows are account-linked server-side — the note under the
   // box says so; that link is what makes "scores are wrong" actionable.
+  const t = useT().console.feedback;
   const [category, setCategory] = useState('bug');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -2321,25 +2329,22 @@ function FeedbackView() {
 
   return (
     <section className="space-y-6">
-      <ViewHeader
-        title="Beta feedback"
-        sub="You are shaping the product. One box — tell us anything."
-      />
+      <ViewHeader title={t.title} sub={t.sub} />
 
       <div className="rounded-xl border border-line bg-surface/80 p-5">
         <div className="flex flex-wrap gap-2">
           {FEEDBACK_CATEGORIES.map((c) => (
             <button
-              key={c.id}
+              key={c}
               type="button"
-              onClick={() => setCategory(c.id)}
+              onClick={() => setCategory(c)}
               className={
-                category === c.id
+                category === c
                   ? 'rounded-full border border-signal/50 bg-signal/10 px-3.5 py-1.5 text-sm font-medium text-hi transition'
                   : 'rounded-full border border-line px-3.5 py-1.5 text-sm text-mid transition hover:border-line-2 hover:text-hi'
               }
             >
-              {c.label}
+              {t.categories[c]}
             </button>
           ))}
         </div>
@@ -2349,11 +2354,11 @@ function FeedbackView() {
           onChange={(e) => setMessage(e.target.value)}
           maxLength={1000}
           rows={6}
-          placeholder="What worked, what didn't, what's missing…"
+          placeholder={t.placeholder}
           className="mt-4 w-full resize-y rounded-lg border border-line bg-ink px-3 py-2.5 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
         />
         <div className="mt-2 flex items-center justify-between gap-4 text-xs text-low">
-          <span>Feedback is linked to your account so we can follow you up.</span>
+          <span>{t.linked}</span>
           <span className="num shrink-0">{message.length}/1000</span>
         </div>
 
@@ -2364,7 +2369,7 @@ function FeedbackView() {
         )}
         {sent && !error && (
           <p className="mt-3 rounded-lg bg-ok/10 p-3 text-sm text-hi">
-            Thank you — received. We read every one.
+            {t.thanks}
           </p>
         )}
 
@@ -2373,14 +2378,53 @@ function FeedbackView() {
           disabled={busy || !message.trim()}
           className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
         >
-          {busy ? 'Sending…' : 'Send feedback'}
+          {busy ? t.sending : t.send}
         </button>
       </div>
     </section>
   );
 }
 
+// The console language (2026-10-12). Lives in Settings so it is
+// reachable on mobile (no sidebar there); the sidebar footer has the same
+// toggle on desktop. Persisted per device (jfos-lang) — the same key the
+// landing/login toggles write, so the choice follows the user across
+// the public pages too.
+function LanguageCard() {
+  const t = useT().console.settings;
+  const { locale, setLocale } = useLocale();
+  const options: { id: Locale; label: string }[] = [
+    { id: 'en', label: 'English' },
+    { id: 'sv', label: 'Svenska' },
+  ];
+  return (
+    <div className="rounded-xl border border-line bg-surface/80 p-5">
+      <h3 className="font-semibold text-hi">{t.languageTitle}</h3>
+      <p className="mt-1 max-w-md text-sm text-low">{t.languageBody}</p>
+      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label={t.languageTitle}>
+        {options.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            lang={o.id}
+            aria-pressed={locale === o.id}
+            onClick={() => setLocale(o.id)}
+            className={
+              locale === o.id
+                ? 'rounded-full border border-signal/50 bg-signal/10 px-3.5 py-1.5 text-sm font-medium text-hi transition'
+                : 'rounded-full border border-line px-3.5 py-1.5 text-sm text-mid transition hover:border-line-2 hover:text-hi'
+            }
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SettingsView() {
+  const t = useT().console.settings;
   const [integrations, setIntegrations] = useState<IntegrationsStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2415,23 +2459,17 @@ function SettingsView() {
 
   return (
     <section className="space-y-6">
-      <ViewHeader
-        title="Settings"
-        sub="Account-level configuration. Integrations connect JobFinderOS to your world."
-      />
+      <ViewHeader title={t.title} sub={t.sub} />
+
+      <LanguageCard />
 
       <YourDataCard />
 
       <div className="rounded-xl border border-line bg-surface/80 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-semibold text-hi">Gmail</h3>
-            <p className="mt-1 max-w-md text-sm text-low">
-              Connect your Gmail account once and your applications can be sent from
-              your own email address — you approve every send before it goes out.
-              Sign-in happens on Google's own page: your password never reaches
-              JobFinderOS.
-            </p>
+            <h3 className="font-semibold text-hi">{t.gmailTitle}</h3>
+            <p className="mt-1 max-w-md text-sm text-low">{t.gmailBody}</p>
           </div>
           {composio?.configured ? (
             <button
@@ -2439,18 +2477,18 @@ function SettingsView() {
               disabled={busy}
               className="inline-flex items-center gap-1.5 rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98] disabled:opacity-50"
             >
-              {busy ? 'Opening…' : 'Connect Gmail account'}
+              {busy ? t.opening : t.connect}
             </button>
           ) : (
             <span className="rounded-full bg-surface-2 px-2.5 py-1 text-xs text-low">
-              not configured
+              {t.notConfigured}
             </span>
           )}
         </div>
 
         {composio && !composio.configured && (
           <p className="mt-4 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
-            Gmail connections aren't available on this deployment yet — check back soon.
+            {t.notAvailable}
           </p>
         )}
 
@@ -2460,7 +2498,7 @@ function SettingsView() {
               <div key={a.id} className="flex items-center justify-between gap-3 text-sm">
                 <span className="capitalize text-mid">{a.app_name}</span>
                 <span className="inline-flex items-center gap-1.5 text-ok">
-                  <span className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden /> connected
+                  <span className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden /> {t.connected}
                 </span>
               </div>
             ))}
@@ -2489,6 +2527,7 @@ function Warning({ children }: { children: React.ReactNode }) {
 // tokens + AlertTriangle) with a Retry that re-runs the full initial
 // refresh, including the honest loading state.
 function LoadFailure({ onRetry }: { onRetry: () => void }) {
+  const t = useT().console.shared;
   return (
     <div
       className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-bad/30 bg-bad/10 p-4"
@@ -2497,17 +2536,15 @@ function LoadFailure({ onRetry }: { onRetry: () => void }) {
       <div className="flex items-start gap-2 text-sm text-hi">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-bad" />
         <div>
-          Couldn&apos;t reach the server — your lists may be missing or stale.
-          <span className="mt-0.5 block text-xs text-low">
-            The backend may still be waking up (up to a minute after idle on the free plan).
-          </span>
+          {t.loadFailed}
+          <span className="mt-0.5 block text-xs text-low">{t.loadFailedHint}</span>
         </div>
       </div>
       <button
         onClick={onRetry}
         className="shrink-0 rounded-lg bg-signal px-3 py-1.5 text-sm font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.98]"
       >
-        Retry
+        {t.retry}
       </button>
     </div>
   );

@@ -8,9 +8,9 @@ export default function AdzunaAttribution() {
       target="_blank"
       rel="noopener noreferrer"
       className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] text-low hover:text-mid"
-      title="Jobs by Adzuna"
+      title="Jobs by Adzuna" // i18n-ok: Adzuna ToS attribution, fixed wording
     >
-      Jobs by <span className="font-semibold">Adzuna</span>
+      Jobs by <span className="font-semibold">Adzuna</span>{/* i18n-ok: Adzuna ToS attribution */}
     </a>
   );
 }
