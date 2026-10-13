@@ -66,6 +66,7 @@ import type {
   ProfileStatus,
 } from '@/types';
 import { cn, parseUtcDate, timeAgo } from '@/lib/utils';
+import { PROFILE_WORK_RIGHTS } from '@/lib/workRights';
 import {
   apiErrorMessage,
   connectComposio,
@@ -101,8 +102,18 @@ export default function Home() {
   const tRef = useRef(t);
   useEffect(() => {
     tRef.current = t;
+  }, [t]);
+  // Declare the rendered language on <html> for assistive tech. The
+  // cleanup restores whatever was there before the console touched it:
+  // routes without their own lang handling (root layout pins 'en')
+  // must not be left marked Swedish after a client-side nav away.
+  useEffect(() => {
+    const prev = document.documentElement.lang;
     document.documentElement.lang = locale;
-  }, [t, locale]);
+    return () => {
+      document.documentElement.lang = prev;
+    };
+  }, [locale]);
   const [view, setView] = useState<View>('dashboard');
   const [status, setStatus] = useState<ProfileStatus | null>(null);
   const [pipeStatus, setPipeStatus] = useState<PipelineStatusResponse | null>(null);
@@ -1928,16 +1939,6 @@ function DraftCard({
 }
 
 // ---------------- Profile ----------------
-
-// The work-rights codes the profile select offers, in display order
-// (mirrors backend WORK_RIGHTS_VALUES). Labels: console.workRights.
-const PROFILE_WORK_RIGHTS = [
-  'citizen_or_pr',
-  'permanent_resident',
-  'eu_right',
-  'needs_sponsorship',
-  'prefer_not_say',
-] as const;
 
 function ProfileView({
   profile,

@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { Tier } from '@/types';
-import { consoleEn, type ConsoleDict } from '@/i18n/console';
+import type { ConsoleDict } from '@/i18n/console';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -32,7 +32,10 @@ export function parseUtcDate(iso: string): Date {
 }
 
 // `tt` = the active language's console.time dict (useT().console.time).
-export function timeAgo(iso: string, tt: ConsoleDict['time'] = consoleEn.time): string {
+// Deliberately required: a default would let a future caller compile
+// while rendering English inside the Swedish console — invisible to
+// tsc and the leftover-English scanner alike.
+export function timeAgo(iso: string, tt: ConsoleDict['time']): string {
   const seconds = Math.floor((Date.now() - parseUtcDate(iso).getTime()) / 1000);
   if (seconds < 60) return tt.justNow;
   const minutes = Math.floor(seconds / 60);

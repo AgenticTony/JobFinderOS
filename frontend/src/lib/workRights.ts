@@ -4,6 +4,17 @@
 // The wizard's short list (the Profile select offers all five).
 export const WIZARD_WORK_RIGHTS = ['citizen_or_pr', 'eu_right', 'needs_sponsorship', 'prefer_not_say'] as const;
 
+// The Profile select's full list, in display order. Single home beside
+// WIZARD_WORK_RIGHTS so both mirrors of the backend list are testable
+// together — the wizard's saved answer can be any of these five.
+export const PROFILE_WORK_RIGHTS = [
+  'citizen_or_pr',
+  'permanent_resident',
+  'eu_right',
+  'needs_sponsorship',
+  'prefer_not_say',
+] as const;
+
 // Options the wizard shows when re-run for a user whose saved answer may
 // be outside the short list ('permanent_resident' is set from Profile):
 // the saved answer is always offered — and, being the prefill, selected —

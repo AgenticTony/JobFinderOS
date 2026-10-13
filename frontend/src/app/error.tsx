@@ -34,6 +34,14 @@ export default function RootError({
   }, []);
   const t = dicts[locale].console.errorPage;
 
+  // Same a11y contract as every other translated surface: the copy's
+  // language must be on <html> (the root layout pins 'en'), or a
+  // Swedish error page is read with an English screen-reader voice.
+  // No cleanup: whatever remounts after reset() declares its own lang.
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   useEffect(() => {
     // The boundary must log — a silently swallowed render error is
     // undiagnosable from user reports alone.

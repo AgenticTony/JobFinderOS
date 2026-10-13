@@ -21,10 +21,11 @@ function formatRemaining(ms: number, t: ConsoleDict['nextHunt']): string {
   return t.seconds(sec);
 }
 
-// Clock time in the console's language (24h in Swedish), not the
-// browser's default locale — the sentence around it is translated too.
+// Clock time: Swedish console always sv-SE (24h); English console uses
+// the browser's own convention — an en-US user keeps their 12-hour
+// clock. The sentence around it is translated too.
 export function clockTime(d: Date, locale: string): string {
-  return d.toLocaleTimeString(locale === 'sv' ? 'sv-SE' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString(locale === 'sv' ? 'sv-SE' : undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
 export function useCountdown(nextRunAt: string | null): string | null {
@@ -57,7 +58,10 @@ export function useNextRunLabel(
   const countdown = useCountdown(schedulerEnabled ? nextRunAt : null);
   if (!schedulerEnabled) return t.manualOnlyLower;
   if (!nextRunAt) return t.every(intervalMinutes);
-  return t.nextIn(countdown ?? '');
+  // countdown is a string whenever nextRunAt is set (useCountdown only
+  // returns null for a null target); the every() fallback is belt for
+  // the day that invariant breaks — a dangling "next hunt in " is worse.
+  return t.nextIn(countdown ?? t.every(intervalMinutes));
 }
 
 // The breathing dot — isolated so its animation never re-renders parents.
