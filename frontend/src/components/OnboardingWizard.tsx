@@ -33,6 +33,7 @@ import { apiErrorMessage, getGeo, suggestQueries } from '@/lib/api';
 import type { GeoData, OnboardingPayload, OccupationSuggestion, SearchMode } from '@/types';
 import { cn } from '@/lib/utils';
 import { useT } from '@/i18n/LocaleContext';
+import { initialWizardWorkRights, wizardWorkRightsOptions } from '@/lib/workRights';
 
 interface Props {
   onComplete: (payload: OnboardingPayload) => Promise<void>;
@@ -57,14 +58,14 @@ interface Props {
   // but unrendered when the fresh suggestion call didn't return them).
   initialOccupations?: OccupationSuggestion[];
   initialQueries?: string[];
+  // Saved work-rights answer — edit mode must start from it, or saving
+  // setup overwrites it with prefer_not_say (bug 2026-10-13).
+  initialWorkRights?: string | null;
 }
 
 // Step labels: wizard.steps (dict); six steps, the index is the step.
 const STEP_COUNT = 6;
 
-// WO-19 part B — mirrors the backend's WORK_RIGHTS_VALUES / LINES.
-// Codes are stored; labels come from console.workRights.
-const WORK_RIGHTS_OPTIONS = ['citizen_or_pr', 'eu_right', 'needs_sponsorship', 'prefer_not_say'] as const;
 
 // STORED values — the backend language filter reads these exact English
 // names. Display labels: console.languageNames[value].
@@ -190,6 +191,7 @@ export default function OnboardingWizard({
   initialSearchRadiusKm,
   initialOccupations,
   initialQueries,
+  initialWorkRights,
 }: Props) {
   const dict = useT();
   const t = dict.wizard;
@@ -230,7 +232,8 @@ export default function OnboardingWizard({
   const [languages, setLanguages] = useState<string[]>(initialLanguages ?? ['English']); // i18n-ok: stored value
   // WO-19 part B: one question, no AI. prefer_not_say = jobs show as
   // unverified until answered (never dropped, never counted as verified).
-  const [workRights, setWorkRights] = useState('prefer_not_say');
+  const [workRights, setWorkRights] = useState(() => initialWizardWorkRights(initialWorkRights));
+  const workRightsOptions = useMemo(() => wizardWorkRightsOptions(initialWorkRights), [initialWorkRights]);
   const [mode, setMode] = useState<SearchMode>('field');
   const [directQueries, setDirectQueries] = useState<string[]>([]);
   const [pivotSuggestions, setPivotSuggestions] = useState<{ query: string; why: string }[]>([]);
@@ -523,7 +526,7 @@ export default function OnboardingWizard({
                   <StepTitle icon={<IdCard className="h-4 w-4" />} title={t.rights.title} />
                   <p className="mt-2 text-sm text-low">{t.rights.body}</p>
                   <div className="mt-5 flex flex-wrap gap-2">
-                    {WORK_RIGHTS_OPTIONS.map((value) => (
+                    {workRightsOptions.map((value) => (
                       <button
                         key={value}
                         onClick={() => setWorkRights(value)}

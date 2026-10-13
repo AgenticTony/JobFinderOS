@@ -690,6 +690,7 @@ export default function Home() {
           initialSearchRadiusKm={profile.search_radius_km ?? 0}
           initialOccupations={profile.occupation_codes ?? []}
           initialQueries={profile.search_queries}
+          initialWorkRights={profile.work_rights}
         />
       )}
     </div>
