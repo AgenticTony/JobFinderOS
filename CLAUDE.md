@@ -1,7 +1,7 @@
 # JobFinderOS — Project Memory
 
 > Auto-loaded context for AI coding sessions. Keep this current as the project evolves.
-> Last updated: 2026-08-30
+> Last updated: 2026-10-11
 
 ## MANDATORY DEVELOPMENT STANDARDS — read before every task
 
@@ -104,7 +104,7 @@ frontend / ops / docs, verified stats, and a findings ledger; indexed 2026-08-30
   - Run: `cd frontend && npm run dev` → http://localhost:3000
   - Type-check: `npx tsc --noEmit --noUnusedLocals --noUnusedParameters`
 - **Tests:** `cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`
-  - All 437 tests must be green before any commit
+  - The full suite (579 passed / 14 skipped, 2026-10-11) must be green before any commit
   - Flow test: `PYTHONPATH=. .venv/bin/python tests/test_flow.py`
   - Calibration (opt-in, costs API calls): `RUN_CALIBRATION=1 pytest tests/test_calibration.py`
 
@@ -355,15 +355,12 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
       root logger to WARN after init_db (both processes log-blind at
       INFO since boot migrations landed) — fixed in env.py with a
       regression test (red-verified).
-- [ ] **WO-25 owner steps (2026-09-28 branch-migration outage)**: a
-      WO-19b branch build migrated production ahead of main; every
-      main-built hunt died on "Can't locate revision" until PR #116
-      merged. Code guard built (see WO-25 execution record). Still to do:
-      (1) after deploy, confirm boot logs show `Deploy build: main@<sha>`
-      on BOTH services — `<unknown branch>` means the next migration from
-      main will be refused; (2) run ops/sql/ci_revision_reader.sql +
-      add the PROD_REVISION_READER_URL GitHub secret; (3) point
-      jobfinderos-api's deploy branch at main; (4) consider SENTRY_DSN.
+- [ ] **WO-25 remaining owner checks** (drift CI ARMED 2026-10-11 —
+      role + PROD_REVISION_READER_URL set, first read `at head`): (1)
+      confirm boot logs show `Deploy build: main@<sha>` on BOTH services
+      — `<unknown branch>` means the next migration from main will be
+      refused; (2) point jobfinderos-api's deploy branch at main; (3)
+      consider SENTRY_DSN (the 09-28 outage paged nobody).
 - [ ] **Cron env hygiene (2026-09-11 incident follow-up)**: on
       jobfinderos-hunt's Environment tab, still to verify/set:
       TRIAL_DAILY_SCORE_CAP + TRIAL_DAY1_SCORE_CAP (the beta lift was

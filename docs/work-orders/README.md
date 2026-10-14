@@ -39,7 +39,7 @@ WO0–WO5 into this queue as the single source of sequencing. **Do not cite a
 bare "WO3" in either document until this is settled** — always qualify it as
 `MIGRATION.md WO3` or `work-orders/WO-03`.
 
-## Queue — open work (board refreshed 2026-09-15)
+## Queue — open work (board refreshed 2026-10-11)
 
 | # | Work order | Pri | Depends on | Status | Why now |
 |---|---|---|---|---|---|
@@ -47,11 +47,10 @@ bare "WO3" in either document until this is settled** — always qualify it as
 | **WO-15** | Career-site discovery (self-expanding employer boards) | P2 | WO-06 ✅ | open | Replaces the deleted slug-scraper with a mechanism that finds employer career feeds from Platsbanken application_urls (verified 2026-08-27: 79% carry one, custom-domain /jobs.json probes 4/4). Direct-from-employer inventory competitors don't have; vendor-neutral (Teamtailor JSON Feed now, Greenhouse/Lever later). ToS gate before shipping |
 | **WO-16** | Pricing + plan design (€24.99 / €59.97 quarterly) | P1 | WO-13, WO-14 | blocked | Decided. The category's weak point is **billing trust**, not features — AIApply has an F BBB rating over credits-on-top, LazyApply 2.1 over ignored refunds, Sonara auto-renews a €2.95 trial to €23.95. Clean billing is a free differentiator. Owns the price; WO-13 owns the tax posture |
 | **WO-17** | Cancellation feedback loop | P2 | WO-13, WO-16 | blocked | The highest-signal moment in the product. Hired users are the only source of genuine 5-star reviews; everyone else is the only honest diagnostic we get. Hard constraint: cancel first, ask after — a survey before the button IS the friction that dominates Jobright's one-star reviews |
-| **WO-19** | Honest gates II: work rights, language requirements, posting trust boundary | P1 | — | open | Three verified gaps (2026-09-08 review of `ai-job-search`, the only production-grade repo surveyed): posting text reaches match/tailor/judge prompts with no trust boundary; we gate on everything EXCEPT work rights (WO-01's live run caught the tailor INVENTING "EU citizen, full work rights"); the language filter tests the ad's language, not the job's required language. Full detail: `WO-19-honest-gates.md` |
+| **WO-19** | Honest gates II: work rights, language requirements, posting trust boundary | P1 | — | part B ✅ (PR #116) · A + C open | Three verified gaps (2026-09-08 review of `ai-job-search`, the only production-grade repo surveyed): posting text reaches match/tailor/judge prompts with no trust boundary; we gate on everything EXCEPT work rights (WO-01's live run caught the tailor INVENTING "EU citizen, full work rights"); the language filter tests the ad's language, not the job's required language. Full detail: `WO-19-honest-gates.md` |
 | **WO-20** | Outcome layer: canonical statuses, reply detection, deadline & follow-up nudges | P1 | — | open | ROADMAP's launch weapon, executed. Replies already land in the user's inbox (`reply_to` = account email) and Composio Gmail is connected in production — reply detection is a read-side use of machinery we own. Manual markers ship first; stats get a real denominator. Full detail: `WO-20-outcome-layer.md` |
 | **WO-21** | Outbound PDF text-layer verification | P2 | — | open | Half-day: pypdf extraction check on every generated CV/cover letter (test-time assert + runtime send-block). The PDF is the artifact the employer keeps; the unicode-font fallback path can silently break the text layer ATS parsers read. Full detail: `WO-21-pdf-text-layer.md` |
 | **WO-22** | Apply-time link recovery (dead portal → live twin from the pool) | P2 | WO-18 ✅ | open | Second pass over `ai-job-search`: their apply flow ESCALATES a dead posting to the employer's own listing instead of warning. WO-18's `likely_same_job` + `collapse_preference` are the lookup engine; when the pool holds only the degraded copy, hand off the live twin instead of a dead link. Full detail: `WO-22-apply-link-recovery.md` |
-| **WO-25** | Migration drift guard (branch builds can't migrate prod; CI detects unknown prod revisions) | P1 | — | built — owner steps open | 2026-09-28 outage: a WO-19b branch build ran `upgrade head` against production, stamping a revision main didn't have — every main-built hunt died at boot until PR #116 merged. Boot migrations run from any branch and nothing detects drift (Sentry off). Prevent + detect + explain, plus a single-head CI check. Needs an owner call on a read-only prod credential in CI. Full detail: `WO-25-migration-drift-guard.md` |
 
 Also live on the platform but tracked outside this queue (see CLAUDE.md open
 items): **send-from-own-Gmail as a submit `method`** — the Composio
@@ -62,6 +61,16 @@ path behind the approval gates is the remaining build.
 
 Nothing here is to be redone — this is the record of what shipped.
 
+- **WO-25** migration drift guard — 2026-10-11 (PRs #117, #118): boot
+  refuses an unknown DB stamp with a diagnosis; on Render only `main`
+  builds may apply pending migrations (missing RENDER_GIT_BRANCH fails
+  closed); `migration-drift.yml` (push/PR/6-hourly) reads production's
+  stamp via the least-privilege `ci_revision_reader` role, plus the
+  single-head rule. Review fix (#118): an unset secret now FAILS ("NOT
+  ARMED") except on fork/Dependabot PRs — the first five green runs had
+  never read production. Armed 2026-10-11: role created, secret set, first
+  read `OK … stamped d94f2a6c8e1b … at head`. Remaining owner checks
+  (boot-log branch, api deploy branch, SENTRY_DSN) live in CLAUDE.md.
 - **WO-10** mount email verification + password reset — 2026-09-08:
   **closed as superseded, never built** (owner decision). MIG-WO2
   (fastapi-users → Supabase Auth, `MIGRATION.md`) deletes everything

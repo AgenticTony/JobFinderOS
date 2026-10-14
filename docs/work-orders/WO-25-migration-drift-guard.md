@@ -1,6 +1,6 @@
 # WO-25 — Migration drift guard: a branch migration must never strand main
 
-> Priority: P1 · Depends on: — · Status: built 2026-09-29 (all code layers); owner steps open — see execution record
+> Priority: P1 · Depends on: — · Status: **done 2026-10-11** — built 2026-09-29, review-fixed 2026-09-30 (PR #118), armed 2026-10-11; owner checks 1/4/5 below still open
 > Origin: 2026-09-28 hunt-cron outage. (WO-24 is held by the ad-URL
 > ingest sketch — not yet written up — so this takes the next number.)
 
@@ -250,3 +250,25 @@ exit codes per flag value, and the workflow's flag expression pinned.
 `ops/sql/ci_revision_reader.sql` and adds the secret, the "Migration
 drift" workflow is RED on main, on the schedule and on same-repo PRs.
 That red is the truthful state — the check cannot see production.
+
+## Armed — 2026-10-11
+
+Owner step 2 done: `ci_revision_reader` created in the production
+project (`jsibogzklhswpmozcyhn`), `PROD_REVISION_READER_URL` set. First
+armed read on PR #118's run: `OK aws-1-eu-west-1.pooler.supabase.com:5432/postgres
+stamped d94f2a6c8e1b (this build's head d94f2a6c8e1b); at head`.
+
+Setup pitfalls hit on the way (for anyone re-creating the role):
+- Generate the password with `openssl rand -hex 32` — base64 output can
+  carry `/ + =`, which break the connection URL unless percent-encoded.
+- The pooler user name is tenant-qualified: `ci_revision_reader.<project-ref>`.
+  Leaving the literal placeholder fails with `(ENOTFOUND) tenant/user … not found`.
+- `relation "public.alembic_version" does not exist` from the SQL editor
+  means the editor is pointed at the wrong project.
+
+Same PR also bumped PyJWT 2.13.0→2.15.1 and urllib3 2.7.0→2.8.0 (15
+pip-audit CVEs that had turned the supply-chain job red on main).
+
+Still open (owner, not buildable): step 1 (boot log shows
+`Deploy build: main@<sha>` on both services), step 4 (api deploy branch =
+main), step 5 (`SENTRY_DSN`).
