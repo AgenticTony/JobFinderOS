@@ -151,7 +151,17 @@ async def scan(
     from app.services.gmail_scan import gmail_fetch_messages
 
     try:
-        summary = await scan_replies(db, user.id, gmail_fetch_messages)
+        # CLAUDE.md lesson #1: scan_replies interleaves up to 50 Composio
+        # round-trips with synchronous DB flushes/commits — awaiting it
+        # directly runs every DB call on the event loop and stalls all
+        # other requests for the scan's duration. asyncio.run on a worker
+        # thread gives the coroutine its own loop OFF the main one (review
+        # round 1, finding 10).
+        import asyncio
+
+        summary = await run_in_threadpool(
+            asyncio.run, scan_replies(db, user.id, gmail_fetch_messages)
+        )
     except composio_service.ComposioError as e:
         raise HTTPException(status_code=502, detail=str(e))
     swept = await run_in_threadpool(propose_no_response_sweep, db, user_id=user.id)

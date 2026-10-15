@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 # Default lookback when no scan cursor exists yet — bounded, not "all mail"
 DEFAULT_LOOKBACK_DAYS = 90
 
+# Per-scan message cap. NOT a silent drop: past the cap the fetch reports
+# truncated=True and the scan holds its cursor behind the last processed
+# message, so the next scan resumes where this one stopped.
+SCAN_PAGE_CAP = 50
+
 _SLUG_RE = re.compile(r"\bGMAIL_[A-Z0-9_]+\b")
 
 
@@ -139,8 +144,13 @@ async def gmail_fetch_messages(
         return []
 
     metas = _find_messages(search_resp)
+    # bounded pass — but NEVER silent: if the query returned more than
+    # the cap we say so, and the scan keeps its cursor behind the last
+    # message actually processed so nothing is skipped forever (review
+    # round 1, finding 8).
+    truncated = len(metas) > SCAN_PAGE_CAP
     messages: List[dict] = []
-    for meta in metas[:50]:  # bounded pass — a scan is incremental anyway
+    for meta in metas[:SCAN_PAGE_CAP]:
         msg_id = str(meta.get("id"))
         detail = await composio_service.execute_tool(user_id, get_slug, {"message_id": msg_id})
         payload = detail.get("payload") if isinstance(detail, dict) else None
@@ -152,9 +162,12 @@ async def gmail_fetch_messages(
                 try:
                     from datetime import datetime, timezone
 
+                    # NAIVE UTC — the app's timestamp convention. A tz-aware
+                    # arrival time mixed with naive sent_at raises TypeError
+                    # in the stats subtraction (review round 1, finding 9).
                     internal_date = datetime.fromtimestamp(
                         int(raw) / 1000, tz=timezone.utc
-                    )
+                    ).replace(tzinfo=None)
                 except (ValueError, OSError):
                     internal_date = None
         body = _body_text(payload)
@@ -167,9 +180,10 @@ async def gmail_fetch_messages(
                 "received_at": internal_date,
             }
         )
-    # oldest→newest by Gmail's numeric message/thread ordering, then id
-    messages.sort(key=lambda m: str(m["id"]))
-    return messages
+    # oldest→newest by ARRIVAL TIME (message-id string sort is not
+    # chronological), id as the stable tiebreak
+    messages.sort(key=lambda m: (m["received_at"] is None, m["received_at"], str(m["id"])))
+    return {"messages": messages, "truncated": truncated}
 
 
 # ---------------------------------------------------------------------------
