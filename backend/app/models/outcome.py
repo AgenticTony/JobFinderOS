@@ -28,13 +28,16 @@ class OutcomeProposal(Base):
     """One proposed outcome change, awaiting the user's decision."""
 
     __tablename__ = "outcome_proposals"
-    # Re-scan dedupe at the DB level: one proposal per (application,
-    # message). Sweep proposals carry no message id (NULL) and are
+    # Re-scan dedupe at the DB level: ONE proposal per (user, message) —
+    # an email names at most one application, ever (review round 2,
+    # finding 6 replaced the per-application key, which let a later scan
+    # re-file the same message against a second application after the
+    # first closed). Sweep proposals carry no message id (NULL) and are
     # unaffected — multiple NULLs are distinct on both backends.
     __table_args__ = (
         Index(
-            "uq_outcome_proposals_app_message",
-            "application_id",
+            "uq_outcome_proposals_user_message",
+            "user_id",
             "evidence_message_id",
             unique=True,
             sqlite_where=text("evidence_message_id IS NOT NULL"),
