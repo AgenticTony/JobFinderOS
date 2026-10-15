@@ -1,11 +1,84 @@
 # WO-28 — Landing redesign port: bilingual FAQ, demo, comparison, outcome copy
 
 > Priority: P1 · Depends on: i18n ✅ (#120/#121 merged; **deploy still
-> pending — this WO's deploy carries it**) · Status: designed 2026-10-15,
-> not started · Rationale owner: `docs/research/competitor-rea-teardown-
-> 2026-10-11.md` §6 (funnel is the gap) + the 2026-10-13 landing audit
-> (social proof, outcome hero, FAQ, sticky CTA) + the 2026-10-14
-> assessment of the owner's redesign bundle (below).
+> pending — this WO's deploy carries it**) · Status: **code merged
+> 2026-10-15 (PR #123, CI green) — DEPLOY BLOCKED on Cloudflare
+> re-auth; see Deploy record** · Rationale owner:
+> `docs/research/competitor-rea-teardown-2026-10-11.md` §6 (funnel is
+> the gap) + the 2026-10-13 landing audit (social proof, outcome hero,
+> FAQ, sticky CTA) + the 2026-10-14 assessment of the owner's redesign
+> bundle (below).
+
+## Execution record — 2026-10-15 (PR #123)
+
+**Shipped** (16 files, +984/−246): hero "Fewer applications. / The
+right ones." + real upload contract; the interactive hunt demo
+(slider + send-toggle, badged illustrative); the comparison table;
+the six-question FAQ; the honest proof slot; the sticky mobile CTA +
+spacer; the "tomorrow morning" final CTA; and the extraction of every
+landing section into `components/landing/` for WO-29 (all 14 files in
+the i18n scanner's FILES; parity walker covers the new keys including
+the interpolated `reachLine`). Local verification CI-exact: tsc clean,
+node --test 42/42, static build + artifact checks; greps confirmed the
+Forbes stat appears **zero** times in `out/index.html` and `out/sv.html`.
+
+**Claims table — every flagged item resolved:**
+
+| Bundle claim | Resolution | Evidence |
+|---|---|---|
+| "up to 10 MB" | corrected → "up to 5 MB" | `file_service.py:52` `max_size_mb=5` |
+| "stored in the EU (Frankfurt)" | corrected → "stored in the EU" (city-free) | Render Frankfurt + Supabase eu-west-1 (Dublin); repo comments conflate them |
+| Forbes "hiring managers" stat | **removed from the page**; mechanism shipped | body said "two thirds", stat line "65%" — unverified AND contradictory, live in both languages until this PR. See placeholder (b) |
+| "hunts at 06:00 and 18:00" | not ported; badge stays "hunts twice daily" | cron is `0 6,18 * * *` **UTC** — Swedish local differs by season |
+| tailor writes in listing's language | shipped in FAQ | verified `ai_service.py:414` |
+| "tomorrow morning" promise | shipped | conservative-true: worst case is the next morning run |
+| refund-if-hired clause | shipped (FAQ restates published terms) | terms section already published it |
+
+**The two owner-input placeholders, as instructed:**
+
+- **(a) beta quote** — ships as the *ProofSlot* placeholder card
+  (`components/landing/ProofSlot.tsx` + `proof` dict keys): a dashed,
+  clearly-pending card stating what will fill it ("a real result, in a
+  real user's own words · Name · role · city · with permission"). To
+  fill: collect the quote with permission, replace the placeholder
+  strings in `dict.ts` (`proof.placeholderQuote/placeholderAttr`).
+- **(b) Forbes citation** — ships as `VOLUME_STAT_CITATION = null` in
+  `components/landing/VolumeArgument.tsx`. The bilingual claim text is
+  ready in `volume.statClaim`; paste the VERIFIED citation
+  (publication + article + date) into that one constant and the stat
+  line renders in both languages. Until then the numeric claim is off
+  the page — which also removes an unverified claim that had been live
+  in production.
+
+**Operational notes from the session:**
+
+- A concurrent WO-20 session had uncommitted backend + console work in
+  the tree. WO-28 staged explicit paths only; the WO-20 files were
+  never committed, reverted, or shipped. A labelled stash
+  `wo20-inflight-frontend-during-wo28-verify` holds their three
+  frontend files from mid-session — the live session's tree has moved
+  past it; drop it only after confirming their work landed.
+- `npm ci` fails on this lock under both npm 10 and 11 (the known
+  `@emnapi/wasi-threads` validator disagreement) — the deploy used
+  CI's documented method: Node 24 + `npm install --no-audit --no-fund`.
+- Wrangler OAuth had expired (2026-09-14); re-authed via browser
+  login, then the deploy ran from a CLEAN worktree of main
+  (`git worktree add --detach`) so the WO-20 session's uncommitted
+  frontend edits could not leak into the production bundle.
+
+**Deploy record:** PENDING — blocked on Cloudflare auth (the wrangler
+OAuth token expired 2026-09-14; the re-login browser flow timed out
+without a click). Everything else is staged: a clean worktree of
+`c12f316` with dependencies installed waits at `/tmp/jfos-deploy-main`
+(removed on reboot — recreate with `git worktree add --detach
+/tmp/jfos-deploy-main c12f316 && cd frontend && npm install --no-audit
+--no-fund` if gone). To finish: run `npx wrangler login` in a terminal
+and approve, then `bash ops/deploy_frontend.sh` from the worktree (or
+from main once the concurrent WO-20 tree is committed) with
+`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` exported —
+the publishable key can be extracted from the live bundle per the
+WO-07 runbook. Then verify `/` + `/sv` serve the new hero and the
+Forbes stat is gone, and record the checks here.
 
 ## Why
 
