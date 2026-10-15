@@ -198,3 +198,23 @@ first scheduled hunt for a connected user) is the live verification —
 same first-call discipline as `scripts/composio_first_call.py`. All
 failures degrade into `gmail_scan_state.last_error`; they never fail
 the hunt.
+
+**Review round 1 (2026-10-15, PR #127 — merged 71a6c97):** external
+review found 10 defects in the first cut; all fixed with red-first
+tests (19 new). The five that could corrupt outcomes or lose mail:
+the 60d sweep could overwrite an interview (now skips employer
+signals; no_response over a signal is superseded-not-written;
+dismissed sweep proposals never re-file); ATS/aggregator senders
+matched every application and attached first-match-wins (now ambiguous
+= uncertain unless company/title discriminates uniquely; aggregator
+hosts never match); a unique-index collision rolled back the whole
+scan's uncommitted proposals while the cursor advanced (now a
+SAVEPOINT); follow-up rows inflated stats/sweep/nudges (now excluded
+everywhere — a reply updates the parent); time-to-first-response
+measured the latest outcome (now the first: signals never move
+resolved_at forward, min for earlier evidence). Plus: SV template
+actually used (column is `country`, not `country_code`),
+compute_nudges scoped + batched, truncated scans hold the cursor at
+the last processed message (no mail skipped past the 50-cap), arrival
+times normalized to naive UTC, /scan runs off the event loop.
+Suites after: 646 (SQLite) / 658 (Postgres) green.
