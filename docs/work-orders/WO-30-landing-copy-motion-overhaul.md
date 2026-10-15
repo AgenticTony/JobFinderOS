@@ -1,11 +1,32 @@
 # WO-30 — Landing copy & motion overhaul: research-first rewrite
 
 > Priority: P1 · Depends on: WO-28 ✅ (deployed; this WO polishes it) ·
-> Status: designed 2026-10-15 from owner review of the deployed WO-28
-> landing, not started · Rationale owner: this file (owner feedback
-> 2026-10-15, post-deploy review) + `docs/research/competitor-rea-teardown-2026-10-11.md`
-> §6 (funnel) + the 2026-10-13 landing audit finding 2 (hero sells
-> restraint, not outcome).
+> Status: **in progress 2026-10-15** — research gate PASSED (REA copy
+> teardown executed, `docs/research/landing-copy-teardown-2026-10-15.md`),
+> hero + full SV de-jakt DEPLOYED (PR #126); remaining: section-copy
+> pass, motion pass, final claims sweep · Rationale owner: this file
+> (owner feedback 2026-10-15, post-deploy review) +
+> `docs/research/competitor-rea-teardown-2026-10-11.md` §6 (funnel) +
+> the 2026-10-13 landing audit finding 2 (hero sells restraint, not
+> outcome).
+
+## Decision record — hero (the WO's gate, 2026-10-15)
+
+Owner picked from the teardown's four transcreated candidates:
+
+> **EN:** "Job hunting is stressful enough. / Get your evenings back."
+> **SV:** "Jobbsökandet är stressigt nog. / Få tillbaka dina kvällar."
+
+Owner's test (recorded verbatim in spirit): a first-time visitor must
+feel the promise AND understand what the product is — feeling-led beat
+the cleverness-led options. The "void" direction ("Stop sending
+applications into the void") was explicitly rejected: doesn't
+transcreate into Swedish. The SV de-jakt acceptance criterion is MET
+(zero jakt/jagar/jagade in the built /sv page — PR #126). Persona
+heroes (WO-29, now scoped at up to five personas) follow the owner's
+own pattern: *"Being unemployed is stressful enough. Job hunting
+shouldn't have to be."* — pain acknowledged in their words, relief
+promised.
 
 ## Why
 
