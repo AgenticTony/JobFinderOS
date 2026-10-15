@@ -85,13 +85,12 @@ const en = {
   },
   demo: {
     badge: 'Illustrative example',
-    h2: "This morning's hunt",
-    sub: 'Three of this morning\u2019s matches, scored against a sample CV. Drag the slider to raise your minimum score — the hunt only shows you what clears it.',
-    minScoreLabel: 'Your minimum score',
-    // (threshold, kept, total) — interpolated into both languages; the
-    // parity walker calls it with sample args and checks all survive.
-    reachLine: (threshold: number, kept: number, total: number) =>
-      `At score ${threshold}: ${kept} of ${total} matches reach you.`,
+    // Owner feedback 2026-10-15: no slider — the console has no live
+    // feed-filtering, and the landing must not demo interactions the
+    // product lacks. The cards mirror the real MatchCard verdict
+    // columns; the toggle mirrors the real approval gate.
+    h2: 'The verdict, card by card',
+    sub: 'Three sample matches, scored against a sample CV: the skills you have, the gaps the ad asks for, what carries over. Nothing is sent without your approval.',
     showDrafts: 'Show what gets sent',
     hideDrafts: 'Hide what gets sent',
     draftLabel: 'Sample cover-letter opening — nothing is sent without your approval',
@@ -396,11 +395,8 @@ const sv: Dict = {
   },
   demo: {
     badge: 'Illustrativt exempel',
-    h2: 'Dagens morgonjakt',
-    sub: 'Tre av dagens morgonmatcher, poängsatta mot ett exempel-CV. Dra reglaget för att höja din minimipoäng — jakten visar dig bara det som klarar den.',
-    minScoreLabel: 'Din minimipoäng',
-    reachLine: (threshold: number, kept: number, total: number) =>
-      `Vid poäng ${threshold}: ${kept} av ${total} matchningar når dig.`,
+    h2: 'Bedömningen, kort för kort',
+    sub: 'Tre exempel på matchningar mot ett exempel-CV: kompetensen du har, det annonsen kräver som saknas, vad som överförs. Inget skickas utan ditt godkännande.',
     showDrafts: 'Visa vad som skickas',
     hideDrafts: 'Dölj vad som skickas',
     draftLabel: 'Exempel på inledning av personligt brev — inget skickas utan ditt godkännande',
