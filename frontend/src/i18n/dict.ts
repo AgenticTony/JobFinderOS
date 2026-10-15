@@ -21,20 +21,26 @@ const en = {
   },
   nav: {
     sections: 'Landing sections',
+    home: 'JobFinderOS home',
     how: 'How it works',
     sources: 'Sources',
     guard: 'Fact guard',
+    faq: 'FAQ',
     signIn: 'Sign in',
     getStarted: 'Get started',
   },
   hero: {
     badge: 'Sweden + UK · hunts twice daily',
-    h1a: 'The jobs worth applying to,',
-    h1b: 'found for you.',
+    h1a: 'Fewer applications.',
+    h1b: 'The right ones.',
     sub: "Sweden's and the UK's job markets, hunted, cleaned and scored against your CV. You approve everything.",
     cta: 'Upload your CV — free in beta',
     how: 'See how it works',
     proof: 'No card · no credits · nothing sent without you',
+    // Claims audit (WO-28): the backend caps uploads at 5 MB
+    // (file_service.py validate_size) and accepts .pdf/.docx only —
+    // the redesign bundle's "up to 10 MB" was false.
+    formats: 'PDF or Word · up to 5 MB',
     pulseAlt:
       "The hunt pulse: a real run's ads, funnelled from hunted to matched, each scored against your CV",
   },
@@ -69,8 +75,85 @@ const en = {
   },
   volume: {
     h2: 'Volume is not a strategy.',
-    body: 'The mass-apply era made recruiters numb: two thirds of hiring managers say AI-written CVs make your skills harder to verify. More applications, less signal. We send fewer matches, and we tell you when a job is not worth applying for.',
-    stat: '65% of hiring managers say AI-optimized CVs make skills harder to verify. Forbes, March 2026.',
+    // Claims audit (WO-28): the "two thirds of hiring managers" figure
+    // was never verified (and the old copy contradicted itself — the
+    // body said two thirds, the stat line 65%). The numeric claim is
+    // OUT of the body; statClaim renders only when the owner pastes a
+    // checked citation into VolumeArgument's VOLUME_STAT_CITATION.
+    body: 'The mass-apply era made recruiters numb to applications. More applications, less signal. We send fewer matches, and we tell you when a job is not worth applying for.',
+    statClaim: 'Two thirds of hiring managers say AI-optimised CVs make skills harder to verify.',
+  },
+  demo: {
+    badge: 'Illustrative example',
+    h2: "This morning's hunt",
+    sub: 'Three of this morning\u2019s matches, scored against a sample CV. Drag the slider to raise your minimum score — the hunt only shows you what clears it.',
+    minScoreLabel: 'Your minimum score',
+    // (threshold, kept, total) — interpolated into both languages; the
+    // parity walker calls it with sample args and checks all survive.
+    reachLine: (threshold: number, kept: number, total: number) =>
+      `At score ${threshold}: ${kept} of ${total} matches reach you.`,
+    showDrafts: 'Show what gets sent',
+    hideDrafts: 'Hide what gets sent',
+    draftLabel: 'Sample cover-letter opening — nothing is sent without your approval',
+    draftSample:
+      'For eight years I have built and run payment flows that clear four million transactions a day — the same reliability this role asks of its next backend engineer.',
+    scoreWord: 'match score',
+    verdicts: {
+      apply: 'Worth applying',
+      marginal: 'Marginal',
+      skip: 'Skip',
+    },
+    chips: {
+      inCv: 'In your CV',
+      gap: 'Gap',
+      carries: 'Carries over',
+    },
+    cards: [
+      {
+        title: 'Backend Developer · fintech',
+        score: 84,
+        verdict: 'apply' as const,
+        chips: [
+          { kind: 'inCv' as const, text: '5 yrs Python' },
+          { kind: 'inCv' as const, text: 'REST APIs' },
+          { kind: 'gap' as const, text: 'Kubernetes' },
+        ],
+      },
+      {
+        title: 'Data Analyst · retail',
+        score: 71,
+        verdict: 'marginal' as const,
+        chips: [
+          { kind: 'inCv' as const, text: 'SQL' },
+          { kind: 'carries' as const, text: 'Excel → dashboards' },
+          { kind: 'gap' as const, text: 'Swedish B2 not shown' },
+        ],
+      },
+      {
+        title: 'Senior Java Developer · bank',
+        score: 58,
+        verdict: 'skip' as const,
+        chips: [
+          { kind: 'inCv' as const, text: 'OOP depth' },
+          { kind: 'gap' as const, text: '8 yrs Java' },
+          { kind: 'gap' as const, text: 'Banking domain' },
+        ],
+      },
+    ],
+  },
+  comparison: {
+    h2: 'Different by design.',
+    sub: 'The typical auto-apply tool optimises for volume. We optimise for the applications worth sending.',
+    colFeature: 'Feature',
+    colThem: 'Typical auto-apply tool',
+    colUs: 'JobFinderOS',
+    rows: [
+      ['What gets sent', 'Hundreds of applications a day', 'Only jobs you approve'],
+      ['Duplicate listings', 'Same job applied to via 3–9 agencies', 'Reposts merged into the original'],
+      ['Why a job matched', 'A score, or nothing', 'Skills you have, gaps, what carries over'],
+      ['Claims in your CV', 'Rewritten to hit keywords', 'Checked line by line against your real CV'],
+      ['Job sources', 'Often scraped behind logins', 'Official, public feeds only'],
+    ] as [string, string, string][],
   },
   sourcesSec: {
     h2: 'Where we hunt.',
@@ -93,7 +176,10 @@ const en = {
       },
     ],
     privacyA:
-      'Official public data only. No logins, no grey scraping. Your account data and CV file are stored in the EU (Frankfurt); the CV text sent to our AI for matching and tailoring is processed outside the EU.',
+      // Claims audit (WO-28): city dropped — storage is Render Frankfurt
+      // + Supabase eu-west-1 (Dublin); our own comments conflate them,
+      // so the defensible claim is "in the EU", no city.
+      'Official public data only. No logins, no grey scraping. Your account data and CV file are stored in the EU; the CV text sent to our AI for matching and tailoring is processed outside the EU.',
     privacyLink: 'Read the privacy notice',
   },
   guardSec: {
@@ -125,11 +211,53 @@ const en = {
       'Get hired, and we refund the months you have not used.',
     ],
   },
+  proof: {
+    kicker: 'From the beta',
+    placeholderQuote: 'Ask us for one result, in a real user\u2019s own words.',
+    placeholderAttr: 'Name · role · city · with permission',
+    note: 'We will not invent a testimonial. When a beta user gives us a result in their own words — with permission — it goes here, word for word.',
+  },
+  faq: {
+    h2: 'Questions, answered.',
+    items: [
+      {
+        q: 'Does it apply to jobs without asking me?',
+        a: 'No. Nothing is sent until you approve it. The hunt finds and scores jobs; you decide which ones get an application, and you see every draft before it goes anywhere.',
+      },
+      {
+        q: 'Where do the jobs come from?',
+        a: "Official, public sources only: Sweden's national job feed and one of the UK's largest job feeds. No logins, no grey-zone scraping. Agency reposts are merged into the original listing so you see each job once.",
+      },
+      {
+        q: 'Will employers know I used AI?',
+        a: 'Your drafts only contain claims your CV can back up, written for that specific listing. That is the opposite of the generic, keyword-stuffed CVs recruiters have learned to spot.',
+      },
+      {
+        q: 'What happens to my CV and data?',
+        a: 'Your account data and CV file are stored in the EU. The CV text sent to our AI for matching and tailoring is processed outside the EU. The privacy notice lists every processor.',
+      },
+      {
+        q: 'What does it cost?',
+        a: 'Nothing during the beta, and no card is needed. When paid plans arrive there are no credits, no auto-renewing trials, one-click cancellation — and if you get the job, we refund the months you have not used.',
+      },
+      {
+        q: 'Does it work in Swedish and English?',
+        a: 'Yes. The hunt reads listings in both languages and writes your CV and cover letter in the language of each listing.',
+      },
+    ],
+  },
   final: {
     h2a: 'Your next job is',
     h2b: 'already posted.',
-    sub: "Somewhere in tonight's hunt.",
+    // Claims audit (WO-28): "tomorrow morning" is conservative-true —
+    // the hunt runs twice daily; the worst case for a new signup is the
+    // next morning run, and an earlier signup sees matches same evening.
+    sub: "Somewhere in tonight's hunt — see your first matches tomorrow morning.",
     cta: 'Upload your CV',
+  },
+  sticky: {
+    cta: 'Upload your CV — free',
+    note: 'No card · nothing sent without you',
   },
   footer: {
     privacy: 'Privacy notice',
@@ -212,20 +340,23 @@ const sv: Dict = {
   },
   nav: {
     sections: 'Landningssidans sektioner',
+    home: 'JobFinderOS startsida',
     how: 'Så fungerar det',
     sources: 'Källor',
     guard: 'Faktavakten',
+    faq: 'FAQ',
     signIn: 'Logga in',
     getStarted: 'Kom igång',
   },
   hero: {
     badge: 'Sverige + Storbritannien · jakt två gånger om dagen',
-    h1a: 'Jobben värda att söka,',
-    h1b: 'hittade åt dig.',
+    h1a: 'Färre ansökningar.',
+    h1b: 'De rätta.',
     sub: 'Sveriges och Storbritanniens jobbmarknader — jagade, rensade och poängsatta mot ditt CV. Du godkänner allt.',
     cta: 'Ladda upp ditt CV — gratis i beta',
     how: 'Se hur det fungerar',
     proof: 'Inget kort · inga krediter · inget skickas utan dig',
+    formats: 'PDF eller Word · max 5 MB',
     pulseAlt:
       'Jaktpulsen: annonser från en riktig körning, från jagade till matchade, varje annons poängsatt mot ditt CV',
   },
@@ -260,8 +391,78 @@ const sv: Dict = {
   },
   volume: {
     h2: 'Volym är ingen strategi.',
-    body: 'Era av massansökningar gjorde rekryterare immuna: två tredjedelar av rekryterande chefer säger att AI-skrivna CV:n gör dina kompetenser svårare att verifiera. Fler ansökningar, mindre signal. Vi skickar färre matchningar — och säger till när ett jobb inte är värt att söka.',
-    stat: '65 % av rekryterande chefer säger att AI-optimerade CV:n gör kompetenser svårare att verifiera. Forbes, mars 2026.',
+    body: 'Era av massansökningar gjorde rekryterare immuna mot ansökningar. Fler ansökningar, mindre signal. Vi skickar färre matchningar — och säger till när ett jobb inte är värt att söka.',
+    statClaim: 'Två tredjedelar av rekryterande chefer säger att AI-optimerade CV:n gör kompetenser svårare att verifiera.',
+  },
+  demo: {
+    badge: 'Illustrativt exempel',
+    h2: 'Dagens morgonjakt',
+    sub: 'Tre av dagens morgonmatcher, poängsatta mot ett exempel-CV. Dra reglaget för att höja din minimipoäng — jakten visar dig bara det som klarar den.',
+    minScoreLabel: 'Din minimipoäng',
+    reachLine: (threshold: number, kept: number, total: number) =>
+      `Vid poäng ${threshold}: ${kept} av ${total} matchningar når dig.`,
+    showDrafts: 'Visa vad som skickas',
+    hideDrafts: 'Dölj vad som skickas',
+    draftLabel: 'Exempel på inledning av personligt brev — inget skickas utan ditt godkännande',
+    draftSample:
+      'I åtta år har jag byggt och drivit betalflöden som klarar fyra miljoner transaktioner om dagen — samma driftsäkerhet som den här rollen kräver av sin nästa backendutvecklare.',
+    scoreWord: 'matchpoäng',
+    verdicts: {
+      apply: 'Värd att söka',
+      marginal: 'Gränsfall',
+      skip: 'Hoppa över',
+    },
+    chips: {
+      inCv: 'I ditt CV',
+      gap: 'Saknas',
+      carries: 'Överförs',
+    },
+    cards: [
+      {
+        title: 'Backendutvecklare · fintech',
+        score: 84,
+        verdict: 'apply',
+        chips: [
+          { kind: 'inCv', text: '5 års Python' },
+          { kind: 'inCv', text: 'REST-API:er' },
+          { kind: 'gap', text: 'Kubernetes' },
+        ],
+      },
+      {
+        title: 'Dataanalytiker · detaljhandel',
+        score: 71,
+        verdict: 'marginal',
+        chips: [
+          { kind: 'inCv', text: 'SQL' },
+          { kind: 'carries', text: 'Excel → dashboards' },
+          { kind: 'gap', text: 'Svenska B2 visas ej' },
+        ],
+      },
+      {
+        title: 'Senior Java-utvecklare · bank',
+        score: 58,
+        verdict: 'skip',
+        chips: [
+          { kind: 'inCv', text: 'OOP-djup' },
+          { kind: 'gap', text: '8 års Java' },
+          { kind: 'gap', text: 'Bankdomän' },
+        ],
+      },
+    ],
+  },
+  comparison: {
+    h2: 'Medvetet annorlunda.',
+    sub: 'Det typiska autoapply-verktyget optimerar för volym. Vi optimerar för ansökningar värda att skicka.',
+    colFeature: 'Funktion',
+    colThem: 'Typiskt autoapply-verktyg',
+    colUs: 'JobFinderOS',
+    rows: [
+      ['Vad som skickas', 'Hundratals ansökningar om dagen', 'Bara jobb du godkänner'],
+      ['Dubbletannonser', 'Samma jobb sökt via 3–9 bemanningsföretag', 'Korspostningar slås samman med originalet'],
+      ['Varför ett jobb matchade', 'En poäng — eller inget', 'Kompetens du har, luckor, vad som överförs'],
+      ['Påståenden i ditt CV', 'Omskrivna för att träffa nyckelord', 'Kontrollerade rad för rad mot ditt riktiga CV'],
+      ['Jobbkällor', 'Ofta skrapade bakom inloggningar', 'Endast officiella, offentliga flöden'],
+    ] as [string, string, string][],
   },
   sourcesSec: {
     h2: 'Var vi jagar.',
@@ -284,7 +485,7 @@ const sv: Dict = {
       },
     ],
     privacyA:
-      'Endast officiell, offentlig data. Inga inloggningar, ingen grå zon-skrapning. Din kontodata och din CV-fil lagras i EU (Frankfurt); CV-texten som skickas till vår AI för matchning och anpassning behandlas utanför EU.',
+      'Endast officiell, offentlig data. Inga inloggningar, ingen grå zon-skrapning. Din kontodata och din CV-fil lagras i EU; CV-texten som skickas till vår AI för matchning och anpassning behandlas utanför EU.',
     privacyLink: 'Läs integritetsmeddelandet',
   },
   guardSec: {
@@ -317,11 +518,50 @@ const sv: Dict = {
       'Får du jobbet återbetalar vi månaderna du inte har använt.',
     ],
   },
+  proof: {
+    kicker: 'Från betan',
+    placeholderQuote: 'Be oss om ett resultat, i en riktig användares egna ord.',
+    placeholderAttr: 'Namn · roll · stad · med tillstånd',
+    note: 'Vi hittar inte på ett omdöme. När en betaanvändare ger oss ett resultat med egna ord — med tillstånd — hamnar det här, ord för ord.',
+  },
+  faq: {
+    h2: 'Frågor, besvarade.',
+    items: [
+      {
+        q: 'Söker den jobb utan att fråga mig?',
+        a: 'Nej. Inget skickas förrän du godkänner det. Jakten hittar och poängsätter jobb; du avgör vilka som får en ansökan — och du ser varje utkast innan det lämnar huset.',
+      },
+      {
+        q: 'Var kommer jobben ifrån?',
+        a: 'Endast officiella, offentliga källor: Sveriges nationella jobbflöde och ett av Storbritanniens största. Inga inloggningar, ingen skrapning i gråzonen. Bemanningsföretagens korspostningar slås samman med originalannonsen så att du ser varje jobb en gång.',
+      },
+      {
+        q: 'Märker arbetsgivare att jag använt AI?',
+        a: 'Dina utkast innehåller bara påståenden ditt CV kan belägga, skrivna för just den annonsen. Det är motsatsen till de generiska, nyckelordsstoppade CV:n rekryterare har lärt sig känna igen.',
+      },
+      {
+        q: 'Vad händer med mitt CV och min data?',
+        a: 'Din kontodata och din CV-fil lagras i EU. CV-texten som skickas till vår AI för matchning och anpassning behandlas utanför EU. Integritetsmeddelandet listar alla behandlare.',
+      },
+      {
+        q: 'Vad kostar det?',
+        a: 'Inget under betan, och inget kort behövs. När betalda planer kommer: inga krediter, inga automatiskt förnyade provperioder, uppsägning med ett klick — och får du jobbet återbetalar vi månaderna du inte har använt.',
+      },
+      {
+        q: 'Fungerar det på svenska och engelska?',
+        a: 'Ja. Jakten läser annonser på båda språken och skriver ditt CV och personliga brev på annonsens språk.',
+      },
+    ],
+  },
   final: {
     h2a: 'Ditt nästa jobb är',
     h2b: 'redan utlagt.',
-    sub: 'Någonstans i kvällens jakt.',
+    sub: 'Någonstans i kvällens jakt — se dina första matchningar imorgon bitti.',
     cta: 'Ladda upp ditt CV',
+  },
+  sticky: {
+    cta: 'Ladda upp ditt CV — gratis',
+    note: 'Inget kort · inget skickas utan dig',
   },
   footer: {
     privacy: 'Integritetsmeddelande',

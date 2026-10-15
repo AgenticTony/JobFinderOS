@@ -6,21 +6,39 @@
 // duplicated. Links stay inside the visitor's language scope where a
 // translated page exists (/sv/login, /sv/privacy); /app has no /sv
 // route — the console reads the saved language (i18n/locale.ts).
+//
+// WO-28: the sections below Act I live in components/landing/ so WO-29's
+// persona pages compose the same pieces instead of copying them. The
+// landing owns the page order and the acts; the components own their
+// slice of the dictionary.
 
 import { useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowDown, Radar, ShieldCheck } from 'lucide-react';
-import GuardReceipt from '@/components/landing/GuardReceipt';
+import { ArrowDown, Radar } from 'lucide-react';
+import ComparisonTable from '@/components/landing/ComparisonTable';
+import Faq from '@/components/landing/Faq';
+import FinalCta from '@/components/landing/FinalCta';
+import GuardSection from '@/components/landing/GuardSection';
+import HuntDemo from '@/components/landing/HuntDemo';
+import ProofSlot from '@/components/landing/ProofSlot';
 import RadarScope from '@/components/landing/RadarScope';
-import Reveal from '@/components/landing/Reveal';
+import SourcesGallery from '@/components/landing/SourcesGallery';
+import StatsBand from '@/components/landing/StatsBand';
+import Steps from '@/components/landing/Steps';
+import StickyCta from '@/components/landing/StickyCta';
+import TermsSection from '@/components/landing/TermsSection';
+import VerdictWide from '@/components/landing/VerdictWide';
+import VolumeArgument from '@/components/landing/VolumeArgument';
 import { dicts, type Locale } from '@/i18n/dict';
 import { shouldRedirectToSv, switchLocale } from '@/i18n/locale';
 
 // The landing as three cinematic acts on one material — the console's ink.
 //   I. The statement, and the hunt as a giant cropped scope.
-//  II. The product, held still: the real hunt pulse beside the pipeline,
-//      the real verdict wide, then the sources gallery.
-// III. The fact guard receipt, the terms, and one way in.
+//  II. The product, held still: the pipeline and the verdict, then the
+//      demo that makes the verdict interactive, the anti-volume argument,
+//      the comparison, and the sources gallery.
+// III. The fact guard receipt, the honest proof slot, the terms, the
+//      FAQ, and one way in.
 // Amber appears only on ink. Display type is weight 600, tracking
 // tightens as it grows. Motion is critically damped and dies under
 // prefers-reduced-motion.
@@ -48,7 +66,7 @@ export default function LandingView({ locale }: { locale: Locale }) {
       {/* Frosted chrome: content scrolls under it, edge fades instead of a rule. */}
       <header className="fixed inset-x-0 top-0 z-50 bg-ink/55 backdrop-blur-xl backdrop-saturate-150">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-2.5" aria-label="JobFinderOS home">
+          <Link href="/" className="flex items-center gap-2.5" aria-label={t.nav.home}>
             <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-signal/30 bg-signal/10">
               <Radar className="h-3.5 w-3.5 text-signal" aria-hidden />
             </span>
@@ -57,7 +75,7 @@ export default function LandingView({ locale }: { locale: Locale }) {
             </span>
           </Link>
           <nav
-            className="hidden items-center gap-7 text-sm text-paper/60 sm:flex"
+            className="hidden items-center gap-7 text-sm text-paper/60 lg:flex"
             aria-label={t.nav.sections}
           >
             <a href="#how" className="transition hover:text-paper">
@@ -68,6 +86,9 @@ export default function LandingView({ locale }: { locale: Locale }) {
             </a>
             <a href="#guard" className="transition hover:text-paper">
               {t.nav.guard}
+            </a>
+            <a href="#faq" className="transition hover:text-paper">
+              {t.nav.faq}
             </a>
           </nav>
           <div className="flex items-center gap-4">
@@ -124,7 +145,7 @@ export default function LandingView({ locale }: { locale: Locale }) {
             <h1 className="landing-rise landing-rise-1 mt-6 font-display text-[clamp(2.6rem,6vw,4.5rem)] font-semibold leading-[1.04] tracking-[-0.025em] text-paper">
               {t.hero.h1a}
               <br />
-              <em className="italic">{t.hero.h1b}</em>
+              <em className="italic text-signal">{t.hero.h1b}</em>
             </h1>
             <p className="landing-rise landing-rise-2 mx-auto mt-6 max-w-lg text-lg leading-relaxed text-paper/60">
               {t.hero.sub}
@@ -148,9 +169,13 @@ export default function LandingView({ locale }: { locale: Locale }) {
               </a>
             </div>
             {/* Proof beside the CTA — the category pattern, with only
-                claims we can stand behind. */}
+                claims we can stand behind. The formats line states the
+                real upload contract (5 MB, PDF/Word — file_service.py). */}
             <p className="landing-rise landing-rise-3 num mt-6 text-[11px] uppercase tracking-[0.16em] text-paper/50">
               {t.hero.proof}
+            </p>
+            <p className="landing-rise landing-rise-3 num mt-2 text-[11px] uppercase tracking-[0.16em] text-paper/40">
+              {t.hero.formats}
             </p>
           </div>
 
@@ -182,241 +207,38 @@ export default function LandingView({ locale }: { locale: Locale }) {
           id="how"
           className="relative z-10 -mt-8 scroll-mt-24 rounded-t-[2.5rem] border-t border-line bg-surface shadow-[0_-24px_60px_-24px_rgba(0,0,0,0.6)]"
         >
-          {/* The numbers, up front — the category's stats band, with
-              only counts we can defend. */}
-          <div className="border-b border-line">
-            <div className="mx-auto grid max-w-6xl grid-cols-2 gap-x-6 gap-y-10 px-6 pb-14 pt-20 sm:grid-cols-4 sm:pt-24">
-              {t.stats.map(([value, label]) => (
-                <Reveal key={label}>
-                  <p className="num font-display text-4xl font-semibold tracking-tight text-paper sm:text-[2.75rem]">
-                    {value}
-                  </p>
-                  <p className="num mt-2 text-[10px] uppercase tracking-[0.16em] text-paper/45">
-                    {label}
-                  </p>
-                </Reveal>
-              ))}
-            </div>
-          </div>
-
-          <div className="mx-auto max-w-6xl px-6 pb-28 pt-16 sm:pt-20">
-            <div className="grid gap-16 lg:grid-cols-[0.9fr_1.1fr] lg:gap-20">
-              <div className="lg:sticky lg:top-28 lg:self-start">
-                <Reveal>
-                  <figure className="overflow-hidden rounded-2xl border border-line shadow-[0_24px_60px_-24px_rgba(0,0,0,0.7)]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src="/screenshots/hunt-pulse.png"
-                      alt={t.hero.pulseAlt}
-                      className="block w-full"
-                      width={786}
-                      height={1226}
-                    />
-                  </figure>
-                  <p className="num mt-3 text-[10px] uppercase tracking-[0.16em] text-paper/50">
-                    {t.verdict.pulseCaption}
-                  </p>
-                </Reveal>
-              </div>
-
-              <div>
-                <Reveal>
-                  <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
-                    {t.verdict.h2a}
-                    <br />
-                    {t.verdict.h2b}
-                  </h2>
-                </Reveal>
-                <ol className="mt-12">
-                  {t.steps.map((step, i) => (
-                    <Reveal key={step.title} delay={i * 90}>
-                      <li className="grid gap-2.5 border-t border-line py-7 sm:grid-cols-[4.5rem_1fr] sm:gap-8">
-                        <p className="num pt-1.5 text-sm text-paper/35">
-                          {String(i + 1).padStart(2, '0')}
-                        </p>
-                        <div>
-                          <h3 className="font-display text-xl font-semibold tracking-tight text-paper">
-                            {step.title}
-                          </h3>
-                          <p className="mt-2 max-w-md leading-relaxed text-paper/70">
-                            {step.body}
-                          </p>
-                        </div>
-                      </li>
-                    </Reveal>
-                  ))}
-                </ol>
-              </div>
-            </div>
-          </div>
-
-          {/* The verdict, wide: what you have, what's missing, what transfers. */}
+          <StatsBand t={t} />
+          <Steps t={t} />
+          <VerdictWide t={t} />
           <div className="border-t border-line">
-            <div className="mx-auto max-w-6xl px-6 py-24 sm:py-28">
-              <Reveal>
-                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
-                  {t.verdict.h2}
-                </h2>
-                <p className="mt-5 max-w-2xl text-lg leading-relaxed text-paper/70">
-                  {t.verdict.body}
-                </p>
-              </Reveal>
-              <Reveal delay={120}>
-                <figure className="mt-12 overflow-hidden rounded-2xl border border-line shadow-[0_24px_60px_-24px_rgba(0,0,0,0.7)]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/screenshots/match-detail.png"
-                    alt={t.verdict.alt}
-                    className="block w-full"
-                    width={776}
-                    height={402}
-                  />
-                </figure>
-                <p className="num mt-4 text-[10px] uppercase tracking-[0.16em] text-paper/40">
-                  {t.verdict.caption}
-                </p>
-              </Reveal>
-            </div>
+            <HuntDemo t={t} />
           </div>
-
-          {/* The anti-volume argument: the market data, inverted. */}
           <div className="border-t border-line">
-            <div className="mx-auto max-w-6xl px-6 py-24 sm:py-28">
-              <Reveal>
-                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
-                  {t.volume.h2}
-                </h2>
-                <p className="mt-5 max-w-2xl text-lg leading-relaxed text-paper/70">
-                  {t.volume.body}
-                </p>
-                <p className="num mt-8 text-xs uppercase tracking-[0.14em] text-paper/45">
-                  {t.volume.stat}
-                </p>
-              </Reveal>
-            </div>
+            <VolumeArgument t={t} />
           </div>
-
-          {/* Sources: momentum gallery, snap-aligned. Named sites stay out
-              of the copy; the framing is coverage and precision instead. */}
-          <div id="sources" className="scroll-mt-24 border-t border-line bg-surface-2/50">
-            <div className="mx-auto max-w-6xl px-6 py-24">
-              <Reveal>
-                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
-                  {t.sourcesSec.h2}
-                </h2>
-              </Reveal>
-              <Reveal delay={90}>
-                <div
-                  role="region"
-                  aria-label={t.sourcesSec.ariaLabel}
-                  tabIndex={0}
-                  className="no-scrollbar -mx-6 mt-10 flex snap-x snap-mandatory gap-5 overflow-x-auto px-6 pb-2"
-                >
-                  {t.sourcesSec.cards.map((s) => (
-                    <div
-                      key={s.title}
-                      className="min-w-[85%] snap-start rounded-2xl border border-line bg-surface p-8 sm:min-w-[340px]"
-                    >
-                      <p className="num text-[10px] uppercase tracking-[0.16em] text-paper/45">
-                        {s.tag}
-                      </p>
-                      <h3 className="mt-4 font-display text-2xl font-semibold tracking-tight text-paper">
-                        {s.title}
-                      </h3>
-                      <p className="mt-3 text-sm leading-relaxed text-paper/60">{s.body}</p>
-                    </div>
-                  ))}
-                </div>
-              </Reveal>
-              <Reveal delay={150}>
-                {/* OPS-6: the old line here claimed "Your data stays in the
-                    EU" — false, and exactly what the privacy work corrects:
-                    stored account data is EU-hosted (Supabase eu-west-1,
-                    Render Frankfurt), but CV text is sent to Z.ai outside
-                    the EU on every match/tailor/judge call. This line now
-                    says only what is true, and links the full notice. */}
-                <p className="mt-10 text-sm leading-relaxed text-paper/50">
-                  {t.sourcesSec.privacyA}{' '}
-                  <Link
-                    href={privacyPath}
-                    className="font-medium text-paper/80 underline underline-offset-4 transition hover:text-paper"
-                  >
-                    {t.sourcesSec.privacyLink}
-                  </Link>
-                  .
-                </p>
-              </Reveal>
-            </div>
+          <div className="border-t border-line">
+            <ComparisonTable t={t} />
+          </div>
+          <div id="sources" className="scroll-mt-24">
+            <SourcesGallery t={t} privacyPath={privacyPath} />
           </div>
         </section>
 
-        {/* ── ACT III · ink close: the guard, and one way in ──────── */}
+        {/* ── ACT III · ink close: the guard, the proof, one way in ── */}
         <section
           id="guard"
           className="relative z-10 -mt-8 scroll-mt-24 rounded-t-[2.5rem] border-t border-line bg-ink shadow-[0_-24px_60px_-24px_rgba(0,0,0,0.6)]"
         >
-          <div className="mx-auto max-w-6xl px-6 py-28">
-            <div className="grid items-center gap-14 lg:grid-cols-2 lg:gap-20">
-              <Reveal>
-                <ShieldCheck className="h-8 w-8 text-ok" aria-hidden />
-                <h2 className="mt-6 font-display text-[clamp(2.25rem,4.5vw,3.5rem)] font-semibold leading-[1.06] tracking-[-0.02em] text-paper">
-                  {t.guardSec.h2a}
-                  <br />
-                  {t.guardSec.h2b}
-                </h2>
-                <p className="mt-5 max-w-md text-lg leading-relaxed text-paper/60">
-                  {t.guardSec.body}
-                </p>
-              </Reveal>
-              <Reveal delay={120}>
-                <GuardReceipt strings={t.guardSec.receipt} />
-              </Reveal>
-            </div>
-          </div>
-
-          {/* Billing complaints, inverted into terms. In beta there is no
-              billing at all; the status line keeps that honest. */}
+          <GuardSection t={t} />
           <div className="border-t border-line">
-            <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 lg:grid-cols-2 lg:gap-20">
-              <Reveal>
-                <h2 className="font-display text-[clamp(2rem,4vw,3rem)] font-semibold leading-[1.08] tracking-[-0.02em] text-paper">
-                  {t.terms.h2a}
-                  <br />
-                  {t.terms.h2b}
-                </h2>
-                <p className="num mt-6 max-w-xs text-xs uppercase leading-relaxed tracking-[0.14em] text-paper/45">
-                  {t.terms.note}
-                </p>
-              </Reveal>
-              <Reveal delay={120}>
-                <ul className="divide-y divide-line text-[17px] leading-relaxed text-paper/80">
-                  {t.terms.items.map((item) => (
-                    <li key={item} className="py-4">
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </Reveal>
-            </div>
+            <ProofSlot t={t} />
           </div>
-
+          <TermsSection t={t} />
           <div className="border-t border-line">
-            <div className="mx-auto max-w-6xl px-6 py-28 text-center">
-              <Reveal>
-                <h2 className="font-display text-[clamp(2.5rem,5.5vw,4.5rem)] font-semibold leading-[1.05] tracking-[-0.022em] text-paper">
-                  {t.final.h2a}
-                  <br />
-                  {t.final.h2b}
-                </h2>
-                <p className="mx-auto mt-5 text-lg text-paper/55">{t.final.sub}</p>
-                <Link
-                  href="/app"
-                  className="mt-10 inline-block rounded-full bg-signal px-8 py-3.5 text-[15px] font-semibold text-ink transition hover:bg-signal/90 active:scale-[0.97]"
-                >
-                  {t.final.cta}
-                </Link>
-              </Reveal>
-            </div>
+            <Faq t={t} />
+          </div>
+          <div className="border-t border-line">
+            <FinalCta t={t} />
           </div>
         </section>
       </main>
@@ -427,9 +249,6 @@ export default function LandingView({ locale }: { locale: Locale }) {
             JobFinderOS
           </p>
           <div className="num flex items-center gap-5 text-[10px] uppercase tracking-[0.16em] text-paper/40">
-            {/* OPS-6: footer privacy link replaces the old imprecise "EU
-                hosted" tagline (stored data is EU-hosted, but CV text
-                reaches Z.ai outside the EU — the /privacy notice says both). */}
             <Link
               href={privacyPath}
               className="transition hover:text-paper/70"
@@ -451,6 +270,11 @@ export default function LandingView({ locale }: { locale: Locale }) {
           </p>
         </div>
       </footer>
+
+      {/* Sticky mobile CTA + the spacer that keeps it off the footer's
+          last row (bar height ≈ 56px; spacer on phones only). */}
+      <div className="h-14 sm:hidden" aria-hidden />
+      <StickyCta t={t} />
     </div>
   );
 }
