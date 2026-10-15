@@ -2,7 +2,9 @@
 
 > Priority: P1 · Depends on: none hard (reply detection rides the
 > Composio Gmail connection, proven in production 2026-08-31) ·
-> Status: designed, not started
+> Status: designed, not started · **first among P1s** (2026-10-15
+> re-prioritization: no competitor shows outcomes — volume metrics only;
+> outcome honesty is uncontested white space — teardown §7)
 > Origin: ROADMAP owns the WHY ("Launch weapon — outcome tracking";
 > the one proof point no competitor has). This WO owns the HOW.
 > Execution patterns adapted 2026-09-08 from `MadsLorentzen/

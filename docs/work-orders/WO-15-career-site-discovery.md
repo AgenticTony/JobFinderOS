@@ -1,6 +1,10 @@
 # WO-15 — Career-site discovery (self-expanding direct-from-employer source)
 
 > Priority: P2 · **Depends on: WO-06** (country routing) · Status: designed, not started
+> Competitive evidence 2026-10-11: JobRight's headline inventory claim is
+> direct-from-employer crawling ("200K company career sites, updated
+> hourly") — employer-direct is a *marketing* claim here, not just an
+> inventory hedge (`docs/research/competitor-rea-teardown-2026-10-11.md` §4).
 > Origin: the WO-08 Teamtailor deletion review. The deleted scraper's
 > slug design was blind to custom domains; this replaces it with a
 > mechanism that discovers employer career boards from data we already
