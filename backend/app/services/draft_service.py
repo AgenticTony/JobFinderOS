@@ -827,7 +827,12 @@ def submit_draft(
         )
 
     applicant = profile.full_name if profile else None
-    subject = f"Application: {job.title}" + (f" — {applicant}" if applicant else "")
+    # WO-20: a follow-up draft is honest about being one — the subject
+    # is the first thing an employer reads.
+    if getattr(draft, "follow_up_application_id", None):
+        subject = f"Following up: {job.title}" + (f" — {applicant}" if applicant else "")
+    else:
+        subject = f"Application: {job.title}" + (f" — {applicant}" if applicant else "")
 
     # One application row per draft (unique index). A FAILED application
     # leaves the draft 'ready'; resubmitting REUSES that row — a fresh
@@ -845,8 +850,16 @@ def submit_draft(
             job_id=job.id,
             match_id=draft.match_id,
             draft_id=draft.id,
+            # WO-20: chain the follow-up back to the application it pings
+            follow_up_of_id=getattr(draft, "follow_up_application_id", None),
         )
         db.add(application)
+    # A reused (failed-then-fixed) row keeps its original chain; a fresh
+    # follow-up draft linking this row is the normal case above.
+    application.follow_up_of_id = (
+        application.follow_up_of_id
+        or getattr(draft, "follow_up_application_id", None)
+    )
     application.method = method
     application.status = "queued"
     application.error = None

@@ -36,6 +36,10 @@ USER_TABLES = [
     "applications",
     "feedback",
     "ai_usage",
+    # WO-20 outcome layer — user-owned rows (proposals cite the user's
+    # own inbox; scan state is per-user). Same own_rows policy shape.
+    "outcome_proposals",
+    "gmail_scan_state",
 ]
 ALL_RLS_TABLES = USER_TABLES + ["users"]
 
@@ -70,6 +74,27 @@ def rls_layer_complete(connection) -> bool:
     return all(relayed for _name, relayed, _p in rows) and all(
         p == 1 for name, _r, p in rows if name in ALL_RLS_TABLES
     )
+
+
+def _existing_tables(connection) -> set:
+    """Tables that actually exist in public right now.
+
+    The static lists above describe the FINAL schema, but this layer is
+    replayed from migrations mid-chain on fresh databases (and by
+    remove_rls in downgrades): at 2026-09-08's point in the chain the
+    WO-20 tables do not exist yet, and a GRANT naming them aborts the
+    whole replay (found by the Postgres CI leg 2026-10-15 — SQLite
+    never replays, which is why the suite was green). Per-table
+    operations are intersected with this set; the ALL TABLES / DEFAULT
+    PRIVILEGES statements above are existence-agnostic and stay as-is.
+    Per-boot convergence (init_db) re-applies the layer once every
+    table exists, so nothing is left permanently uncovered."""
+    rows = connection.exec_driver_sql(
+        "SELECT c.relname FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind = 'r'"
+    ).fetchall()
+    return {r[0] for r in rows}
 
 
 def ensure_rls(connection) -> None:
@@ -112,14 +137,20 @@ def ensure_rls(connection) -> None:
     )
 
     # --- Grants: authenticated may read the shared pool, write its own ---
+    # Only tables that exist at this point in the chain (see
+    # _existing_tables); the ALL TABLES / default-privilege grants below
+    # pick up everything created later.
+    existing = _existing_tables(connection)
+    grantable = [t for t in ALL_RLS_TABLES if t in existing]
     run("GRANT USAGE ON SCHEMA public TO authenticated")
     run("GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated")
     run("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated")
-    run(
-        "GRANT INSERT, UPDATE, DELETE ON "
-        + ", ".join(ALL_RLS_TABLES)
-        + " TO authenticated"
-    )
+    if grantable:
+        run(
+            "GRANT INSERT, UPDATE, DELETE ON "
+            + ", ".join(grantable)
+            + " TO authenticated"
+        )
     # The ONE shared-pool write a route makes: manual job create
     # (POST /jobs — rate-limited, validated). INSERT only; every other
     # job_postings mutation is worker/pipeline work on the service
@@ -190,7 +221,7 @@ def ensure_rls(connection) -> None:
     # other roles instead of running the predicate; (select auth.uid())
     # wraps the call in an initPlan the optimizer caches per statement —
     # the point on match_results/ai_usage row counts.
-    for table in ALL_RLS_TABLES:
+    for table in [t for t in ALL_RLS_TABLES if t in existing]:
         key = "id" if table == "users" else "user_id"
         run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         run(f"DROP POLICY IF EXISTS own_rows ON {table}")
@@ -204,7 +235,7 @@ def ensure_rls(connection) -> None:
     # Shared-read tables: readable by authenticated (the request surface
     # reads the pool and scrape bookkeeping), insertable only where a
     # route does it (manual job create). No UPDATE/DELETE, ever.
-    for table in SHARED_READ_TABLES:
+    for table in [t for t in SHARED_READ_TABLES if t in existing]:
         run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         run(f"DROP POLICY IF EXISTS shared_read ON {table}")
         run(
@@ -212,15 +243,16 @@ def ensure_rls(connection) -> None:
             f" FOR SELECT TO authenticated USING (true)"
         )
     run("DROP POLICY IF EXISTS manual_create ON job_postings")
-    run(
-        "CREATE POLICY manual_create ON job_postings"
-        " FOR INSERT TO authenticated WITH CHECK (true)"
-    )
+    if "job_postings" in existing:
+        run(
+            "CREATE POLICY manual_create ON job_postings"
+            " FOR INSERT TO authenticated WITH CHECK (true)"
+        )
 
     # Locked service tables: RLS with NO policy — deny-all for
     # anon/authenticated through the Data API; the owner (worker,
     # pipeline, alembic) bypasses RLS and is unaffected.
-    for table in LOCKED_SERVICE_TABLES:
+    for table in [t for t in LOCKED_SERVICE_TABLES if t in existing]:
         run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
 
 
@@ -231,12 +263,13 @@ def remove_rls(connection) -> None:
     cascade-revoke more than this layer owns. No-op off Postgres."""
     if connection.dialect.name != "postgresql":
         return
-    for table in ALL_RLS_TABLES:
+    existing = _existing_tables(connection)
+    for table in [t for t in ALL_RLS_TABLES if t in existing]:
         connection.exec_driver_sql(f"DROP POLICY IF EXISTS own_rows ON {table}")
         connection.exec_driver_sql(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
-    for table in SHARED_READ_TABLES:
+    for table in [t for t in SHARED_READ_TABLES if t in existing]:
         connection.exec_driver_sql(f"DROP POLICY IF EXISTS shared_read ON {table}")
         connection.exec_driver_sql(f"DROP POLICY IF EXISTS manual_create ON {table}")
         connection.exec_driver_sql(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
-    for table in LOCKED_SERVICE_TABLES:
+    for table in [t for t in LOCKED_SERVICE_TABLES if t in existing]:
         connection.exec_driver_sql(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")

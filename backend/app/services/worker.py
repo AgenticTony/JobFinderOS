@@ -216,6 +216,17 @@ def run_scheduled_hunt() -> dict:
                     if s["status"] == "failed":
                         summary["errors"] += 1
             _maintenance_sweeps(db)
+            # WO-20: outcome maintenance rides the daily cycle — the
+            # quiet sweep for every user with sent applications, inbox
+            # scan for Gmail-connected users. Best-effort by design:
+            # per-user failures land in gmail_scan_state.last_error and
+            # must never fail the hunt itself.
+            try:
+                from app.services.gmail_scan import run_outcome_maintenance
+
+                logger.info("Outcome maintenance: %s", run_outcome_maintenance(db))
+            except Exception as e:  # noqa: BLE001 — outcomes never break the hunt
+                logger.error("Outcome maintenance failed: %s", e)
             user_ids = [
                 row[0]
                 for row in db.query(Profile.user_id)

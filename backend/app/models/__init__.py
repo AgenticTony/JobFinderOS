@@ -6,6 +6,7 @@ from app.models.draft import ApplicationDraft
 from app.models.feedback import Feedback  # noqa: F401 — registered on Base
 from app.models.job import JobPosting
 from app.models.match import MatchResult
+from app.models.outcome import GmailScanState, OutcomeProposal
 from app.models.profile import Profile
 from app.models.scrape_run import ScrapeRun
 from app.models.scrape_watermark import ScrapeWatermark  # noqa: F401
@@ -19,6 +20,8 @@ __all__ = [
     "MatchResult",
     "ApplicationDraft",
     "Application",
+    "GmailScanState",
+    "OutcomeProposal",
     "ScrapeRun",
     "User",
 ]

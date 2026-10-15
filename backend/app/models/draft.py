@@ -73,6 +73,21 @@ class ApplicationDraft(Base):
     fabrication_attested = Column(Text, nullable=True)  # JSON list
     fabrication_resolved_at = Column(DateTime, nullable=True)
 
+    # WO-20: set when this draft is a FOLLOW-UP to an already-sent
+    # application (seeded from that application's package; submit links
+    # the resulting application row back via follow_up_of_id). NULL on
+    # every first-contact draft — the distinction the nudge logic reads.
+    # use_alter: this FK completes a cycle with applications.draft_id —
+    # without it, Base.metadata.create_all under Postgres fails the
+    # topological sort (CircularDependencyError; the conftest-documented
+    # failure class). SQLite tolerates the cycle, which is why the suite
+    # was green before the Postgres leg ran.
+    follow_up_application_id = Column(
+        Integer,
+        ForeignKey("applications.id", use_alter=True, name="fk_drafts_follow_up_application"),
+        nullable=True,
+    )
+
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 

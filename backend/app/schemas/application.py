@@ -10,6 +10,14 @@ class DraftSubmitRequest(BaseModel):
     method: str = "email"  # email | browser | manual
 
 
+class OutcomeUpdateRequest(BaseModel):
+    """WO-20 manual outcome marker — the user's own word about what the
+    employer did. Manual outcomes outrank detected ones (never overwritten
+    by an approved proposal)."""
+    outcome_status: str  # outcome_service.OUTCOME_STATUSES
+    note: Optional[str] = None
+
+
 class DraftUpdateRequest(BaseModel):
     cover_letter: Optional[str] = None
     tailored_cv: Optional[str] = None
@@ -95,6 +103,13 @@ class ApplicationResponse(BaseModel):
     apply_url: Optional[str] = None
     sent_at: Optional[datetime] = None
     error: Optional[str] = None
+    # WO-20 outcome layer — the employer-side lifecycle. Parallel to, and
+    # never mixed with, send-side `status` above.
+    outcome_status: Optional[str] = None
+    outcome_source: Optional[str] = None  # manual | reply_detection | sweep
+    outcome_note: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    follow_up_of_id: Optional[int] = None
     created_at: datetime
     # EGRESS 2026-09-11: the Sent page used to join job titles
     # client-side by WALKING the whole /jobs/ pool 500 rows at a time
@@ -120,6 +135,11 @@ class ApplicationResponse(BaseModel):
             apply_url=a.apply_url,
             sent_at=a.sent_at,
             error=a.error,
+            outcome_status=getattr(a, "outcome_status", None),
+            outcome_source=getattr(a, "outcome_source", None),
+            outcome_note=getattr(a, "outcome_note", None),
+            resolved_at=getattr(a, "resolved_at", None),
+            follow_up_of_id=getattr(a, "follow_up_of_id", None),
             created_at=a.created_at,
             job=JobResponse.from_orm_job(a.job).model_dump() if a.job else None,
         )

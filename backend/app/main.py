@@ -23,6 +23,7 @@ from app.api.v1 import (
     feedback,
     jobs,
     matches,
+    outcomes,
     pipeline,
     profiles,
 )
@@ -106,6 +107,7 @@ app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["Pipeline"]
 app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])
 app.include_router(matches.router, prefix="/api/v1/matches", tags=["Matches"])
 app.include_router(applications.router, prefix="/api/v1/applications", tags=["Applications"])
+app.include_router(outcomes.router, prefix="/api/v1/outcomes", tags=["Outcomes"])
 app.include_router(settings_api.router, prefix="/api/v1/settings", tags=["Settings"])
 app.include_router(account.router, prefix="/api/v1", tags=["Account"])
 app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["Feedback"])

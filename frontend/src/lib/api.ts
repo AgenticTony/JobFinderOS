@@ -11,6 +11,10 @@ import type {
   IntegrationsStatus,
   Match,
   OnboardingPayload,
+  OutcomeNudges,
+  OutcomeProposal,
+  OutcomeStats,
+  OutcomeStatus,
   PipelineRunResponse,
   PipelineStatusResponse,
   Profile,
@@ -471,5 +475,59 @@ export const getApplications = async (): Promise<Application[]> => {
 
 export const retryApplication = async (applicationId: number): Promise<Application> => {
   const response = await api.post<Application>(`/api/v1/applications/${applicationId}/retry`);
+  return response.data;
+};
+
+// --- WO-20 outcome layer ---------------------------------------------
+// What the employer did — manual markers, propose-then-confirm reply
+// detection, nudges, and the honest-stats surface.
+
+export const markOutcome = async (
+  applicationId: number,
+  outcomeStatus: OutcomeStatus,
+  note?: string,
+): Promise<Application> => {
+  const response = await api.post<Application>(
+    `/api/v1/outcomes/${applicationId}/outcome`,
+    { outcome_status: outcomeStatus, note: note ?? null },
+  );
+  return response.data;
+};
+
+export const createFollowUp = async (applicationId: number): Promise<ApplicationDraft> => {
+  const response = await api.post<ApplicationDraft>(
+    `/api/v1/outcomes/${applicationId}/follow-up`,
+  );
+  return response.data;
+};
+
+export const getOutcomeProposals = async (): Promise<OutcomeProposal[]> => {
+  const response = await api.get<OutcomeProposal[]>('/api/v1/outcomes/proposals');
+  return response.data;
+};
+
+export const decideOutcomeProposal = async (
+  proposalId: number,
+  decision: 'approved' | 'dismissed',
+): Promise<Application> => {
+  const response = await api.post<Application>(
+    `/api/v1/outcomes/proposals/${proposalId}/decide`,
+    { decision },
+  );
+  return response.data;
+};
+
+export const approveAllOutcomeProposals = async (): Promise<{ approved: number }> => {
+  const response = await api.post<{ approved: number }>('/api/v1/outcomes/proposals/approve-all');
+  return response.data;
+};
+
+export const getOutcomeNudges = async (): Promise<OutcomeNudges> => {
+  const response = await api.get<OutcomeNudges>('/api/v1/outcomes/nudges');
+  return response.data;
+};
+
+export const getOutcomeStats = async (): Promise<OutcomeStats> => {
+  const response = await api.get<OutcomeStats>('/api/v1/outcomes/stats');
   return response.data;
 };
