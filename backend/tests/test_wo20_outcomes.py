@@ -796,7 +796,7 @@ class TestSavepointKeepsEarlierProposals:
 
         original_query = svc._proposal_exists_for_message
 
-        def blind_lookup(db, application_id, message_id):
+        def blind_lookup(db, user_id, message_id):
             return None  # the concurrent row is uncommitted — invisible
 
         monkeypatch.setattr(svc, "_proposal_exists_for_message", blind_lookup)
@@ -1040,3 +1040,275 @@ class TestTimestampNormalization:
         approve_all_pending(db, user_id=user.id)
         s = outcome_stats(db, user_id=user.id)
         assert s["avg_days_to_first_response"] is not None
+
+
+# =====================================================================
+# Review round 2 (PR #127) — cursor ordering, lone-ATS, final-regression,
+# follow-up deadlines, live aggregator hosts, cross-app message dedupe
+# ======================================================================
+
+class TestOldestPageSelection:
+    """Review round 2, finding 1: Gmail search returns NEWEST-first and
+    the adapter kept the first 50 — the NEWEST 50 — so the truncation
+    cursor landed at ~today and everything older was skipped forever.
+    The page taken must be the OLDEST slice of a newest-first result."""
+
+    def test_oldest_page_of_newest_first_results(self):
+        from app.services.gmail_scan import _oldest_page
+
+        # 120 metas, newest first (Gmail's documented order)
+        metas = [{"id": str(120 - i)} for i in range(120)]  # id 120 … 1
+        page, truncated = _oldest_page(metas, cap=50)
+        assert truncated is True
+        assert len(page) == 50
+        # the OLDEST 50: ids 50…1, not 120…71
+        assert [m["id"] for m in page] == [str(i) for i in range(50, 0, -1)]
+
+    def test_short_result_not_truncated(self):
+        from app.services.gmail_scan import _oldest_page
+
+        metas = [{"id": str(30 - i)} for i in range(30)]
+        page, truncated = _oldest_page(metas, cap=50)
+        assert truncated is False
+        assert len(page) == 30
+
+    def test_scan_cursor_semantics_with_oldest_page(self, db):
+        """End-to-end: a truncated scan of the OLDEST page leaves the
+        cursor at the newest message OF THAT PAGE, so the next window
+        resumes after it — older mail is never stranded."""
+        first_batch_received = (utc_now() - timedelta(days=80)).replace(
+            hour=9, minute=0, second=0, microsecond=0
+        )
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=85, status="sent")
+
+        async def fetch(uid, after, terms):
+            return {
+                "messages": [{
+                    "id": "m-old", "from": "hr@acme.example",
+                    "subject": "Your application",
+                    "body": "We'd like to schedule a call.",
+                    "received_at": first_batch_received,
+                }],
+                "truncated": True,
+            }
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        state = db.query(GmailScanState).one()
+        assert state.scan_cursor == first_batch_received.date().isoformat()
+
+
+class TestLoneAtsRequiresDiscriminator:
+    """Review round 2, finding 2: with exactly ONE open application, any
+    ATS-domain email attached to it unchecked — including replies to
+    jobs applied to OFF-platform through the same ATS. ATS-domain
+    senders always require the subject discriminator; only a specific
+    match (target email/domain, non-aggregator posting host) attaches
+    alone."""
+
+    def test_lone_ats_match_generic_subject_is_uncertain(self, db):
+        user = _user(db)
+        job = _job(db, title="Developer", company="Acme",
+                   url="https://boards.greenhouse.io/acme/jobs/1")
+        _application(db, user, job, sent_days_ago=3, status="sent", target_email=None)
+
+        async def fetch(uid, after, terms):
+            return {
+                "messages": [{
+                    "id": "m-1", "from": "Notifications <noreply@greenhouse.io>",
+                    "subject": "Update on your application",
+                    "body": "We have decided to move forward with other candidates.",
+                    "received_at": utc_now() - timedelta(days=1),
+                }],
+                "truncated": False,
+            }
+
+        summary = asyncio.run(scan_replies(db, user.id, fetch))
+        assert summary["proposed"] == 0
+        assert summary["uncertain"] == 1
+
+    def test_lone_ats_match_with_company_subject_attaches(self, db):
+        user = _user(db)
+        job = _job(db, title="Developer", company="Acme",
+                   url="https://boards.greenhouse.io/acme/jobs/1")
+        _application(db, user, job, sent_days_ago=3, status="sent", target_email=None)
+
+        async def fetch(uid, after, terms):
+            return {
+                "messages": [{
+                    "id": "m-1", "from": "Notifications <noreply@greenhouse.io>",
+                    "subject": "Your Acme application — next steps",
+                    "body": "We'd like to schedule a call.",
+                    "received_at": utc_now() - timedelta(days=1),
+                }],
+                "truncated": False,
+            }
+
+        summary = asyncio.run(scan_replies(db, user.id, fetch))
+        assert summary["proposed"] == 1
+
+    def test_specific_target_email_attaches_without_discriminator(self, db):
+        """A direct target-email match is evidence in itself — no
+        subject check needed."""
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=3, status="sent",
+                     target_email="jobs@acme.example")
+
+        async def fetch(uid, after, terms):
+            return {
+                "messages": [{
+                    "id": "m-1", "from": "HR <jobs@acme.example>",
+                    "subject": "Hello",
+                    "body": "We'd like to schedule a call.",
+                    "received_at": utc_now() - timedelta(days=1),
+                }],
+                "truncated": False,
+            }
+
+        summary = asyncio.run(scan_replies(db, user.id, fetch))
+        assert summary["proposed"] == 1
+
+
+class TestFinalNotReopenedByStaleSignal:
+    """Review round 2, finding 3: approving an older OPEN-signal
+    proposal (interview) after a newer FINAL outcome (rejected)
+    reopened the application — it re-entered nudges and the sweep."""
+
+    def test_stale_interview_does_not_reopen_rejected(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=40, status="sent")
+        # newer final outcome already applied
+        set_outcome(db, app, "rejected", "reply_detection",
+                    resolved_at=utc_now() - timedelta(days=1))
+        # stale OPEN-signal proposal still pending
+        db.add(OutcomeProposal(
+            user_id=user.id, application_id=app.id, proposed_status="interview",
+            source="reply_detection", evidence_message_id="m-old",
+            evidence_received_at=utc_now() - timedelta(days=30),
+        ))
+        db.commit()
+        approve_all_pending(db, user_id=user.id)
+        db.refresh(app)
+        assert app.outcome_status == "rejected"  # final stands
+        p = db.query(OutcomeProposal).one()
+        assert "superseded" in (p.reason or "")
+
+    def test_newer_offer_still_progresses_rejected(self, db):
+        """FINAL → FINAL progression stays allowed: a genuine later offer
+        email may legitimately rescue a rejected application."""
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=40, status="sent")
+        set_outcome(db, app, "rejected", "reply_detection",
+                    resolved_at=utc_now() - timedelta(days=30))
+        db.add(OutcomeProposal(
+            user_id=user.id, application_id=app.id, proposed_status="offer",
+            source="reply_detection", evidence_message_id="m-new",
+            evidence_received_at=utc_now() - timedelta(days=1),
+        ))
+        db.commit()
+        approve_all_pending(db, user_id=user.id)
+        db.refresh(app)
+        assert app.outcome_status == "offer"
+
+
+class TestFollowUpDraftNotDeadlineNudged:
+    """Review round 2, finding 4: a ready follow-up draft for a job
+    whose posting window is long past showed under 'Finish applying'
+    as a passed deadline."""
+
+    def test_follow_up_draft_excluded_from_deadlines(self, db):
+        from app.core import config as config_mod
+
+        user = _user(db)
+        job = _job(db, published_days_ago=config_mod.settings.MAX_POSTING_AGE_DAYS + 5)
+        app = _application(db, user, job, sent_days_ago=30, status="sent")
+        db.add(ApplicationDraft(
+            user_id=user.id, job_id=job.id, status="ready",
+            cover_letter="follow up", follow_up_application_id=app.id,
+        ))
+        db.commit()
+        n = compute_nudges(db, user_id=user.id)
+        assert n["deadlines"] == []
+
+    def test_first_contact_draft_still_nudged(self, db):
+        from app.core import config as config_mod
+
+        user = _user(db)
+        job = _job(db, published_days_ago=config_mod.settings.MAX_POSTING_AGE_DAYS + 5)
+        db.add(ApplicationDraft(
+            user_id=user.id, job_id=job.id, status="ready", cover_letter="x",
+        ))
+        db.commit()
+        n = compute_nudges(db, user_id=user.id)
+        assert len(n["deadlines"]) == 1
+
+
+class TestLiveAggregatorHosts:
+    """Review round 2, finding 5: the live pool has careerjet postings
+    on jobviewtrack.com and arbeitnow on www.arbeitnow.co.uk — neither
+    was in AGGREGATOR_HOSTS, so board mail matched as 'the employer'."""
+
+    def test_live_hosts_are_aggregators(self):
+        from app.services.outcome_service import _is_aggregator_host
+
+        for host in ("jobviewtrack.com", "www.jobviewtrack.com",
+                     "arbeitnow.co.uk", "www.arbeitnow.co.uk"):
+            assert _is_aggregator_host(host), host
+
+    def test_live_host_does_not_match_as_employer(self, db):
+        from app.services.outcome_service import sender_matches_application
+
+        user = _user(db)
+        job = _job(db, url="https://jobviewtrack.com/job/developer/123")
+        app = _application(db, user, job, target_email=None)
+        assert not sender_matches_application("digest@jobviewtrack.com", app, job)
+
+
+class TestOneMessageOneProposal:
+    """Review round 2, finding 6: dedupe was keyed (application,
+    message) — the same email could later be filed against a SECOND
+    application after the first closed. One email, at most one
+    proposal, ever."""
+
+    def test_same_message_never_refiled_on_another_application(self, db):
+        user = _user(db)
+        job_a = _job(db, title="Developer", company="Acme",
+                     url="https://boards.greenhouse.io/acme/jobs/1")
+        job_b = _job(db, title="Analyst", company="Beta",
+                     url="https://boards.greenhouse.io/beta/jobs/1")
+        _application(db, user, job_a, sent_days_ago=3, status="sent", target_email=None)
+        _application(db, user, job_b, sent_days_ago=2, status="sent", target_email=None)
+
+        msg = {
+            "id": "m-1", "from": "Notifications <noreply@greenhouse.io>",
+            "subject": "Your Acme application — next steps",
+            "body": "We'd like to schedule a call.",
+            "received_at": utc_now() - timedelta(days=1),
+        }
+
+        async def fetch(uid, after, terms):
+            return {"messages": [msg], "truncated": False}
+
+        # Scan 1: subject names Acme → filed on A
+        asyncio.run(scan_replies(db, user.id, fetch))
+        first = db.query(OutcomeProposal).one()
+        app_a_row = db.query(Application).join(JobPosting).filter(
+            JobPosting.company == "Acme").one()
+        assert first.application_id == app_a_row.id
+
+        # A closes; the overlap window replays the SAME message with B
+        # now the only candidate — it must NOT be filed again
+        db.refresh(app_a_row)
+        db.refresh(first)
+        first.decision = "approved"
+        first.decided_at = utc_now()
+        db.add(first)
+        set_outcome(db, app_a_row, "hired", "manual")
+        summary2 = asyncio.run(scan_replies(db, user.id, fetch))
+        assert summary2["proposed"] == 0
+        assert db.query(OutcomeProposal).count() == 1
+        assert db.query(OutcomeProposal).one().application_id == app_a_row.id

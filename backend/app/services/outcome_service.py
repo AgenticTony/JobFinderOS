@@ -88,17 +88,22 @@ ATS_SENDER_DOMAINS = [
 # scraped posting's URL usually points at the BOARD — matching mail from
 # that host would attach board notifications to every application scraped
 # from that board (review round 1, finding 2). Derived from the live
-# source set (services/scrapers/*).
+# source set (services/scrapers/*), VERIFIED against the live pool
+# 2026-10-15: careerjet postings live on jobviewtrack.com and arbeitnow
+# splits across arbeitnow.com AND arbeitnow.co.uk (review round 2,
+# finding 5 — both were matching as "the employer").
 AGGREGATOR_HOSTS = {
     "reed.co.uk",
     "adzuna.com",
     "adzuna.co.uk",
     "arbeitnow.com",
+    "arbeitnow.co.uk",
     "remotive.com",
     "jobicy.com",
     "workingnomads.com",
     "careerjet.com",
     "careerjet.co.uk",
+    "jobviewtrack.com",
     "platsbanken.se",
     "arbetsformedlingen.se",
     "jobtech.dev",
@@ -300,6 +305,43 @@ def _is_aggregator_host(host: Optional[str]) -> bool:
     )
 
 
+def sender_match_is_specific(
+    from_email: Optional[str], application: Application, job: Optional[JobPosting]
+) -> bool:
+    """A SPECIFIC match names THIS application: the target email we sent
+    to, its domain, or the employer's own (non-aggregator) posting host.
+    A specific match alone is evidence enough to attach a reply. An
+    ATS-domain sender is never specific — the same notification domain
+    serves every employer on that ATS, including jobs the user applied
+    to OFF-platform (review round 2, finding 2)."""
+    if not from_email:
+        return False
+    sender_domain = _domain(from_email)
+    if application.target_email and from_email == application.target_email.lower():
+        return True
+    target_domain = _domain(application.target_email)
+    if sender_domain and target_domain and _domains_match(sender_domain, target_domain):
+        return True
+    if sender_domain:
+        for host_source in (job.url if job else None, application.apply_url):
+            host = _domain(host_source, is_url=True)
+            if (
+                host
+                and not _is_aggregator_host(host)
+                # An ATS-hosted posting (boards.greenhouse.io/…) is the
+                # ATS's domain, not the employer's own — exactly as
+                # generic as the ATS sender domain itself (round 2,
+                # finding 2, caught by the lone-match red test).
+                and not any(
+                    host == d or host.endswith("." + d)
+                    for d in ATS_SENDER_DOMAINS
+                )
+                and _domains_match(sender_domain, host)
+            ):
+                return True
+    return False
+
+
 def sender_matches_application(
     from_email: Optional[str], application: Application, job: Optional[JobPosting]
 ) -> bool:
@@ -345,17 +387,21 @@ def sender_matches_application(
 # ---------------------------------------------------------------------------
 
 def _proposal_exists_for_message(
-    db: Session, application_id: int, evidence_message_id: Optional[str]
+    db: Session, user_id, evidence_message_id: Optional[str]
 ) -> Optional[OutcomeProposal]:
-    """Pre-check for an identical filed proposal. A concurrent
-    uncommitted insert is INVISIBLE here — the unique index at flush is
-    the real backstop (review round 1, finding 3)."""
+    """Pre-check for an identical filed proposal, scoped to the USER +
+    message — one email files at most ONE proposal across ALL the
+    user's applications (review round 2, finding 6: the per-application
+    key let a later scan re-file the same message against a second
+    application after the first closed). A concurrent uncommitted
+    insert is INVISIBLE here — the unique index at flush is the real
+    backstop (review round 1, finding 3)."""
     if not evidence_message_id:
         return None
     return (
         db.query(OutcomeProposal)
         .filter(
-            OutcomeProposal.application_id == application_id,
+            OutcomeProposal.user_id == user_id,
             OutcomeProposal.evidence_message_id == evidence_message_id,
         )
         .first()
@@ -382,7 +428,7 @@ def _file_proposal(
     proposal of the same scan (review round 1, finding 3)."""
     if proposed_status not in OUTCOME_STATUSES or proposed_status in MANUAL_ONLY_OUTCOMES:
         raise OutcomeError(f"'{proposed_status}' cannot be proposed by {source}")
-    existing = _proposal_exists_for_message(db, application.id, evidence_message_id)
+    existing = _proposal_exists_for_message(db, application.user_id, evidence_message_id)
     if existing is not None:
         return None
     proposal = OutcomeProposal(
@@ -457,6 +503,32 @@ def decide_proposal(
             proposal.decision = "approved"
             proposal.decided_at = utc_now()
             proposal.reason = (proposal.reason or "") + " [superseded: employer signal on record]"
+            db.add(proposal)
+            db.commit()
+            return application
+        if (
+            application.outcome_status in FINAL_OUTCOMES
+            and not (
+                proposal.evidence_received_at is not None
+                and application.resolved_at is not None
+                and proposal.evidence_received_at > application.resolved_at
+            )
+        ):
+            # A stale or untimestamped proposal cannot regress a CLOSED
+            # application (review round 2, finding 3): newest-first
+            # scanning proposes the newer rejection before the older
+            # interview invite, and approve-all in created_at order
+            # would otherwise land the application back at 'interview' —
+            # re-entering nudges and the sweep pool with the real
+            # rejection lost. A proposal with NEWER evidence than the
+            # recorded outcome is a genuine progression (a later offer
+            # rescuing a rejection) and stays allowed. The age test uses
+            # evidence_received_at, NOT the open/final partition —
+            # 'offer' is an open status, and blocking on the partition
+            # would reject exactly that rescue.
+            proposal.decision = "approved"
+            proposal.decided_at = utc_now()
+            proposal.reason = (proposal.reason or "") + " [superseded: final outcome on record]"
             db.add(proposal)
             db.commit()
             return application
@@ -632,23 +704,37 @@ async def scan_replies(
             from_email = extract_email(msg.get("from"))
             body = msg.get("body")
 
-            # Ambiguity resolution (review round 1, finding 2): a sender
-            # that plausibly matches SEVERAL open applications (shared
-            # ATS domain) is evidence for none of them by order of
-            # query. Exactly one match → it; several → discriminate by
-            # company/title in the subject; still ambiguous → surfaced.
+            # Matching (review rounds 1-2): SPECIFIC matches (this
+            # application's own email/domain/employer host) attach alone
+            # when unique, discriminate by company/title when several.
+            # ATS-domain senders are never specific — the same
+            # notification domain serves every employer on that ATS, so
+            # an ATS match ALWAYS requires the subject discriminator,
+            # even when only one application matches (round 2, finding 2).
             direct = [
                 app for app in open_candidates
                 if sender_matches_application(from_email, app, jobs.get(app.job_id))
             ]
-            if len(direct) == 1:
-                target = direct[0]
-            elif len(direct) > 1:
-                target = _discriminate_by_subject(msg.get("subject"), direct, jobs)
-                if target is None:
-                    summary["uncertain"] += 1
-                    continue
+            if not direct:
+                continue
+            target = None
+            if any(
+                sender_match_is_specific(from_email, app, jobs.get(app.job_id))
+                for app in direct
+            ):
+                specifics = [
+                    app for app in direct
+                    if sender_match_is_specific(from_email, app, jobs.get(app.job_id))
+                ]
+                if len(specifics) == 1:
+                    target = specifics[0]
+                elif len(specifics) > 1:
+                    target = _discriminate_by_subject(msg.get("subject"), specifics, jobs)
             else:
+                # ATS-only senders: subject must name exactly one candidate
+                target = _discriminate_by_subject(msg.get("subject"), direct, jobs)
+            if target is None:
+                summary["uncertain"] += 1
                 continue
 
             summary["matched"] += 1
@@ -782,7 +868,16 @@ def compute_nudges(db: Session, *, user_id) -> dict:
     deadline_items = []
     drafts = (
         db.query(ApplicationDraft)
-        .filter(ApplicationDraft.user_id == user_id, ApplicationDraft.status == "ready")
+        .filter(
+            ApplicationDraft.user_id == user_id,
+            ApplicationDraft.status == "ready",
+            # Follow-up drafts are NOT first-contact packages awaiting a
+            # send — they ping a job already applied to, and their
+            # posting window is usually long past. Showing them under
+            # 'Finish applying' as missed deadlines is noise (review
+            # round 2, finding 4).
+            ApplicationDraft.follow_up_application_id.is_(None),
+        )
         .all()
     )
     # Scoped to THIS user (review round 1, finding 7 — the unscoped

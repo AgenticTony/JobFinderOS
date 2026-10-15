@@ -30,6 +30,21 @@ DEFAULT_LOOKBACK_DAYS = 90
 # message, so the next scan resumes where this one stopped.
 SCAN_PAGE_CAP = 50
 
+
+def _oldest_page(metas: List[dict], cap: int = SCAN_PAGE_CAP) -> tuple:
+    """(oldest `cap` of a NEWEST-FIRST result, truncated).
+
+    Gmail search returns hits newest-first (review round 2, finding 1):
+    taking the FIRST cap would read the newest messages, land the
+    truncation cursor at ~today, and strand everything older outside
+    every later window. Taking the TAIL reads the oldest slice, so the
+    cursor (the newest arrival OF THAT SLICE) leaves the rest inside
+    the next scan's window — each scan consumes the oldest batch and
+    the cursor marches forward until a scan is no longer truncated.
+    """
+    truncated = len(metas) > cap
+    return (metas[-cap:] if truncated else metas), truncated
+
 _SLUG_RE = re.compile(r"\bGMAIL_[A-Z0-9_]+\b")
 
 
@@ -144,13 +159,13 @@ async def gmail_fetch_messages(
         return []
 
     metas = _find_messages(search_resp)
-    # bounded pass — but NEVER silent: if the query returned more than
-    # the cap we say so, and the scan keeps its cursor behind the last
-    # message actually processed so nothing is skipped forever (review
-    # round 1, finding 8).
-    truncated = len(metas) > SCAN_PAGE_CAP
+    # bounded pass — but NEVER silent: the OLDEST slice of the
+    # newest-first result (see _oldest_page), with truncation reported
+    # so the scan keeps its cursor behind the last message actually
+    # processed and nothing is skipped forever.
+    page, truncated = _oldest_page(metas)
     messages: List[dict] = []
-    for meta in metas[:SCAN_PAGE_CAP]:
+    for meta in page:
         msg_id = str(meta.get("id"))
         detail = await composio_service.execute_tool(user_id, get_slug, {"message_id": msg_id})
         payload = detail.get("payload") if isinstance(detail, dict) else None
