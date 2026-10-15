@@ -3,6 +3,11 @@
 > Priority: P1 · Depends on: WO-13 (Paddle MoR), WO-14 (trial gating)
 > Status: decided 2026-08-28 · Supersedes the €19 figure used throughout WO-13
 > Competitive research verified at source; re-verify prices before launch.
+> Competitive evidence 2026-10-11: the category's billing-trust wounds
+> re-confirmed at review level — AIApply F BBB (credits-on-top), Sonara
+> trial→rebill, Teal weekly-billing resentment
+> (`docs/research/competitor-rea-teardown-2026-10-11.md` §7). Clean
+> billing remains the free differentiator.
 
 ## The decision
 

@@ -2,6 +2,10 @@
 
 > Priority: P2 · Depends on: WO-18 ✅ (its pair machinery is the lookup
 > engine) · Status: designed, not started
+> Competitive evidence 2026-10-11: JobRight sells "no expired listings,
+> updated hourly" because dead postings are a category-wide trust wound
+> (`docs/research/competitor-rea-teardown-2026-10-11.md` §4, §7) — this
+> WO feeds the same claim.
 > Origin: 2026-09-08 second review of `MadsLorentzen/ai-job-search`
 > (same repo that seeded WO-18's source-ranking tiebreak, WO-19, WO-20,
 > WO-21). Its apply flow (`.claude/commands/apply.md` +

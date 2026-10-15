@@ -2,6 +2,9 @@
 
 > Priority: P2 · Depends on: WO-13 (Paddle MoR), WO-16 (pricing)
 > Status: not started
+> Competitive evidence 2026-10-11: cancel/billing friction dominates the
+> category's one-star reviews — cancel-first is market-facing positioning,
+> not just UX hygiene (`docs/research/competitor-rea-teardown-2026-10-11.md` §7).
 
 ## Why
 
