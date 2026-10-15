@@ -15,35 +15,80 @@ import asyncio
 import json
 import logging
 import re
-from datetime import date, timedelta
 from typing import Any, List, Optional
 
 from app.services import composio_service
 
 logger = logging.getLogger(__name__)
 
-# Default lookback when no scan cursor exists yet — bounded, not "all mail"
-DEFAULT_LOOKBACK_DAYS = 90
-
-# Per-scan message cap. NOT a silent drop: past the cap the fetch reports
-# truncated=True and the scan holds its cursor behind the last processed
-# message, so the next scan resumes where this one stopped.
+# Per-scan message cap. NOT a silent drop: past the cap the fetch
+# reports truncated=True and the scan re-anchors its window watermark
+# at the oldest PROCESSED message, so the next scan resumes below the
+# batch and nothing is skipped forever.
 SCAN_PAGE_CAP = 50
 
+# Search-call budget: enough pages to prove the window overflows the
+# cap whatever page size the tool serves (10 per page → 6 calls).
+SEARCH_MAX_PAGES = 10
 
-def _oldest_page(metas: List[dict], cap: int = SCAN_PAGE_CAP) -> tuple:
-    """(oldest `cap` of a NEWEST-FIRST result, truncated).
+# Page-cursor keys the wrapper might use, checked tolerantly — the
+# response shape has moved between SDK versions before.
+_PAGE_TOKEN_KEYS = ("page_token", "pageToken", "next_page_token", "nextPageToken")
 
-    Gmail search returns hits newest-first (review round 2, finding 1):
-    taking the FIRST cap would read the newest messages, land the
-    truncation cursor at ~today, and strand everything older outside
-    every later window. Taking the TAIL reads the oldest slice, so the
-    cursor (the newest arrival OF THAT SLICE) leaves the rest inside
-    the next scan's window — each scan consumes the oldest batch and
-    the cursor marches forward until a scan is no longer truncated.
+
+def _meta_epoch(meta: dict) -> Optional[int]:
+    """internalDate (ms epoch, str or int) → epoch seconds, tolerantly.
+    Minimal search metas {id, threadId} carry no date — None."""
+    raw = meta.get("internalDate") or meta.get("internal_date")
+    if raw in (None, ""):
+        return None
+    try:
+        return int(str(raw)) // 1000
+    except (ValueError, TypeError):
+        return None
+
+
+def _next_page_token(resp: Any) -> Optional[str]:
+    """Tolerant next-page cursor extraction, anywhere in the response."""
+    def scan(node) -> Optional[str]:
+        if isinstance(node, dict):
+            for key in _PAGE_TOKEN_KEYS:
+                v = node.get(key)
+                if isinstance(v, (str, int)) and str(v).strip():
+                    return str(v)
+            for v in node.values():
+                got = scan(v)
+                if got:
+                    return got
+        elif isinstance(node, list):
+            for v in node:
+                got = scan(v)
+                if got:
+                    return got
+        return None
+    return scan(resp)
+
+
+def _newest_batch(metas: List[dict], cap: int = SCAN_PAGE_CAP) -> tuple:
+    """(newest `cap` metas by arrival, truncated).
+
+    Round 3, finding 2: a threads-shaped response flattens to an order
+    that interleaves chronology — list position is not arrival order,
+    so neither a head NOR a tail slice is safe. Metas carrying
+    internalDate are SORTED by it (newest first); a minimal flat page
+    is Gmail's documented newest-first order (the sort is then a
+    no-op). Undated metas sort as newest so they enter the batch and
+    are dated by their detail GET.
     """
     truncated = len(metas) > cap
-    return (metas[-cap:] if truncated else metas), truncated
+    def _key(m: dict):
+        e = _meta_epoch(m)
+        # undated metas sort as NEWEST so a truncated batch still takes
+        # them (their GET dates them; if old, the watermark simply lands
+        # lower — safe); dated metas sort by arrival, newest first
+        return (2, 0.0) if e is None else (1, float(e))
+    ordered = sorted(metas, key=_key, reverse=True)
+    return (ordered[:cap] if truncated else ordered), truncated
 
 _SLUG_RE = re.compile(r"\bGMAIL_[A-Z0-9_]+\b")
 
@@ -111,18 +156,28 @@ def _body_text(payload: Any) -> Optional[str]:
 
 async def gmail_fetch_messages(
     user_id: str,
-    after_date: Optional[date],
+    window: dict,
     sender_terms: Optional[List[str]] = None,
-) -> List[dict]:
-    """Fetch sender-constrained inbox messages since `after_date` (plus a
-    one-day overlap — dedupe is the unique proposal index), oldest→newest,
-    with FULL bodies. Raises ComposioError upward; scan_replies records
-    it in gmail_scan_state.last_error."""
+) -> dict:
+    """Fetch sender-constrained messages inside the epoch window
+    {"after": int, "before": int} (half-open Gmail after:/before:
+    bounds), oldest→newest, with FULL bodies. Raises ComposioError
+    upward; scan_replies records it in gmail_scan_state.last_error.
+
+    Round 3, finding 1: the search follows page tokens until the
+    COLLECTED count proves the window overflows the cap (or the pages
+    run out) — a single first page both stranded every older page and,
+    when it held ≤cap hits, wrongly reported the window complete. The
+    processed batch is the window's NEWEST messages (see
+    _newest_batch), so a truncated scan's watermark anchors at the
+    batch's oldest arrival and every older hit stays claimable.
+    """
     if not composio_service.is_configured():
         raise composio_service.ComposioError("COMPOSIO_API_KEY not set — inbox scan disabled")
 
-    lookback = after_date or (date.today() - timedelta(days=DEFAULT_LOOKBACK_DAYS))
-    query = f"after:{lookback.strftime('%Y/%m/%d')}"
+    after_e = int(window["after"])
+    before_e = int(window["before"])
+    query = f"after:{after_e} before:{before_e}"
     if sender_terms:
         froms = " OR ".join(f"from:{t}" for t in sender_terms)
         query = f"({froms}) {query}"
@@ -140,7 +195,6 @@ async def gmail_fetch_messages(
             f"gmail tool discovery failed (search={search_slug}, get={get_slug})"
         )
 
-    search_resp = await composio_service.execute_tool(user_id, search_slug, {"query": query})
     # Tolerant traversal: response shape has moved between SDK versions;
     # threads → messages meta is the stable Gmail shape we rely on.
     def _find_messages(node) -> List[dict]:
@@ -158,12 +212,28 @@ async def gmail_fetch_messages(
             return out
         return []
 
-    metas = _find_messages(search_resp)
-    # bounded pass — but NEVER silent: the OLDEST slice of the
-    # newest-first result (see _oldest_page), with truncation reported
-    # so the scan keeps its cursor behind the last message actually
+    # Paginate until the collected count settles the truncation
+    # question (round 3, finding 1): >cap collected, or the token runs
+    # out. max_results asks for cap+1 so ONE call suffices when the
+    # tool honors it; a tool paging at its own smaller size is followed.
+    metas: List[dict] = []
+    token: Optional[str] = None
+    for _ in range(SEARCH_MAX_PAGES):
+        args: dict = {"query": query, "max_results": SCAN_PAGE_CAP + 1}
+        if token:
+            args["page_token"] = token
+        search_resp = await composio_service.execute_tool(user_id, search_slug, args)
+        metas.extend(_find_messages(search_resp))
+        token = _next_page_token(search_resp)
+        if not token or len(metas) > SCAN_PAGE_CAP:
+            break
+    truncated = len(metas) > SCAN_PAGE_CAP or bool(token)
+
+    # Bounded pass — but NEVER silent: the NEWEST batch by arrival
+    # (see _newest_batch), with truncation reported so the scan
+    # re-anchors its watermark behind the last message actually
     # processed and nothing is skipped forever.
-    page, truncated = _oldest_page(metas)
+    page, _ = _newest_batch(metas)
     messages: List[dict] = []
     for meta in page:
         msg_id = str(meta.get("id"))
