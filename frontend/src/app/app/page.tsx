@@ -26,6 +26,7 @@ import {
   Save,
   Send,
   ShieldAlert,
+  X,
 } from 'lucide-react';
 import CvUpload from '@/components/CvUpload';
 // GA4 funnel events — consent-gated (lib/analytics.ts).
@@ -35,15 +36,22 @@ import OnboardingWizard from '@/components/OnboardingWizard';
 import Sidebar, { NAV, type View } from '@/components/Sidebar';
 import HuntPulse from '@/components/HuntPulse';
 import {
+  approveAllOutcomeProposals,
   attestDraft,
+  createFollowUp,
   decideMatch,
+  decideOutcomeProposal,
   getApplications,
   getDrafts,
   getMatches,
+  getOutcomeNudges,
+  getOutcomeProposals,
+  getOutcomeStats,
   getPipelineStatus,
   getProfile,
   getProfileStatus,
   api,
+  markOutcome,
   prepareDraft,
   recheckDraft,
   retryApplication,
@@ -60,6 +68,10 @@ import type {
   ApplicationDraft,
   Match,
   OnboardingPayload,
+  OutcomeNudges,
+  OutcomeProposal,
+  OutcomeStats,
+  OutcomeStatus,
   PipelineRunResponse,
   PipelineStatusResponse,
   Profile,
@@ -121,6 +133,11 @@ export default function Home() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [drafts, setDrafts] = useState<ApplicationDraft[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
+  // WO-20 outcome layer: what the employer did. Proposals/nudges/stats
+  // refresh with the applications they annotate (same onChanged path).
+  const [outcomeProposals, setOutcomeProposals] = useState<OutcomeProposal[]>([]);
+  const [outcomeNudges, setOutcomeNudges] = useState<OutcomeNudges | null>(null);
+  const [outcomeStats, setOutcomeStats] = useState<OutcomeStats | null>(null);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [matchPolling, setMatchPolling] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<PipelineRunResponse | null>(null);
@@ -262,14 +279,20 @@ export default function Home() {
     // lists, so an outage rendered as a healthy-but-empty console whose
     // empty states invited a quota-spending hunt to "fix" it. allSettled
     // keeps the failure signal: keep whatever loads, but say so.
-    const [matchRes, draftRes, appsRes] = await Promise.allSettled([
+    const [matchRes, draftRes, appsRes, propRes, nudgeRes, statsRes] = await Promise.allSettled([
       getMatches({ limit: 200 }),
       getDrafts(),
       getApplications(),
+      getOutcomeProposals(),
+      getOutcomeNudges(),
+      getOutcomeStats(),
     ]);
     setMatches(matchRes.status === 'fulfilled' ? matchRes.value : []);
     setDrafts(draftRes.status === 'fulfilled' ? draftRes.value : []);
     setApplications(appsRes.status === 'fulfilled' ? appsRes.value : []);
+    if (propRes.status === 'fulfilled') setOutcomeProposals(propRes.value);
+    if (nudgeRes.status === 'fulfilled') setOutcomeNudges(nudgeRes.value);
+    if (statsRes.status === 'fulfilled') setOutcomeStats(statsRes.value);
     const anyListFailed =
       matchRes.status === 'rejected' || draftRes.status === 'rejected' || appsRes.status === 'rejected';
     setLoadFailed(anyListFailed);
@@ -648,6 +671,9 @@ export default function Home() {
                     page={view}
                     drafts={drafts}
                     applications={applications}
+                    outcomeProposals={outcomeProposals}
+                    outcomeNudges={outcomeNudges}
+                    outcomeStats={outcomeStats}
                     onChanged={refresh}
                     onPrepare={handlePrepare}
                     onSwitch={switchView}
@@ -1076,6 +1102,9 @@ function ApplicationsView({
   page,
   drafts,
   applications,
+  outcomeProposals,
+  outcomeNudges,
+  outcomeStats,
   onChanged,
   onSwitch,
   subTabsAlways = false,
@@ -1086,6 +1115,9 @@ function ApplicationsView({
   page: 'apps-review' | 'apps-sent';
   drafts: ApplicationDraft[];
   applications: (Application)[];
+  outcomeProposals: OutcomeProposal[];
+  outcomeNudges: OutcomeNudges | null;
+  outcomeStats: OutcomeStats | null;
   onChanged: () => Promise<void>;
   onPrepare: (jobId: number) => Promise<void>;
   onSwitch: (v: View) => void;
@@ -1095,6 +1127,7 @@ function ApplicationsView({
   onClearDraftEdits: (id: number) => void;
 }) {
   const t = useT().console.apps;
+  const to = useT().console.outcomes;
   const openDrafts = drafts.filter((d) => d.status !== 'submitted');
   // Accordion: one draft open at a time; a single draft opens by itself
   const [openId, setOpenId] = useState<number | null>(() =>
@@ -1115,10 +1148,18 @@ function ApplicationsView({
   );
 
   if (page === 'apps-sent') {
+    const followUpByApp = new Map(
+      (outcomeNudges?.follow_ups ?? []).map((f) => [f.application_id, f]),
+    );
+    const confirmByApp = new Map(
+      (outcomeNudges?.confirm_applied ?? []).map((c) => [c.application_id, c]),
+    );
     return (
       <section>
         <ViewHeader title={t.sentTitle} sub={t.sentSub} />
         {subTabs}
+        <OutcomeStatsStrip stats={outcomeStats} />
+        <OutcomeProposalsPanel proposals={outcomeProposals} onChanged={onChanged} />
         {applications.length === 0 ? (
           <Empty
             icon={<Send className="h-8 w-8" />}
@@ -1128,7 +1169,15 @@ function ApplicationsView({
         ) : (
           <div className="space-y-3">
             {applications.map((a) => (
-              <SentApplicationCard key={a.id} application={a} draft={draftFor(a)} onChanged={onChanged} />
+              <SentApplicationCard
+                key={a.id}
+                application={a}
+                draft={draftFor(a)}
+                followUpNudge={followUpByApp.get(a.id) ?? null}
+                confirmNudge={confirmByApp.has(a.id)}
+                onChanged={onChanged}
+                onSwitch={onSwitch}
+              />
             ))}
           </div>
         )}
@@ -1138,10 +1187,42 @@ function ApplicationsView({
 
   // Accordion state lives up top (rules of hooks); only the review page uses it
 
+  // WO-20 deadline urgency — the "Finish applying" cliff made visible
+  // BEFORE the 30-day auto-pass, not after: documents written, never
+  // sent, now unsendable. One line per expiring draft; clicking opens
+  // the draft's accordion so the send button is one tap away.
+  const deadlineItems = outcomeNudges?.deadlines ?? [];
+
   return (
     <section>
       <ViewHeader title={t.reviewTitle} sub={t.reviewSub} />
       {subTabs}
+      {deadlineItems.length > 0 && (
+        <ul className="mb-4 space-y-1.5">
+          {deadlineItems.map((d) => (
+            <li
+              key={d.draft_id}
+              className={cn(
+                'flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3.5 py-2.5 text-sm',
+                d.level === 'passed'
+                  ? 'border-bad/40 bg-bad/10 text-bad'
+                  : 'border-signal/40 bg-signal/10 text-signal'
+              )}
+            >
+              <span>
+                {to.deadlineUrgent(d.days_left)} — {d.title}
+                {d.company ? ` · ${d.company}` : ''}
+              </span>
+              <button
+                onClick={() => setOpenId(d.draft_id)}
+                className="rounded-lg border border-current/30 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-current/10"
+              >
+                {to.openDraft}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {openDrafts.length === 0 ? (
         <Empty
           icon={<FileText className="h-8 w-8" />}
@@ -1207,17 +1288,149 @@ function RetryButton({
 
 // A sent application: header row with status/actions; expands to re-read
 // the letter and re-download the PDFs (the draft survives submission).
+// WO-20 propose-then-confirm panel. Detected outcomes (and the 60-day
+// quiet sweep) land here first — nothing touches an application until
+// the user confirms. Each row cites its evidence (sender + subject).
+function OutcomeProposalsPanel({
+  proposals,
+  onChanged,
+}: {
+  proposals: OutcomeProposal[];
+  onChanged: () => Promise<void>;
+}) {
+  const t = useT().console.outcomes;
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (proposals.length === 0) return null;
+
+  const decide = async (id: number, decision: 'approved' | 'dismissed') => {
+    setBusyId(id);
+    setError(null);
+    try {
+      await decideOutcomeProposal(id, decision);
+      await onChanged();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const confirmAll = async () => {
+    setBulkBusy(true);
+    setError(null);
+    try {
+      await approveAllOutcomeProposals();
+      await onChanged();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-4 rounded-xl border border-signal/40 bg-signal/5 p-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <p className="font-medium text-hi">{t.proposalsTitle(proposals.length)}</p>
+        <button
+          onClick={confirmAll}
+          disabled={bulkBusy}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-signal/40 bg-signal/10 px-3 py-1.5 text-sm text-signal transition-colors hover:bg-signal/20 disabled:opacity-50"
+        >
+          {bulkBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          <Check className="h-3.5 w-3.5" /> {t.confirmAll}
+        </button>
+      </div>
+      <p className="mb-3 text-sm text-low">{t.proposalsSub}</p>
+      {error && (
+        <p className="mb-2 rounded-lg bg-bad/10 p-2.5 text-sm text-bad" role="alert">
+          {error}
+        </p>
+      )}
+      <ul className="space-y-2">
+        {proposals.map((p) => (
+          <li
+            key={p.id}
+            className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-hi">
+                {t.proposalFor(t.status[p.proposed_status] ?? p.proposed_status)}
+              </p>
+              <p className="truncate text-xs text-low">
+                {p.source === 'sweep'
+                  ? t.quietSweepReason
+                  : p.evidence_from
+                    ? `${t.evidenceFrom(p.evidence_from)}${p.evidence_subject ? ` · “${p.evidence_subject}”` : ''}`
+                    : (p.reason ?? '')}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => decide(p.id, 'approved')}
+                disabled={busyId === p.id}
+                className="inline-flex items-center gap-1 rounded-lg border border-ok/40 bg-ok/10 px-3 py-1.5 text-sm text-ok transition-colors hover:bg-ok/20 disabled:opacity-50"
+              >
+                {busyId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                {t.keep}
+              </button>
+              <button
+                onClick={() => decide(p.id, 'dismissed')}
+                disabled={busyId === p.id}
+                className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-50"
+              >
+                <X className="h-3.5 w-3.5" /> {t.dismiss}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// WO-20 stats strip — the honest denominator, on the Sent page where the
+// numbers' subjects live. Small on purpose: one line, no chart to fake.
+function OutcomeStatsStrip({ stats }: { stats: OutcomeStats | null }) {
+  const t = useT().console.outcomes;
+  if (!stats || stats.sent_total === 0) {
+    return <p className="mb-4 text-sm text-low">{t.statsEmpty}</p>;
+  }
+  const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`);
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border border-line bg-surface/60 px-4 py-3 text-sm text-mid">
+      <span className="font-medium text-hi">{t.statsSent(stats.sent_total)}</span>
+      <span>{t.statsResponse(pct(stats.response_rate))}</span>
+      <span>{t.statsInterview(pct(stats.interview_rate))}</span>
+      {stats.avg_days_to_first_response !== null && (
+        <span>{t.statsFirstReply(String(stats.avg_days_to_first_response))}</span>
+      )}
+    </div>
+  );
+}
+
 function SentApplicationCard({
   application,
   draft,
+  followUpNudge,
+  confirmNudge,
   onChanged,
+  onSwitch,
 }: {
   application: Application;
   draft?: ApplicationDraft;
+  // WO-20 nudges for this application (null = no nudge)
+  followUpNudge: { application_id: number; job_id: number; days_quiet: number; follow_up_count: number } | null;
+  confirmNudge: boolean;
   onChanged: () => Promise<void>;
+  onSwitch: (v: View) => void;
 }) {
   const tc = useT().console;
   const t = tc.apps;
+  const to = tc.outcomes;
   const [expanded, setExpanded] = useState(false);
   // FE-9: the header is keyboard-operable (role="button" — a real <button>
   // is impossible here because the header legitimately CONTAINS interactive
@@ -1229,6 +1442,9 @@ function SentApplicationCard({
   // the user clicked "PDF" and nothing happened. Same inline-error
   // pattern as the retry button next to it.
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [markerBusy, setMarkerBusy] = useState(false);
+  const [followUpBusy, setFollowUpBusy] = useState(false);
+  const [actionNote, setActionNote] = useState<string | null>(null);
   const a = application;
   const hasDocuments = Boolean(draft && (draft.cover_letter || draft.tailored_cv));
 
@@ -1240,6 +1456,47 @@ function SentApplicationCard({
       setDownloadError(apiErrorMessage(err));
     }
   };
+
+  // WO-20 manual marker — the user's own word about what happened. The
+  // button appears on select; "What happened?" is the resting label so
+  // the control reads as a question, not a status the system claims.
+  const markHappened = async (status: OutcomeStatus) => {
+    setMarkerBusy(true);
+    setActionNote(null);
+    try {
+      await markOutcome(a.id, status);
+      setActionNote(to.markerSet(to.status[status] ?? status));
+      await onChanged();
+    } catch (err) {
+      setActionNote(apiErrorMessage(err) || to.markerFailed);
+    } finally {
+      setMarkerBusy(false);
+    }
+  };
+
+  const draftFollowUp = async () => {
+    setFollowUpBusy(true);
+    setActionNote(null);
+    try {
+      await createFollowUp(a.id);
+      setActionNote(to.followUpReady);
+      await onChanged();
+      onSwitch('apps-review');
+    } catch (err) {
+      setActionNote(apiErrorMessage(err) || to.followUpFailed);
+    } finally {
+      setFollowUpBusy(false);
+    }
+  };
+
+  const OUTCOME_OPTIONS: OutcomeStatus[] = [
+    'interview',
+    'offer',
+    'hired',
+    'rejected',
+    'no_response',
+    'withdrawn',
+  ];
 
   return (
     <div className="rounded-xl border border-line bg-surface/80 transition-colors hover:border-line-2">
@@ -1276,6 +1533,22 @@ function SentApplicationCard({
           </p>
           {a.error && <p className="mt-1 text-sm text-bad">{a.error}</p>}
         </div>
+        {/* WO-20 outcome badge — what the EMPLOYER did, visually distinct
+            from the send-side status pill (filled vs outline). */}
+        {a.outcome_status && (
+          <span
+            title={a.outcome_source ? `${to.source[a.outcome_source] ?? a.outcome_source}` : undefined}
+            className={cn(
+              'rounded-full border px-2.5 py-1 text-xs font-medium',
+              ['hired', 'offer'].includes(a.outcome_status) && 'border-ok/40 bg-ok/15 text-ok',
+              ['interview'].includes(a.outcome_status) && 'border-signal/40 bg-signal/15 text-signal',
+              ['rejected', 'no_response', 'offer_declined', 'withdrawn'].includes(a.outcome_status) &&
+                'border-line bg-surface-2 text-mid'
+            )}
+          >
+            {to.status[a.outcome_status] ?? a.outcome_status}
+          </span>
+        )}
         <span
           className={cn(
             'rounded-full px-2.5 py-1 text-xs font-medium',
@@ -1306,6 +1579,63 @@ function SentApplicationCard({
             className={cn('h-5 w-5 shrink-0 text-low transition-transform', expanded && 'rotate-180')}
           />
         )}
+      </div>
+
+      {/* WO-20 outcome bar: nudges (follow-up offer, confirm-applied) and
+          the manual "What happened?" marker. Everything here is opt-in —
+          the user's own word or click, never an automatic write. The
+          marker stays available after an outcome is set: correcting your
+          own marker is always allowed (an outcome is never locked). */}
+      <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-2.5">
+          {followUpNudge && (
+            <>
+              <span className="text-sm text-low">
+                {to.followUpOffer(followUpNudge.days_quiet)}
+              </span>
+              <button
+                onClick={draftFollowUp}
+                disabled={followUpBusy}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi disabled:opacity-50"
+              >
+                {followUpBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {to.followUp}
+              </button>
+            </>
+          )}
+          {confirmNudge && (
+            <button
+              onClick={() => markHappened('applied')}
+              disabled={markerBusy}
+              title={to.confirmAppliedHelp}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-signal/40 bg-signal/10 px-3 py-1.5 text-sm text-signal transition-colors hover:bg-signal/20 disabled:opacity-50"
+            >
+              <Check className="h-3.5 w-3.5" /> {to.confirmApplied}
+            </button>
+          )}
+          {actionNote && <span className="text-sm text-low" role="status">{actionNote}</span>}
+          <span className="ml-auto flex items-center gap-2">
+            <label htmlFor={`outcome-${a.id}`} className="text-xs text-low">
+              {to.markPrompt}
+            </label>
+            <select
+              id={`outcome-${a.id}`}
+              value=""
+              disabled={markerBusy}
+              onChange={(e) => {
+                const v = e.target.value as OutcomeStatus;
+                if (v) markHappened(v);
+                e.target.value = ''; // the select is an action, never a display
+              }}
+              className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-mid transition-colors hover:border-line-2 disabled:opacity-50"
+            >
+              <option value="">…</option>
+              {OUTCOME_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {to.status[s] ?? s}
+                </option>
+              ))}
+            </select>
+          </span>
       </div>
 
       <AnimatePresence>

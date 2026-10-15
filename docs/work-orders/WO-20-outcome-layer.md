@@ -2,7 +2,8 @@
 
 > Priority: P1 · Depends on: none hard (reply detection rides the
 > Composio Gmail connection, proven in production 2026-08-31) ·
-> Status: designed, not started · **first among P1s** (2026-10-15
+> Status: **executed 2026-10-15 — see execution record** ·
+> **first among P1s** (2026-10-15
 > re-prioritization: no competitor shows outcomes — volume metrics only;
 > outcome honesty is uncontested white space — teardown §7)
 > Origin: ROADMAP owns the WHY ("Launch weapon — outcome tracking";
@@ -127,3 +128,73 @@ placeholder swaps to real numbers the day this ships.
    sweep) asserted; `drafted` never chased, never counted quiet.
 6. Stats: response-rate denominator excludes unsent applications;
    `no_response` sweep results count in the denominator.
+
+---
+
+## Execution record — 2026-10-15
+
+**Status: executed** (all four layers; 48 acceptance tests in
+`backend/tests/test_wo20_outcomes.py`, all green; migration round-trip
+verified upgrade→head and downgrade on a scratch DB).
+
+What shipped, by layer:
+
+1. **Vocabulary + columns** (`20260915…` no — `20261015_f1a3c5e7b9d1`):
+   `applications.outcome_{status,source,note,evidence}` + `resolved_at` +
+   `follow_up_of_id`; drafts gain `follow_up_application_id`; new tables
+   `outcome_proposals` (unique (application, message) — the re-scan
+   dedupe backstop) and `gmail_scan_state` (per-user Gmail after: date
+   cursor). RLS: both new tables in `rls_sql.USER_TABLES`.
+   `set_outcome` is the single writer; send-side `status` proven
+   untouched by test.
+2. **Manual markers**: `POST /api/v1/outcomes/{app_id}/outcome`
+   (ratelimit `outcome_update`) + Sent-card "What happened?" select.
+   Manual outcomes outrank detected ones — `decide_proposal` refuses to
+   overwrite a manual outcome and marks the proposal superseded.
+3. **Reply detection** (`POST /api/v1/outcomes/scan`, ratelimit
+   `outcome_scan`; daily via `run_outcome_maintenance` hooked into the
+   scheduled hunt): Composio adapter `gmail_scan.py` discovers tool
+   slugs at runtime (vendor rule — never hardcoded), searches by
+   sender terms (target email, its domain, posting host, ATS domains),
+   reads FULL bodies only (no body → surfaced-uncertain, never a
+   snippet). Classification is rule-based EN+SV (no AI spend, no
+   nondeterminism): acknowledgments classify to None BY ABSENCE of
+   class evidence — an ack pre-check was removed after the red test
+   caught it swallowing the most common rejection letter ("Thank you
+   for applying. We have decided to move forward…"). Propose-then-
+   confirm: scans only file proposals; approval is the sole write path.
+4. **Nudges + stats**: `GET /outcomes/nudges` (deadline urgency 7d/🔥 /
+   passed/⚠ on the Review tab — the Finish-applying cliff; follow-up
+   offer 10d-quiet <2 follow-ups → `create_follow_up_draft` seeded from
+   the original package through the SAME review gates, capped at 2
+   counting drafts-in-review; confirm-applied prompt for 3d+-stale
+   manual hand-offs; 60d quiet sweep proposing `no_response`).
+   `GET /outcomes/stats`: honest denominator = sent by us OR
+   user-confirmed applied (beta reality: email apply is off, so
+   manual hand-offs count only when the user confirms —
+   `confirm_applied` nudges exist to make that cheap).
+
+**Deviations from the design sketch, all recorded in code comments:**
+
+- `outcome_source` gained `sweep` (the WO sketch listed manual |
+  reply_detection; the 60d sweep files proposals from a third source
+  and the column must say where an outcome came from).
+- Proposals carry `evidence_received_at`; `resolved_at` is set from it
+  on approval so time-to-first-response measures the REPLY, not the
+  scan. Consequence: `resolved_at` is set on every outcome write (an
+  open `interview` has a first-response time), not only finals —
+  final-only semantics would null the stat for the cohort that matters
+  most.
+- Classification is deterministic rules, not an AI call: zero marginal
+  cost, testable offline, and uncertainty surfaces instead of guessing.
+  An AI judge can layer on later without touching the contract.
+
+**Not verified live (the one honest open item):** the Composio Gmail
+read path (`gmail_fetch_messages`) follows the same
+slug-discovery-at-runtime discipline as the WO-07 connection layer and
+is unit-tested only through the injected `FetchMessages` contract. The
+first real scan (Settings → connected Gmail → Sent page → scan, or the
+first scheduled hunt for a connected user) is the live verification —
+same first-call discipline as `scripts/composio_first_call.py`. All
+failures degrade into `gmail_scan_state.last_error`; they never fail
+the hunt.

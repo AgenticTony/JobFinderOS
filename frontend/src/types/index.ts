@@ -46,6 +46,19 @@ export interface Match {
   job: Job | null;
 }
 
+export type OutcomeStatus =
+  | 'drafted'
+  | 'applied'
+  | 'interview'
+  | 'offer'
+  | 'hired'
+  | 'rejected'
+  | 'no_response'
+  | 'offer_declined'
+  | 'withdrawn';
+
+export type OutcomeSource = 'manual' | 'reply_detection' | 'sweep';
+
 export interface Application {
   id: number;
   job_id: number;
@@ -59,10 +72,71 @@ export interface Application {
   apply_url: string | null;
   sent_at: string | null;
   error: string | null;
+  // WO-20 outcome layer — the employer-side lifecycle, parallel to the
+  // send-side `status` above (the two are never conflated).
+  outcome_status?: OutcomeStatus | null;
+  outcome_source?: OutcomeSource | null;
+  outcome_note?: string | null;
+  resolved_at?: string | null;
+  follow_up_of_id?: number | null;
   created_at: string;
   // Embedded by the backend since the 2026-09-11 egress fix (the Sent
   // page used to join this client-side by walking the whole jobs pool)
   job?: Job | null;
+}
+
+// WO-20 propose-then-confirm: a detected (or swept) outcome change,
+// cited with its evidence, awaiting the user's approve/dismiss.
+export interface OutcomeProposal {
+  id: number;
+  application_id: number;
+  job_id: number | null;
+  proposed_status: OutcomeStatus;
+  source: 'reply_detection' | 'sweep';
+  evidence_message_id: string | null;
+  evidence_from: string | null;
+  evidence_subject: string | null;
+  evidence_received_at: string | null;
+  reason: string | null;
+  decision: 'approved' | 'dismissed' | null;
+  decided_at: string | null;
+  created_at: string;
+}
+
+export interface OutcomeNudges {
+  deadlines: Array<{
+    draft_id: number;
+    job_id: number;
+    title: string;
+    company: string | null;
+    days_left: number;
+    level: 'urgent' | 'passed';
+  }>;
+  follow_ups: Array<{
+    application_id: number;
+    job_id: number;
+    days_quiet: number;
+    follow_up_count: number;
+  }>;
+  confirm_applied: Array<{ application_id: number; job_id: number }>;
+  pending_proposals: number;
+  thresholds: {
+    deadline_urgent_days: number;
+    follow_up_quiet_days: number;
+    follow_up_max: number;
+    quiet_sweep_days: number;
+  };
+}
+
+export interface OutcomeStats {
+  sent_total: number;
+  responded_total: number;
+  response_rate: number | null;
+  interview_total: number;
+  interview_rate: number | null;
+  no_response_total: number;
+  avg_days_to_first_response: number | null;
+  outcome_counts: Record<string, number>;
 }
 
 export interface ApplicationDraft {

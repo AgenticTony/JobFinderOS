@@ -68,6 +68,12 @@ BUCKETS = {
     "draft_update": (60, 3600),      # package edits per hour
     "draft_submit": (20, 3600),      # submissions per hour
     "application_retry": (20, 3600), # failed-send retries per hour
+    # WO-20 outcome layer — cheap DB writes, but bounded like the rest
+    # (a scripted loop must not churn outcome history or proposals).
+    "outcome_update": (60, 3600),    # manual markers per hour
+    "outcome_decide": (60, 3600),    # proposal approve/dismiss per hour
+    "outcome_scan": (6, 3600),       # inbox scans per hour (vendor calls)
+    "followup_create": (10, 3600),   # follow-up drafts per hour
     # The hard ceiling on ACTUAL employer emails: hourly buckets alone
     # still allow a patient (or scripted) account to reach hundreds of
     # employers a day from the shared APPLY_FROM_EMAIL domain — a
