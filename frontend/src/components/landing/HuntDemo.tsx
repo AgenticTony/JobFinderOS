@@ -1,11 +1,13 @@
 'use client';
 
-// WO-28: the interactive hunt demo. Everything here is ILLUSTRATIVE —
-// sample jobs, a sample CV's evidence chips, a sample draft opening;
-// no real user's data appears. The mechanisms it depicts are real:
-// the minimum-score threshold gates what reaches you (onboarding
-// setting), and drafts are per-listing artifacts you approve before
-// anything is sent. The badge keeps the illustration honest.
+// WO-28 + owner feedback 2026-10-15: the interactive score slider is
+// GONE. The product lets you SET a minimum score once in onboarding;
+// it does not offer live feed-filtering by drag — and the landing must
+// never demo an interaction the console doesn't have. What remains is
+// what the console really shows: verdict cards with evidence chips
+// (have / gap / carries — the real MatchCard columns), and the
+// approval gate — drafts you inspect before anything is sent. The
+// badge keeps the illustration honest: sample jobs, a sample CV.
 
 import { useState } from 'react';
 import { ArrowRight, Check, X } from 'lucide-react';
@@ -13,18 +15,9 @@ import { ArrowRight, Check, X } from 'lucide-react';
 import Reveal from '@/components/landing/Reveal';
 import { dicts, type Dict } from '@/i18n/dict';
 
-// Scores 84/71/58: at the default threshold 60, two of three cards
-// clear the bar — dragging up prunes to one, dragging down admits the
-// skip verdict. The one number a visitor should take away: a higher
-// bar means fewer, better matches.
-const DEFAULT_THRESHOLD = 60;
-
 export default function HuntDemo({ t = dicts.en }: { t?: Dict }) {
   const d = t.demo;
-  const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD);
   const [showDraft, setShowDraft] = useState(false);
-
-  const kept = d.cards.filter((c) => c.score >= threshold);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-24 sm:py-28">
@@ -42,33 +35,8 @@ export default function HuntDemo({ t = dicts.en }: { t?: Dict }) {
 
       <Reveal delay={90}>
         <div className="mt-10 rounded-2xl border border-line bg-surface p-6 sm:p-8">
-          {/* The slider: the onboarding minimum-score setting, made
-              tangible. aria-live announces the changing count. */}
-          <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-            <label
-              htmlFor="demo-min-score"
-              className="num text-[10px] uppercase tracking-[0.16em] text-paper/45"
-            >
-              {d.minScoreLabel}
-            </label>
-            <p aria-live="polite" className="num text-sm text-paper/70">
-              {d.reachLine(threshold, kept.length, d.cards.length)}
-            </p>
-          </div>
-          <input
-            id="demo-min-score"
-            type="range"
-            min={55}
-            max={90}
-            step={1}
-            value={threshold}
-            onChange={(e) => setThreshold(Number(e.target.value))}
-            aria-label={d.minScoreLabel}
-            className="mt-4 w-full accent-signal"
-          />
-
-          <ul className="mt-8 space-y-4">
-            {kept.map((card) => (
+          <ul className="space-y-4">
+            {d.cards.map((card) => (
               <li
                 key={card.title}
                 className="rounded-xl border border-line bg-ink p-5 sm:p-6"
