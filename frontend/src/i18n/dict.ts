@@ -31,9 +31,12 @@ const en = {
   },
   hero: {
     badge: 'Sweden + UK · hunts twice daily',
-    h1a: 'Fewer applications.',
-    h1b: 'The right ones.',
-    sub: "Sweden's and the UK's job markets, hunted, cleaned and scored against your CV. You approve everything.",
+    // WO-30 hero (owner pick 2026-10-15, evidence: REA copy teardown
+    // §4 — feeling-led H1, understanding in the sub): "Get your
+    // evenings back" is the offload outcome reviewers describe.
+    h1a: 'Job hunting is stressful enough.',
+    h1b: 'Get your evenings back.',
+    sub: 'JobFinderOS scans both markets twice a day and scores every listing against your CV — you approve what gets sent. No more scrolling job boards at midnight.',
     cta: 'Upload your CV — free in beta',
     how: 'See how it works',
     proof: 'No card · no credits · nothing sent without you',
@@ -348,20 +351,23 @@ const sv: Dict = {
     getStarted: 'Kom igång',
   },
   hero: {
-    badge: 'Sverige + Storbritannien · jakt två gånger om dagen',
-    h1a: 'Färre ansökningar.',
-    h1b: 'De rätta.',
-    sub: 'Sveriges och Storbritanniens jobbmarknader — jagade, rensade och poängsatta mot ditt CV. Du godkänner allt.',
+    // WO-30 hero (owner pick 2026-10-15) + the de-jakt rule: Swedish
+    // landing copy uses bevakar/bevakning, never jakt/jagar — the
+    // hunt metaphor stays English-only (product names untouched).
+    badge: 'Sverige + Storbritannien · bevakning två gånger om dagen',
+    h1a: 'Jobbsökandet är stressigt nog.',
+    h1b: 'Få tillbaka dina kvällar.',
+    sub: 'JobFinderOS bevakar marknaden två gånger om dagen och poängsätter varje annons mot ditt CV — du godkänner det som skickas. Inget mer kvällsskrollande efter jobb.',
     cta: 'Ladda upp ditt CV — gratis i beta',
     how: 'Se hur det fungerar',
     proof: 'Inget kort · inga krediter · inget skickas utan dig',
     formats: 'PDF eller Word · max 5 MB',
     pulseAlt:
-      'Jaktpulsen: annonser från en riktig körning, från jagade till matchade, varje annons poängsatt mot ditt CV',
+      'Bevakningsflödet: annonser från en riktig körning, varje annons poängsatt mot ditt CV',
   },
   stats: [
     ['2', 'länder bevakas'],
-    ['6', 'källor per jakt'],
+    ['6', 'källor per körning'],
     ['2×', 'körningar varje dag'],
     ['0', 'påhittade fakta'],
   ],
@@ -371,7 +377,7 @@ const sv: Dict = {
       body: 'Ditt CV, dina städer och regioner, din minimipoäng. En stad eller en hel region.',
     },
     {
-      title: 'Jakten körs två gånger om dagen',
+      title: 'Bevakningen körs två gånger om dagen',
       body: 'Nya annonser skrapas, bemanningsföretagens korspostningar slås samman med direktannonsen och varje överlevande poängsätts. Resten når aldrig dig.',
     },
     {
@@ -381,12 +387,12 @@ const sv: Dict = {
   ],
   verdict: {
     h2a: 'Du laddar upp en gång.',
-    h2b: 'Den jagar två gånger om dagen.',
+    h2b: 'Den bevakar två gånger om dagen.',
     h2: 'Varje match förklarar sig själv.',
     body: 'Inte en poäng i en svart låda. Varje bedömning visar kompetenserna du har, det annonsen kräver som du saknar, och vad som överförs — så att du söker rätt jobb och medvetet hoppar över resten.',
     alt: 'En matchbedömning: jobbet, poängen och tre kolumner — vad du har, vad de vill ha, vad som överförs',
     caption: 'En riktig bedömning, oredigerad',
-    pulseCaption: 'Jaktpulsen, från en riktig körning',
+    pulseCaption: 'Bevakningsflödet, från en riktig körning',
   },
   volume: {
     h2: 'Volym är ingen strategi.',
@@ -461,18 +467,18 @@ const sv: Dict = {
     ] as [string, string, string][],
   },
   sourcesSec: {
-    h2: 'Var vi jagar.',
+    h2: 'Var vi bevakar.',
     ariaLabel: 'Jobbkällor',
     cards: [
       {
         tag: 'Sverige',
         title: 'Hela det nationella flödet.',
-        body: 'Varje offentlig annons i landet, direkt från den officiella källan. Är den utlagd är den jagad.',
+        body: 'Varje offentlig annons i landet, direkt från den officiella källan. Är den utlagd finns den med.',
       },
       {
         tag: 'Storbritannien',
         title: 'Alla sektorer, varje dag.',
-        body: 'Ett av marknadens största jobbflöden, poängsatt av samma motor som den svenska jakten.',
+        body: 'Ett av marknadens största jobbflöden, poängsatt av samma motor som den svenska bevakningen.',
       },
       {
         tag: 'Precision',
@@ -545,14 +551,14 @@ const sv: Dict = {
       },
       {
         q: 'Fungerar det på svenska och engelska?',
-        a: 'Ja. Jakten läser annonser på båda språken och skriver ditt CV och personliga brev på annonsens språk.',
+        a: 'Ja. Bevakningen läser annonser på båda språken och skriver ditt CV och personliga brev på annonsens språk.',
       },
     ],
   },
   final: {
     h2a: 'Ditt nästa jobb är',
     h2b: 'redan utlagt.',
-    sub: 'Någonstans i kvällens jakt — se dina första matchningar imorgon bitti.',
+    sub: 'Någonstans i kvällens bevakning — se dina första matchningar imorgon bitti.',
     cta: 'Ladda upp ditt CV',
   },
   sticky: {
@@ -592,7 +598,7 @@ const sv: Dict = {
     busyRegister: 'Skapar konto…',
     busyForgot: 'Skickar återställningslänk…',
     submitSignin: 'Logga in',
-    submitRegister: 'Skapa konto och börja jaga',
+    submitRegister: 'Skapa konto och kom igång',
     submitForgot: 'Skicka återställningslänk',
     forgotLink: 'Glömt ditt lösenord?',
     checkEmailTitle: 'Kolla din inkorg',
@@ -603,7 +609,7 @@ const sv: Dict = {
     createAccount: 'Skapa ett konto',
     alreadyHunting: 'Jagar du redan med oss?',
     signIn: 'Logga in',
-    footerLine: 'Jagar två gånger om dagen · poängsätter ärligt · inget skickas utan dig',
+    footerLine: 'Bevakar två gånger om dagen · poängsätter ärligt · inget skickas utan dig',
     privacy: 'Integritetsmeddelande',
     errWrong: 'Fel e-post eller lösenord',
     errExists: 'Den e-postadressen har redan ett konto, eller så är lösenordet för kort',
