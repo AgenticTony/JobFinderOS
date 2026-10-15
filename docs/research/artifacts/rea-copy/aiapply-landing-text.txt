@@ -1,0 +1,787 @@
+- document:
+  - region "This website uses cookies":
+    - link "Cookiebot by Usercentrics - opens in a new window":
+      - /url: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/?utm_source=banner_cb&utm_medium=referral&utm_content=v2
+    - tabpanel "Consent":
+      - heading "This website uses cookies" [level=2]
+      - paragraph: We use cookies to ensure our website works effectively for you, enhancing your browsing experience without tracking your personal information.
+      - group "Consent Selection":
+        - text: Consent Selection
+        - strong: Necessary
+        - checkbox "Necessary" [checked] [disabled]
+        - strong: Preferences
+        - switch "Preferences" [checked]
+        - strong: Statistics
+        - switch "Statistics" [checked]
+        - strong: Marketing
+        - switch "Marketing" [checked]
+      - link "Show details":
+        - /url: "#"
+    - button "OK"
+  - navigation:
+    - link "AiApply":
+      - /url: https://aiapply.co
+      - img
+    - img "User"
+    - img "User"
+    - img "User"
+    - img "User"
+    - text: Loved by 2,064,348 users ★★★★★
+    - button "EN":
+      - img
+      - text: EN
+    - link "Log in":
+      - /url: https://aiapply.co/signin?from=navbar
+    - link "Sign up":
+      - /url: /product
+  - text: 🏆 61% of users get an interview in first 10 days
+  - heading "Stop Applying for Weeks Start Interviewing in Days" [level=1]
+  - paragraph: AlApply finds high-match roles, tailors your resume & cover letter, auto-applies, and coaches you live - so you move from submit to getting a job fast.
+  - link "Start now":
+    - /url: /product
+    - text: Start now
+    - img
+  - heading "Get hired by top companies worldwide" [level=2]
+  - img "Coinbase"
+  - img "Spotify"
+  - img "Microsoft"
+  - img "Meta"
+  - img "SpaceX"
+  - img "Deloitte"
+  - img "Dropbox"
+  - img "FedEx"
+  - img "Amazon"
+  - img "Coinbase"
+  - img "Spotify"
+  - img "Microsoft"
+  - img "Meta"
+  - img "SpaceX"
+  - img "Deloitte"
+  - img "Dropbox"
+  - img "FedEx"
+  - img "Amazon"
+  - img
+  - heading "Director of Sales" [level=3]
+  - paragraph: Stripe
+  - text: 💰 $210k–$280k OTE 📍 Remote 📊 Director
+  - paragraph: Summary
+  - paragraph: Lead Stripe's mid-market sales team across North America. Own pipeline, forecast, and a $40M ARR new-business target.
+  - text: ✨
+  - paragraph: Why this is a good fit
+  - paragraph: Your record scaling SaaS sales orgs and consistent quota over-attainment make you a strong fit for this leadership role.
+  - paragraph: Qualifications
+  - text: ✓ Built & led teams of 12+ AEs ✓ 130% team quota attainment ✓ Payments / fintech domain ✗ No EMEA leadership experience 84/100 Excellent fit
+  - img
+  - heading "Senior Financial Analyst" [level=3]
+  - paragraph: JPMorgan Chase
+  - text: 💰 $110k–$150k 📍 New York, US 📊 Senior
+  - paragraph: Summary
+  - paragraph: Build financial models and forecasts for the corporate banking division. Partner with senior leadership on strategic deals.
+  - text: ✨
+  - paragraph: Why this is a good fit
+  - paragraph: Your modeling background, CFA progress, and capital markets experience are a strong match for this role.
+  - paragraph: Qualifications
+  - text: ✓ Advanced Excel & SQL modeling ✓ 4+ years FP&A experience ✓ CFA Level II candidate ✗ No M&A deal exposure 89/100 Excellent fit
+  - img
+  - text: Stripe · 2 min ago Senior Backend Engineer
+  - img
+  - text: Netflix · 8 min ago Staff Software Engineer
+  - img
+  - text: Tesla · 15 min ago Firmware Engineer, Autopilot
+  - img
+  - text: Salesforce · 18 min ago Lead Full-Stack Developer
+  - img
+  - text: Airbnb · 22 min ago Senior Data Scientist
+  - img
+  - text: Uber · 25 min ago Engineering Manager, Payments
+  - img
+  - text: Shopify · 30 min ago Senior React Developer
+  - img
+  - text: Stripe · 2 min ago Senior Backend Engineer
+  - img
+  - text: Netflix · 8 min ago Staff Software Engineer
+  - img
+  - text: Tesla · 15 min ago Firmware Engineer, Autopilot
+  - img
+  - text: Salesforce · 18 min ago Lead Full-Stack Developer
+  - img
+  - text: Airbnb · 22 min ago Senior Data Scientist
+  - img
+  - text: Uber · 25 min ago Engineering Manager, Payments
+  - img
+  - text: Shopify · 30 min ago Senior React Developer
+  - heading "You are 80% more likely to get a job faster if you use AIApply" [level=2]
+  - text: Prepare AI Resume Creator Generate resumes and cover letters for each job application, based on your skills and experience
+  - link "Start now":
+    - /url: /product
+    - text: Start now
+    - img
+  - img "AI for jobs"
+  - img "Resume builder AI"
+  - img "How to build a resume AI"
+  - img "AI for jobs"
+  - text: Loved by 2,064,348 users Make it less wordy|
+  - img
+  - figure:
+    - heading "Steve Jobs" [level=3]
+    - img
+    - paragraph: Los Altos, CA
+    - img
+    - paragraph: steve@apple.com
+    - img
+    - paragraph: linkedin.com/stevejobs
+    - paragraph: Summary
+    - paragraph: Product leader with a track record of shipping user-loved features, mentoring cross-functional teams, and driving measurable business growth across consumer and B2B products.
+    - paragraph: Experience
+    - heading "Co-Founder, Chairman & CEO" [level=3]
+    - paragraph: "| Apple Inc."
+    - paragraph: 1997–2011
+    - text: • Launched Apple I and Apple II, the first mass-market personal computers. • Led development of the Macintosh, the first commercially successful GUI computer. • Orchestrated Apple's turnaround (1997–2011); introduced iMac, iPod, iPhone, iPad, and the App Store.
+    - heading "Founder & CEO" [level=3]
+    - paragraph: "| NeXT Inc."
+    - paragraph: 1985–1996
+    - text: • Built high-end workstations and NeXTSTEP OS; core technology later became the foundation for macOS and iOS. • Sold NeXT to Apple in 1996, catalyzing Apple's modern software platform.
+    - heading "Chairman & CEO" [level=3]
+    - paragraph: "| Pixar Animation Studios"
+    - paragraph: 1986–2006
+    - text: • Financed and led Pixar's growth into a premier animation studio, delivering industry-defining films and a successful IPO; acquired by Disney in 2006.
+  - text: Apply Auto Apply To Jobs Let AIApply to matching jobs for you automatically. Save time and get a job faster
+  - link "Start now":
+    - /url: /product
+    - text: Start now
+    - img
+  - text: 372,241+ roles applied to
+  - img "Google"
+  - text: Staff Engineer AI/ML Just now TensorFlow ML
+  - button "Applying Now..."
+  - img "Stripe"
+  - text: Data Analyst, Stripe Finance 3h Analytics Python
+  - button "Applied"
+  - img "Microsoft"
+  - text: Strategy Partner, Microsoft Corporate 4h Strategy Leadership
+  - button "Pending"
+  - img "Meta"
+  - text: Product Manager Technology 5h Product AI/ML
+  - button "Applied"
+  - img "Google"
+  - text: Software Engineer Engineering 6h React Node.js
+  - button "Applied"
+  - text: Succeed Interview Buddy Get real-time interview help and detailed post-interview feedback
+  - link "Start now":
+    - /url: /product
+    - text: Start now
+    - img
+  - figure "4.7 out of 5":
+    - img "5 star rating"
+    - text: 4.7 • 387 Ratings
+  - text: Interview Buddy is the future of job prep. It gave me perfectly tailored answers, anticipated follow-up questions, and helped me calm my nerves. Worth every penny!
+  - img "Jason T."
+  - text: Jason T., Sales Executive
+  - img "Interview Buddy Demo"
+  - checkbox
+  - text: Answer ⌘ A Reset ⌘ R Our enterprise sales cycle is 120 days; how would you shorten it?
+  - heading "Everything you need to get a job FAST!" [level=2]
+  - heading "Auto Apply" [level=3]:
+    - link "Auto Apply":
+      - /url: https://aiapply.co/auto-apply
+  - paragraph: Automate your job search. AIApply applies to perfectly matched positions daily while you focus on preparing for interviews.
+  - img "AiApply to jobs"
+  - heading "AI Resume Builder" [level=3]:
+    - link "AI Resume Builder":
+      - /url: https://aiapply.co/resume-builder
+  - paragraph: Build ATS-optimized resumes tailored to each job description. Our AI highlights your best skills to help you get more interviews.
+  - img "is aiapply better than kickresume"
+  - heading "AI Cover Letter" [level=3]:
+    - link "AI Cover Letter":
+      - /url: https://aiapply.co/cover-letter-generator
+  - paragraph: Generate personalized cover letters in seconds. Each letter matches the job requirements and showcases why you're the perfect fit.
+  - img "cover letter generator"
+  - heading "AI Interview Practice" [level=3]:
+    - link "AI Interview Practice":
+      - /url: https://aiapply.co/ai-job-interview
+  - paragraph: Simulate real interviews with AI. Get role-specific questions, instant feedback, and build the confidence to ace your next interview.
+  - img "ai cover letter"
+  - heading "Interview Buddy" [level=3]:
+    - link "Interview Buddy":
+      - /url: https://aiapply.co/interview-answer-buddy
+  - paragraph: Get live AI coaching during interviews. Receive real-time answer suggestions and talking points through your earpiece or screen.
+  - img "Interview buddy"
+  - heading "20M+ Jobs. All in One Place." [level=3]:
+    - link "20M+ Jobs. All in One Place.":
+      - /url: https://aiapply.co/auto-apply
+  - paragraph: Access the largest collection of live job listings on the internet. We scan thousands of sources daily so you never miss the right opportunity.
+  - img "Search millions of live job listings"
+  - img
+  - heading "We help job seekers succeed" [level=2]
+  - link "Start now":
+    - /url: /product
+  - heading "2,064,348+ experienced job seekers are using AIApply" [level=2]
+  - img "Eric Castañeda avatar"
+  - text: Eric Castañeda US
+  - img "5 star rating"
+  - paragraph: Before AI Apply I was stuck in an underpaid role with a terrible boss, so I quit. A couple of days later I gave AI Apply a try, and within 48 hours the interview requests and calls started rolling in. I landed a job in roughly a week and a half. It was decent, but not where I wanted to be on pay. Then a month later, a 70K role I had applied to through AI Apply got back in touch, and after two interviews I just found out I got the offer! The office is in Beverly Hills on Wilshire Blvd, a gorgeous space with views of the Hollywood Hills and the Hollywood Sign. None of this would have happened without AI Apply. Truly life changing. Thank you!
+  - time: April 29, 2026
+  - img "Michael Parker avatar"
+  - text: Michael Parker US
+  - img "5 star rating"
+  - paragraph: "I have been on AIApply for a while now and honestly I am a big fan. The interface is clean and easy to get around, and the AI does an impressively good job of quickly shaping my resume and cover letters to each role. The part I love most is Auto Apply. It is almost effortless: I just set my preferences, add my details, and let the AI run with it. It tracks down matching openings, tailors my materials for each one, and submits them on its own while I put my energy into interview prep instead of endless forms. Way more applications are going out than I could ever handle by hand, and the time savings are huge. If the manual job-search slog has worn you down, AIApply, and especially auto-apply, is absolutely worth a go. Highly recommend!"
+  - time: April 22, 2026
+  - img "John D Patton avatar"
+  - text: John D Patton US
+  - img "5 star rating"
+  - paragraph: Applying with AI here is genuinely effortless. The interface is so intuitive that it saves hours on end, and tailoring each application has boosted the responses I get from companies.
+  - time: June 10, 2025
+  - img "Nancy Karanja avatar"
+  - text: Nancy Karanja GB
+  - img "5 star rating"
+  - paragraph: My experience with this company was fantastic. They supported me brilliantly throughout my applications, showing me how to tailor my CV and cover letter and getting me ready for interviews. The team was professional, quick to respond, and truly committed to helping me succeed.
+  - time: October 26, 2025
+  - text: KR Ken Rylander ES
+  - img "5 star rating"
+  - paragraph: After using AIApply the interviews really started coming in. I would genuinely recommend it.
+  - time: April 8, 2025
+  - img "Dee Linn avatar"
+  - text: Dee Linn US
+  - img "5 star rating"
+  - paragraph: I have not actually tried the service yet, but you can just tell it is the kind of site that would edge out the competition, especially with how affordable the subscription is.
+  - time: May 12, 2026
+  - text: AS Askia US
+  - img "5 star rating"
+  - paragraph: Incredibly easy to use. You can go fully manual, hybrid, or hand it over to full automation. The more feedback you give, the smarter its searching gets over time. It is landing me more interviews, more at-bats, than I ever managed on my own.
+  - time: April 22, 2026
+  - img "Olufisayo Abiodun avatar"
+  - text: Olufisayo Abiodun US
+  - img "5 star rating"
+  - paragraph: What an incredible tool! I had an interview invite just one day after signing up with AIApply. I love how much time it is saving me!
+  - time: October 17, 2025
+  - img "Brit Dunn avatar"
+  - text: Brit Dunn US
+  - img "5 star rating"
+  - paragraph: Submits applications quickly and reliably, freeing you up to spend your time sharpening the interview and technical skills you need to land the role.
+  - time: May 4, 2026
+  - img "Tiffany tae Jayy avatar"
+  - text: Tiffany tae Jayy AE
+  - img "5 star rating"
+  - paragraph: It helped me put together a resume that opened the door to a great opportunity.
+  - time: June 30, 2025
+  - img "Mohamed Benkabbou avatar"
+  - text: Mohamed Benkabbou US
+  - img "5 star rating"
+  - paragraph: "The best part was getting interviews in the very first week! Think about it: applying on your own, reaching 100 jobs could take six months or more, but with an AI tool like this you knock out 100 in under an hour. AMAZING!!!"
+  - time: April 30, 2026
+  - text: RB Robin Birdsong US
+  - img "5 star rating"
+  - paragraph: The simplicity and the instant results made for an amazing experience. It brings real efficiency to a process that has been a bottleneck forever. I am genuinely excited just to see which companies take interest in my background and skill set.
+  - time: May 6, 2026
+  - text: YU Yuriy US
+  - img "5 star rating"
+  - paragraph: I have not landed a role yet, still working through interviews, but once I started with AIApply I had 4 interviews booked in the first week! Before that I poured a ton of time, and honestly a lot of money, into LinkedIn Premium and Indeed, and neither got me real results across six whole months. If you are job hunting, do not burn months stressing or firing off applications that go nowhere. Give AIApply a shot. It has already made a massive difference for me. Thank you, AIApply!
+  - time: May 11, 2026
+  - img "Felipe Thum avatar"
+  - text: Felipe Thum BR
+  - img "5 star rating"
+  - paragraph: The tool delivers on every promise it makes! No regrets using it at all!
+  - time: May 5, 2026
+  - text: CL Conservative Libertarian US
+  - img "5 star rating"
+  - paragraph: Setup was simple and the interface was pretty easy to follow. I have only just started, so this is more of a first-impressions review. AIApply already sent my resume to 70 well-matched jobs, and I am hoping to save serious time by letting it do the applying for me.
+  - time: April 19, 2026
+  - img "Martin Mendez avatar"
+  - text: Martin Mendez AR
+  - img "5 star rating"
+  - paragraph: I was getting absolutely nowhere before AiApply. A single week after I started, the interview requests began coming in and I even received an offer. Highly recommended!
+  - time: April 21, 2026
+  - img "Jay avatar"
+  - text: Jay AU
+  - img "5 star rating"
+  - paragraph: Having AiApply find the jobs, tailor my resume, and apply for me automatically makes the whole thing so much easier. Now all that is left is to prep for the interview. Thank you so much, AIApply!
+  - time: April 26, 2026
+  - img "Tapas Das avatar"
+  - text: Tapas Das AE
+  - img "5 star rating"
+  - paragraph: I only just started with AiApply and within ten minutes it had already impressed me with what it can do. Absolutely amazing.
+  - time: April 28, 2026
+  - img "Suzette Bennett avatar"
+  - text: Suzette Bennett US
+  - img "5 star rating"
+  - paragraph: This app handles everything for you, from reworking your resume to writing the cover letter. Applying with AI is the way to go if you want to get noticed.
+  - time: October 27, 2025
+  - text: JC Julian Carlin CR
+  - img "5 star rating"
+  - paragraph: It really worked. In under 48 hours it had applied to 100 jobs on my behalf without any time or effort from me. I am looking forward to seeing how it keeps improving.
+  - time: September 19, 2025
+  - text: DD Derrick DaSilva US
+  - img "5 star rating"
+  - paragraph: AIApply rewrites your resume so your skills and strengths actually stand out to recruiters, and so the filtering software recognizes you instead of screening you out before anyone even takes a look.
+  - time: October 23, 2025
+  - text: MR M R AKSHAY IN
+  - img "5 star rating"
+  - paragraph: AIApply is a handy tool for anyone who wants AI to strengthen their job applications. It tailors your resume and cover letter to each job description, which saves a huge amount of time and effort.
+  - time: October 13, 2025
+  - text: MA Mari GB
+  - img "5 star rating"
+  - paragraph: Using this app for job applications has been awesome. It keeps everything tailored and easy at every step.
+  - time: October 11, 2025
+  - img "Pete DeQuarto avatar"
+  - text: Pete DeQuarto US
+  - img "5 star rating"
+  - paragraph: AIApply is a total game-changer. Thanks to Auto-Apply, I have been applying to jobs I would never even have come across otherwise!
+  - time: October 8, 2025
+  - img "Tomislav Vuković avatar"
+  - text: Tomislav Vuković HR
+  - img "5 star rating"
+  - paragraph: It spared me so much hassle writing cover letters and tweaking my CV for every single vacancy. Give it a try, I am sure it will help you too!
+  - time: July 21, 2025
+  - text: MK Miranda Kay US
+  - img "5 star rating"
+  - paragraph: Love this app. Super helpful, saves me time, and cuts down the stress!
+  - time: May 10, 2026
+  - img "meet shah avatar"
+  - text: meet shah IN
+  - img "5 star rating"
+  - paragraph: My experience with AIApply has been really positive. It made applying far quicker and more manageable by automating the repetitive stuff like filling in forms and customizing resumes.
+  - time: July 2, 2025
+  - text: MA MAX US
+  - img "5 star rating"
+  - paragraph: I wanted to share an updated review after my recent time with AIApply and the Interview Buddy feature. I initially ran into setup and functionality problems with Interview Buddy during Microsoft Teams interviews, but the support team reached out and worked through it with me until it was sorted. I really appreciate that they took my feedback on board and stepped in to fix things. My main concern was around how clear the setup was and how responsive support could be, especially for a paid product you are relying on in time-sensitive interviews. Since then the support experience has gotten better and the issue has been resolved.
+  - time: May 5, 2026
+  - text: SV Sajeesh Vijayan US
+  - img "5 star rating"
+  - paragraph: The ultimate job-search tool. I have been using it to apply for openings, and watching it match roles to my skills is fantastic. It really builds your confidence too. I have not tried the auto-apply feature yet, but I will be giving it a go soon.
+  - time: April 22, 2026
+  - img "Molly Skipsey avatar"
+  - text: Molly Skipsey AU
+  - img "5 star rating"
+  - paragraph: Takes the grind out of the job hunt! I have spent three months on the free version creating tailored cover letters, and it has been incredibly helpful.
+  - time: May 26, 2025
+  - img "Parthiban Subramani avatar"
+  - text: Parthiban Subramani CA
+  - img "5 star rating"
+  - paragraph: AI Apply is a great platform for taking the complexity out of applying. It is easy to use, saves time, and offers genuinely useful AI suggestions to sharpen your applications. A real help for anyone applying to lots of jobs at once.
+  - time: May 9, 2026
+  - img "Angelica Furlong avatar"
+  - text: Angelica Furlong US
+  - img "5 star rating"
+  - paragraph: This is what happens when AI meets your career future. Amazing product, 100% worth the investment.
+  - time: May 3, 2026
+  - img "Sherlonda Pitts avatar"
+  - text: Sherlonda Pitts US
+  - img "5 star rating"
+  - paragraph: I am really enjoying the auto-apply, the cover letters it writes, and the resume builder.
+  - time: May 1, 2026
+  - img "Nkese Edem avatar"
+  - text: Nkese Edem US
+  - img "5 star rating"
+  - paragraph: I got hired by Truist bank!! I really only used AIApply for the first round of applications. They wrote an amazing cover letter and highlighted my experience beautifully. It made me feel confident throughout the process and saved me enough time to keep working gigs while I waited on hiring. I am so grateful God used AIApply to help me apply faster. The responses keep coming, and recruiters call me almost every day.
+  - time: May 1, 2026
+  - text: EK Ednon Khan US
+  - img "5 star rating"
+  - paragraph: Great system. It walks you through a step-by-step process tuned to a specific role, spans plenty of industries so you can apply for different positions, and emails those companies on your behalf at scale.
+  - time: April 18, 2026
+  - img "A. M. avatar"
+  - text: A. M. US
+  - img "5 star rating"
+  - paragraph: The platform is really easy to use, and it is the features that make this job tool so much more valuable than something like LinkedIn or the more basic, bot-like options out there. You actually see results and feel empowered as you go after your next dream gig!
+  - time: October 18, 2025
+  - text: MI Michael GB
+  - img "5 star rating"
+  - paragraph: Fantastic app that has completely transformed how I approach my job search. Incredibly satisfying.
+  - time: October 14, 2025
+  - img "Ryan Butkowsky avatar"
+  - text: Ryan Butkowsky CA
+  - img "5 star rating"
+  - paragraph: AIApply saves an enormous amount of time on the application process and delivers high-quality, focused help with creating effective, valuable application documents. It has seriously leveled up my chances of landing my dream job!
+  - time: September 9, 2025
+  - img "shaimaa faik avatar"
+  - text: shaimaa faik GB
+  - img "5 star rating"
+  - paragraph: It is like having someone on hand to help you search and apply. It boosts your odds of actually being seen.
+  - time: October 30, 2025
+  - img "Thasmeel Singh avatar"
+  - text: Thasmeel Singh ZA
+  - img "5 star rating"
+  - paragraph: AIApply is something we needed years ago. It cuts down the time it takes to put together your profile and makes you far more effective and efficient.
+  - time: July 7, 2025
+  - img "gloria sadetski avatar"
+  - text: gloria sadetski IT
+  - img "5 star rating"
+  - paragraph: It helps me build a personalized CV for each role, so I can stand out from the other job hunters.
+  - time: June 28, 2025
+  - text: MU Mustafa DK
+  - img "5 star rating"
+  - paragraph: Great matches and fast applications that save me loads of time. Highly recommended. I have tried several other platforms, and this one has given me the best-quality matches by far.
+  - time: June 27, 2025
+  - text: KH KH US
+  - img "5 star rating"
+  - paragraph: A HUGE time saver, and entering all my information was really easy. Highly recommended.
+  - time: May 13, 2026
+  - text: VC victor charton CH
+  - img "5 star rating"
+  - paragraph: I love the concept, and the product itself is really good.
+  - time: October 22, 2025
+  - img "Khan ShahebIT avatar"
+  - text: Khan ShahebIT DE
+  - img "5 star rating"
+  - paragraph: I have been on AIApply.co for a few months now and it has been a game-changer for my job search. Between the time-saving features and the user-friendly interface, powered by GPT-4 and Azure AI, I have seen a 3x jump in interview invites!
+  - time: July 18, 2025
+  - text: MM M M US
+  - img "5 star rating"
+  - paragraph: A fantastic solution for today's job market, where finding work feels almost impossible. Thank you, AIApply, for what you do. It genuinely helped me through a tough stretch.
+  - time: May 6, 2026
+  - text: I Ikechukwu Osuji CA
+  - img "5 star rating"
+  - paragraph: Being able to focus on other things while my applications keep running in the background has been a huge win.
+  - time: April 21, 2026
+  - text: EK Eric Keller US
+  - img "5 star rating"
+  - paragraph: It felt fast, streamlined, and simple. I was applying to jobs quicker than I could even read through a posting.
+  - time: April 18, 2026
+  - img "Ahmed Fouad avatar"
+  - text: Ahmed Fouad EG
+  - img "5 star rating"
+  - paragraph: Very easy to use, with features covering every little detail you would need on your hiring journey. Whether you are a beginner or already familiar with these kinds of tools, you will pick it up fast and enjoy the experience.
+  - time: October 22, 2025
+  - img "Stephanie Chow avatar"
+  - text: Stephanie Chow CA
+  - img "5 star rating"
+  - paragraph: The customer service was excellent! Thanks so much for your help, Sabastian!
+  - time: May 12, 2026
+  - img "Nisha Vikram avatar"
+  - text: Nisha Vikram QA
+  - img "5 star rating"
+  - paragraph: I am happy with the service. It is really user friendly.
+  - time: May 9, 2026
+  - img "Jesse Collver avatar"
+  - text: Jesse Collver AU
+  - img "5 star rating"
+  - paragraph: It has completely changed the way I go about applying for new jobs!
+  - time: May 9, 2026
+  - img "Patrick Meadows avatar"
+  - text: Patrick Meadows US
+  - img "5 star rating"
+  - paragraph: Auto-apply is incredible. I love the automatic cover letters and the help with answers during interviews.
+  - time: May 4, 2026
+  - img "Eraina Ferguson avatar"
+  - text: Eraina Ferguson US
+  - img "5 star rating"
+  - paragraph: I love how smooth the intake process is, and the chance to apply for so many roles.
+  - time: May 1, 2026
+  - img "Edu Rivera avatar"
+  - text: Edu Rivera MX
+  - img "5 star rating"
+  - paragraph: It is easy to use, and I am hopeful I will have a job within a few days.
+  - time: May 13, 2026
+  - text: SA Saheed GB
+  - img "5 star rating"
+  - paragraph: A really useful tool. It practically handles your entire job search for you.
+  - time: October 12, 2025
+  - img "Jenia avatar"
+  - text: Jenia US
+  - img "5 star rating"
+  - paragraph: A powerful, brilliant resource that turns the ordinary into something extraordinary.
+  - time: June 27, 2025
+  - img "Akarshak Tanwar avatar"
+  - text: Akarshak Tanwar CA
+  - img "5 star rating"
+  - paragraph: In one week I applied to over 150 jobs and locked in 2 confirmed interviews, with a support team that was quick to respond. The auto-apply feature is fascinating and a real pleasure to use!
+  - time: September 6, 2025
+  - text: SM Sean McKinley US
+  - img "5 star rating"
+  - paragraph: Easy to learn and a great tool for building and customizing how your documents, cover letter and resume, come across. AIApply will make you look great on paper.
+  - time: June 21, 2025
+  - text: RS Renato Stoicov BR
+  - img "5 star rating"
+  - paragraph: The features are friendly, fast, and nicely customized. Really great.
+  - time: May 5, 2026
+  - text: CU customer NL
+  - img "5 star rating"
+  - paragraph: A fantastic first impression. It looks really promising, putting the power of AI to good use.
+  - time: April 23, 2026
+  - text: AK Akash US
+  - img "5 star rating"
+  - paragraph: Landed a job within two weeks.
+  - time: April 17, 2026
+  - img "Thomas Zhang avatar"
+  - text: Thomas Zhang US
+  - img "5 star rating"
+  - paragraph: auto-apply is fantastic
+  - time: October 16, 2025
+  - img "John's SelectFire avatar"
+  - text: John's SelectFire US
+  - img "5 star rating"
+  - paragraph: So user friendly, and I am not tech savvy at all...
+  - time: May 8, 2026
+  - img "Lauren O’Hale avatar"
+  - text: Lauren O’Hale IE
+  - img "5 star rating"
+  - paragraph: Applying is genuinely fast and easy.
+  - time: May 8, 2026
+  - img "Alexandre Matos avatar"
+  - text: Alexandre Matos BR
+  - img "5 star rating"
+  - paragraph: It is really great.
+  - time: May 6, 2026
+  - img "Shivaranjanie Selvam avatar"
+  - text: Shivaranjanie Selvam IN
+  - img "5 star rating"
+  - paragraph: A fantastic companion for your job hunt.
+  - time: May 3, 2026
+  - img "Jerin Davis avatar"
+  - text: Jerin Davis IN
+  - img "5 star rating"
+  - paragraph: It is genuinely good.
+  - time: April 30, 2026
+  - img "karpagavalli avatar"
+  - text: karpagavalli CA
+  - img "5 star rating"
+  - paragraph: Brilliant app.
+  - time: April 27, 2026
+  - img "Jordan Banfield avatar"
+  - text: Jordan Banfield AE
+  - img "5 star rating"
+  - paragraph: Really simple and user friendly.
+  - time: April 23, 2026
+  - img "Kenneth Saunders avatar"
+  - text: Kenneth Saunders US
+  - img "5 star rating"
+  - paragraph: This platform is an absolute game-changer.
+  - time: April 23, 2026
+  - img "Kishore Barua Dip avatar"
+  - text: Kishore Barua Dip AU
+  - img "5 star rating"
+  - paragraph: loving the best of ai-apply
+  - time: April 22, 2026
+  - text: DE Delphine FR
+  - img "5 star rating"
+  - paragraph: Saves both time and mental energy.
+  - time: October 24, 2025
+  - text: PE Peter AU
+  - img "5 star rating"
+  - paragraph: Easy to use and really professional.
+  - time: October 23, 2025
+  - text: SI Silvia US
+  - img "5 star rating"
+  - paragraph: Love it, it is so fast.
+  - time: April 30, 2026
+  - heading "Resume Examples That Get Results" [level=2]
+  - paragraph: Get inspired by professional resume examples tailored to your industry
+  - link "John Smith Python Django Developer Experience Senior Django Developer • Tech Corp 2020 - Present Backend Engineer • StartupXYZ 2018 - 2020 Skills Python Django PostgreSQL AWS Python Django Developer Perfect for developers, programmers, and tech professionals Updated 2 days ago":
+    - /url: /resume-examples/python-django-developer
+    - text: John Smith Python Django Developer Experience Senior Django Developer • Tech Corp 2020 - Present Backend Engineer • StartupXYZ 2018 - 2020 Skills Python Django PostgreSQL AWS
+    - heading "Python Django Developer" [level=3]
+    - paragraph: Perfect for developers, programmers, and tech professionals
+    - img
+    - text: Updated 2 days ago
+  - link "Sarah Johnson Performance Marketing Manager Experience Performance Marketing Lead • BrandCo 2019 - Present Paid Media Manager • Agency 2017 - 2019 Skills Google Ads Analytics Meta Ads CRO Performance Marketing Manager Ideal for marketing professionals and brand strategists Updated 3 days ago":
+    - /url: /resume-examples/performance-marketing-manager
+    - text: Sarah Johnson Performance Marketing Manager Experience Performance Marketing Lead • BrandCo 2019 - Present Paid Media Manager • Agency 2017 - 2019 Skills Google Ads Analytics Meta Ads CRO
+    - heading "Performance Marketing Manager" [level=3]
+    - paragraph: Ideal for marketing professionals and brand strategists
+    - img
+    - text: Updated 3 days ago
+  - link "Michael Chen Revenue Analyst Experience Senior Revenue Analyst • DataCorp 2021 - Present Financial Analyst • Analytics Inc 2019 - 2021 Skills SQL Python Tableau Excel Revenue Analyst Built for analysts who turn numbers into decisions Updated 1 week ago":
+    - /url: /resume-examples/revenue-analyst
+    - text: Michael Chen Revenue Analyst Experience Senior Revenue Analyst • DataCorp 2021 - Present Financial Analyst • Analytics Inc 2019 - 2021 Skills SQL Python Tableau Excel
+    - heading "Revenue Analyst" [level=3]
+    - paragraph: Built for analysts who turn numbers into decisions
+    - img
+    - text: Updated 1 week ago
+  - link "Emma Rodriguez HR Officer Experience HR Officer • PeopleFirst 2021 - Present HR Assistant • TalentCo 2019 - 2021 Skills Recruiting Onboarding HRIS Employee relations HR Officer Made for HR and people-team professionals Updated 5 days ago":
+    - /url: /resume-examples/hr-officer
+    - text: Emma Rodriguez HR Officer Experience HR Officer • PeopleFirst 2021 - Present HR Assistant • TalentCo 2019 - 2021 Skills Recruiting Onboarding HRIS Employee relations
+    - heading "HR Officer" [level=3]
+    - paragraph: Made for HR and people-team professionals
+    - img
+    - text: Updated 5 days ago
+  - link "David Wilson Sales Executive Experience Senior Sales Executive • SalesCorp 2020 - Present Account Executive • GrowthCo 2018 - 2020 Skills CRM Salesforce Negotiation B2B Sales Executive Designed for sales professionals and business development Updated 4 days ago":
+    - /url: /resume-examples/sales-executive
+    - text: David Wilson Sales Executive Experience Senior Sales Executive • SalesCorp 2020 - Present Account Executive • GrowthCo 2018 - 2020 Skills CRM Salesforce Negotiation B2B
+    - heading "Sales Executive" [level=3]
+    - paragraph: Designed for sales professionals and business development
+    - img
+    - text: Updated 4 days ago
+  - link "Lisa Thompson Fintech Product Manager Experience Senior Product Manager • TechVentures 2019 - Present Product Analyst • PayCorp 2017 - 2019 Skills Agile Roadmaps SQL Payments Fintech Product Manager Perfect for product managers and product leads Updated 1 day ago":
+    - /url: /resume-examples/fintech-product-manager
+    - text: Lisa Thompson Fintech Product Manager Experience Senior Product Manager • TechVentures 2019 - Present Product Analyst • PayCorp 2017 - 2019 Skills Agile Roadmaps SQL Payments
+    - heading "Fintech Product Manager" [level=3]
+    - paragraph: Perfect for product managers and product leads
+    - img
+    - text: Updated 1 day ago
+  - link "View All Resume Examples":
+    - /url: /resume-examples
+    - text: View All Resume Examples
+    - img
+  - paragraph:
+    - text: Not sure where to begin? Build a resume section by section with the
+    - link "AI Resume Builder":
+      - /url: https://aiapply.co/resume-builder
+    - text: ", or"
+    - link "turn your LinkedIn profile into a resume":
+      - /url: https://aiapply.co/resume-builder/from-linkedin
+    - text: in a single step.
+  - heading "Frequently Asked Questions" [level=2]
+  - radio
+  - text: What is AIApply and how does it work?
+  - radio
+  - text: How can AIApply help me get a job faster?
+  - radio
+  - text: What features does AIApply offer?
+  - radio
+  - text: Do I need an existing resume to use AIApply?
+  - radio
+  - text: Will my AIApply resume be ATS-friendly?
+  - radio
+  - text: Does using AI mean my resume and cover letters will sound generic?
+  - radio
+  - text: Can employers tell if I used AI to write my application?
+  - radio
+  - text: Is AIApply free to use? Do you offer a free trial?
+  - radio
+  - text: What subscription plans and pricing does AIApply offer?
+  - radio
+  - text: Do I have to pay separately for each feature?
+  - radio
+  - text: Do you offer discounts for students or other groups?
+  - radio
+  - text: What if I'm not satisfied with AIApply? Can I cancel or get a refund?
+  - radio
+  - text: Can I create multiple versions of my resume or cover letter?
+  - radio
+  - text: Can I edit AI-generated resumes, pick templates, and export in different formats?
+  - radio
+  - text: Can AIApply generate cover letters for me?
+  - radio
+  - text: Does AIApply offer interview preparation tools?
+  - radio
+  - text: Can AIApply really apply to jobs on my behalf?
+  - radio
+  - text: Who is AIApply for?
+  - radio
+  - text: How is AIApply different from other resume builders?
+  - radio
+  - text: Is my data safe and private with AIApply?
+  - contentinfo:
+    - complementary:
+      - link:
+        - /url: https://aiapply.co
+        - img
+      - button "🇺🇸 English"
+      - navigation:
+        - link "Privacy Policy":
+          - /url: https://aiapply.co/privacy-policy
+        - link "Terms of Service":
+          - /url: https://aiapply.co/terms-of-service
+        - link "Student discount":
+          - /url: https://aiapply.co/students
+      - img "Google Cloud Partner"
+    - navigation:
+      - heading "Tools" [level=3]
+      - link "Auto Apply To Jobs":
+        - /url: https://aiapply.co/auto-apply
+      - link "AI Cover Letter":
+        - /url: https://aiapply.co/cover-letter-generator
+      - link "AI Resume Builder":
+        - /url: https://aiapply.co/resume-builder
+      - link "Mock Job Interview":
+        - /url: https://aiapply.co/ai-job-interview
+      - link "Interview Buddy":
+        - /url: https://aiapply.co/interview-answer-buddy
+      - link "Resume Translator":
+        - /url: https://aiapply.co/resume-translator
+      - link "Job Board":
+        - /url: /app/jobs
+      - link "LinkedIn to Resume":
+        - /url: https://aiapply.co/resume-builder/from-linkedin
+      - link "AI Resume Scanner":
+        - /url: https://aiapply.co/ai-resume-scanner
+      - link "All Free Tools":
+        - /url: https://aiapply.co/tools
+    - navigation:
+      - heading "Examples" [level=3]
+      - link "Resume Examples":
+        - /url: /resume-examples
+      - link "Cover Letter Examples":
+        - /url: /cover-letter-examples
+      - heading "Resources" [level=3]
+      - link "Career Guides":
+        - /url: /careers
+      - link "Job Skills":
+        - /url: /skills
+      - link "Salary Guides":
+        - /url: /salaries
+      - link "AI Information":
+        - /url: /llms.txt
+    - navigation:
+      - heading "Businesses" [level=3]
+      - link "White Label":
+        - /url: https://aiapply.co/partners
+      - link "For Career Coaches":
+        - /url: https://aiapply.co/coaches
+      - link "Affiliate":
+        - /url: https://aiapply.co/affiliates
+      - link "Hire Talent":
+        - /url: https://hire.aiapply.co
+      - link "Human Data Labs":
+        - /url: https://labs.aiapply.co/
+      - heading "Compare" [level=3]
+      - link "AIApply vs Careerflow":
+        - /url: https://aiapply.co/compare/aiapply-vs-careerflow
+      - link "AIApply vs Final Round AI":
+        - /url: https://aiapply.co/compare/aiapply-vs-finalroundai
+      - link "AIApply vs Huntr":
+        - /url: https://aiapply.co/compare/aiapply-vs-huntr
+      - link "AIApply vs LazyApply":
+        - /url: https://aiapply.co/compare/aiapply-vs-lazyapply
+      - link "AIApply vs LoopCV":
+        - /url: https://aiapply.co/compare/aiapply-vs-loopcv
+      - link "AIApply vs Sonara":
+        - /url: https://aiapply.co/compare/aiapply-vs-sonara
+      - link "AIApply vs Teal":
+        - /url: https://aiapply.co/compare/aiapply-vs-teal
+    - navigation:
+      - heading "Company" [level=3]
+      - link "Careers":
+        - /url: https://careers.aiapply.co
+      - link "hello@aiapply.co":
+        - /url: mailto:hello@aiapply.co
+        - img
+        - text: hello@aiapply.co
+      - paragraph: AIApply Ltd
+      - paragraph: Company No. 15200716
+      - paragraph: Suite 4, New Humberstone House
+      - paragraph: 40 Thurmaston Lane
+      - paragraph: Leicester, LE5 0TE, UK
+    - navigation:
+      - heading "Blog" [level=3]
+      - link "When to Capitalize Job Titles (and When Not To)":
+        - /url: https://aiapply.co/blog/when-to-capitalize-job-titles
+      - link "8 Proven Resume Title Strategies To Get You Noticed in 2026":
+        - /url: https://aiapply.co/blog/resume-title-examples
+      - link "7 Best AI Job Search Tools to Boost Your Career":
+        - /url: https://aiapply.co/blog/ai-job-search-tools
+      - link "Best Careerflow Alternatives in 2026":
+        - /url: https://aiapply.co/blog/careerflow-alternatives
+      - link "Best Teal Alternatives in 2026":
+        - /url: https://aiapply.co/blog/teal-alternatives
+      - link "Best Sonara Alternatives in 2026":
+        - /url: https://aiapply.co/blog/sonara-alternatives
+      - 'link "AIApply vs JobCopilot: Which AI Job Search Tool Is Better"':
+        - /url: https://aiapply.co/blog/aiapply-vs-jobcopilot
+      - link "All Posts":
+        - /url: https://aiapply.co/blog
+  - contentinfo:
+    - complementary:
+      - paragraph: © 2026 AIApply Limited, All rights reserved
+    - navigation:
+      - link "Facebook":
+        - /url: https://www.facebook.com/people/AI-Apply/61553278253785/
+      - link "Instagram":
+        - /url: https://www.instagram.com/aiapply.co/
+      - link "X":
+        - /url: https://x.com/aiapplyco
+        - img
+      - link "TikTok":
+        - /url: https://www.tiktok.com/@aiapply.co
+        - img
+      - link "LinkedIn":
+        - /url: https://www.linkedin.com/company/getaiapply

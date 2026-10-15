@@ -1,0 +1,403 @@
+- document:
+  - region "We value your privacy":
+    - button "Close"
+    - heading "We value your privacy" [level=2]
+    - paragraph:
+      - text: We use cookies to enhance your browsing experience, serve personalized ads or content, and analyse our traffic. By clicking "Accept All", you consent to our use of cookies.
+      - link "Cookie Policy":
+        - /url: https://careerflow.ai/privacy
+    - group:
+      - button "Customize"
+      - button "Reject All"
+      - button "Accept All"
+    - text: Powered by
+    - link "Visit CookieYes website":
+      - /url: https://www.cookieyes.com/product/cookie-consent/?ref=cypbcyb&utm_source=cookie-banner&utm_medium=fl-branding
+  - banner:
+    - link "home":
+      - /url: /
+      - text: Careerflow.ai
+    - navigation:
+      - link "AI Resume Builder":
+        - /url: /resume-builder
+      - button "Features":
+        - text: Features
+        - img
+      - button "Services":
+        - text: Services
+        - img
+      - button "For Orgs":
+        - text: For Orgs
+        - img
+      - button "Resources":
+        - text: Resources
+        - img
+      - link "Human Data":
+        - /url: /human-data
+    - link "Log In":
+      - /url: https://app.careerflow.ai/
+    - link "Sign up":
+      - /url: https://app.careerflow.ai/signup/
+  - text: Trusted by OVER 1.2 million JOB SEEKERS!
+  - heading "Land your dream job. Without the stress." [level=1]
+  - text: AI Resume Builder Automated Job Tracking Optimize your LinkedIn Profile And Much More...
+  - link "Sign up FOR FREE":
+    - /url: https://app.careerflow.ai/signup/
+  - img "Five diverse Careerflow users shown in circular profile photos with colorful backgrounds."
+  - text: "\"I got recruiters from Amazon, Wise, and other companies reaching out to me already!!\""
+  - heading "Trusted by job seekers who've landed at top companies" [level=2]
+  - text: Our users have secured positions at industry-leading companies such as
+  - heading "Say goodbye to job search frustration" [level=2]
+  - text: From constant rejections to landing your dream job, discover the difference Careerflow can make Before Careerflow
+  - heading "Struggling to navigate the job market without the right tools" [level=3]
+  - text: After Careerflow
+  - heading "Easily navigate the job market with AI-powered tools" [level=3]
+  - heading "Rejection" [level=4]
+  - text: Non-compliant resumes lead to rejections
+  - heading "Time Wasted" [level=4]
+  - text: Job searching is a time-consuming task
+  - heading "Fragmented Tools" [level=4]
+  - text: Switching between multiple tools is stressful
+  - heading "No More Rejections" [level=4]
+  - text: Instantly create ATS-friendly resumes
+  - heading "Save Time" [level=4]
+  - text: Careerflow's AI tools simplify your job search
+  - heading "All in One Solution" [level=4]
+  - text: Manage your entire job search in one platform
+  - heading "Real Results for Job Seekers Like You" [level=2]
+  - text: More interviews, offers, and a faster path to your next role 1M+ Job Seekers Served 60% Faster time to interviews 2x More Job Offers
+  - link "Sign up FOR FREE":
+    - /url: https://app.careerflow.ai/signup/
+  - text: FEATURES
+  - heading "Simplify Every Step of Your Job Search with Careerflow" [level=2]
+  - text: AI Resume Builder
+  - heading "Instantly build a job-ready resume with AI" [level=2]
+  - text: Use AI to make your resume ATS-friendly, boost your score, and add job-specific keywords in just a few clicks.
+  - link "Create my resume":
+    - /url: https://app.careerflow.ai/signup/
+  - img "Careerflow AI resume builder showing a resume with 95% overall score, highlighting keyword usage, resume structure, and measurable results."
+  - text: Job Fit Analyzer
+  - heading "Personalize your documents for every Job" [level=2]
+  - text: Quickly create resumes and cover letters tailored to each job’s specific requirements.
+  - link "Analyze Job Fit":
+    - /url: https://app.careerflow.ai/signup/
+  - text: AI Application Autofill
+  - heading "Auto-fill job applications with speed and precision" [level=2]
+  - text: Instantly complete applications with our AI tool, ensuring consistent and accurate entries every time.
+  - link "Autofill your applications":
+    - /url: https://app.careerflow.ai/signup/
+  - text: JOB TRacker
+  - heading "Stay organized and track every application" [level=2]
+  - text: Keep all your job applications in one place, monitor progress, and streamline your search from start to finish.
+  - link "Start tracking":
+    - /url: https://app.careerflow.ai/signup/
+  - heading "Land More Interviews with an Optimized LinkedIn Profile" [level=2]
+  - text: Join over 1 million job seekers who've polished their LinkedIn profiles with Careerflow. Scan yours in one click and start fixing what's holding it back, for free.
+  - link "Sign up FOR FREE":
+    - /url: https://app.careerflow.ai/signup/
+  - heading "Explore our full suite of AI tools & features" [level=2]
+  - text: Enhance your job-hunting experience with tools for every step
+  - link "LinkedIn Profile Optimizer":
+    - /url: "#"
+    - heading "LinkedIn Profile Optimizer" [level=3]
+  - link "Chrome Extension":
+    - /url: "#"
+    - heading "Chrome Extension" [level=3]
+  - link "Interview Preparation":
+    - /url: "#"
+    - heading "Interview Preparation" [level=3]
+  - link "AI Cover Letter Generator":
+    - /url: "#"
+    - heading "AI Cover Letter Generator" [level=3]
+  - link "Networking Tracker":
+    - /url: "#"
+    - heading "Networking Tracker" [level=3]
+  - link "Elevator Pitch":
+    - /url: "#"
+    - heading "Elevator Pitch" [level=3]
+  - link "Skill gap analyzer":
+    - /url: "#"
+    - heading "Skill gap analyzer" [level=3]
+  - link "Resume Templates":
+    - /url: "#"
+    - heading "Resume Templates" [level=3]
+  - heading "Partnering with Organizations that Support Job Seekers" [level=2]
+  - text: We help organizations offer better tools and guidance to job seekers.
+  - link "Bootcamps":
+    - /url: /organizations/bootcamps
+    - img
+    - heading "Bootcamps" [level=4]
+  - link "Workforce Development":
+    - /url: /organizations/workforce-development
+    - img
+    - heading "Workforce Development" [level=4]
+  - link "Outplacement":
+    - /url: /organizations/outplacement
+    - img
+    - heading "Outplacement" [level=4]
+  - link "University Career Centers":
+    - /url: /organizations/higher-ed
+    - img
+    - heading "University Career Centers" [level=4]
+  - link "Career Coaches":
+    - /url: /organizations/career-coaches
+    - img
+    - heading "Career Coaches" [level=4]
+  - link "Explore With Careerflow":
+    - /url: /organizations
+    - img
+    - heading "Explore With Careerflow" [level=4]
+  - link "KNOW MORE":
+    - /url: https://www.careerflow.ai/organizations
+  - heading "Hear From Our Community" [level=2]
+  - text: Trusted and loved by over 1M+ users worldwide.
+  - button:
+    - img
+  - tabpanel:
+    - text: “I have not expected that you will review and build my resume so detailed and even give me an example how to rephrase in another word my experience. Its incredible.”
+    - heading "Max Li" [level=4]
+    - text: Senior Software Engineer
+  - tabpanel:
+    - text: “Honestly, this app has been incredibly helpful for my job search. Even though I hadn't anticipated job hunting in 2024, this app/website has made the process much easier!”
+    - heading "Andrii Z" [level=4]
+    - text: Full Stack Engineer
+  - tabpanel:
+    - text: “Careerflow gave me confidence in my CV and Cover Letter with its skill match checker and generator, enabling multiple submissions to numerous companies”
+    - heading "David Gartner" [level=4]
+    - text: Financial Analyst
+  - button:
+    - img
+  - tablist:
+    - tab "1 of 2": "1"
+    - tab "2 of 2" [selected]: "2"
+    - tab "3 of 2": "3"
+    - tab "4 of 2": "4"
+    - tab "5 of 2": "5"
+    - tab "6 of 2": "6"
+  - heading "Simple Pricing, Powerful Features" [level=2]
+  - text: Whether you're starting out or need extra support, we have a plan for you
+  - tablist:
+    - tab "Weekly"
+    - tab "Monthly"
+    - tab "Quarterly"
+    - tab "Yearly (20% saved)" [selected]
+  - tabpanel "Yearly (20% saved)":
+    - text: Basic Free
+    - link "Start now":
+      - /url: https://app.careerflow.ai/signup/
+    - text: "Start your journey now! What’s Included: Chrome extension Recruiter/HM search Resources and Guides Job Application Tracker (limited) Networking Tracker (limited) Job Application Autofill (limited) Document Storage (limited) Resume Builder (limited) LinkedIn Optimizer (basic) Support (basic) Resume Analysis (basic) Skill Gap Analyzer (limited)"
+    - link "See all Features":
+      - /url: "#"
+    - text: MOST popular Premium $45 $14 .41/month $172.99 total
+    - link "Start now":
+      - /url: https://buy.stripe.com/cN2g2b5202zDblucNm
+    - text: "Save 20% on yearly plans Everything in Free Plan; Plus: Unlimited AI Resumes Unlimited AI Resume ATS Optimizer Unlimited AI Resume Bullet & Summary Writer Advanced AI Resume Analysis Advanced AI LinkedIn Optimizer ATS Score and Keyword Analyzer Unlimited AI Cover Letter Writer Unlimited AI Elevator Pitch Writer Unlimited AI LinkedIn Post Writer Job Description Summarizer Perks and Discounts on Services Premium Support"
+    - link "See all Features":
+      - /url: "#"
+    - text: BEST VALUE Premium Plus $45 $24 .99/month $299.99 total
+    - link "Start now":
+      - /url: https://app.careerflow.ai/
+    - text: "Save 35% on yearly plans Everything in Premium Plan; Plus: AI Mock Interview Interview Analysis Priority Support for faster help"
+  - heading "Have More Questions?" [level=2]
+  - text: Here are some of the frequently asked questions from our customers What is Careerflow, and how can it help my career?
+  - img
+  - paragraph: Careerflow is an AI-powered career management platform designed to help job seekers optimize their resumes, track applications, enhance LinkedIn profiles, and receive career coaching. Our tools improve your job search efficiency and boost your chances of success.
+  - text: How does Careerflow’s AI Resume Analyzer work?
+  - img
+  - paragraph: Our AI Resume Analyzer scans your resume, checks for formatting issues, keyword optimization, and readability, and provides instant feedback to improve your chances of passing Applicant Tracking Systems (ATS) and impressing recruiters.
+  - text: Can Careerflow help me optimize my LinkedIn profile?
+  - img
+  - paragraph: Yes! Our LinkedIn Profile Optimizer analyzes your profile and suggests improvements in areas such as your headline, summary, skills, and keywords to increase visibility and engagement with recruiters.
+  - text: What is Careerflow’s Job Tracker, and how does it work?
+  - img
+  - paragraph: The Job Tracker helps you organize and manage your job applications in one place. You can track application statuses, set reminders for follow-ups, and receive updates on your job search progress.
+  - text: Does Careerflow provide interview and career coaching?
+  - img
+  - paragraph: Yes! We offer expert career coaching services, including interview preparation, resume reviews, and salary negotiation strategies to help you land your dream job.
+  - text: Is Careerflow free, or do I need to pay for premium features?
+  - img
+  - paragraph: Careerflow has both free and premium plans. The free plan includes essential tools like basic resume analysis and limited job tracking, while the premium plan unlocks in-depth career coaching, detailed LinkedIn optimization, and personalized resume reviews.
+  - text: How can I get started with Careerflow?
+  - img
+  - paragraph: Getting started is easy! Sign up, upload your resume or connect your LinkedIn profile, and begin using our AI-powered tools to enhance your job search and career growth.
+  - heading "Insightful Resources" [level=2]
+  - text: Here are some of the frequently asked questions from our customers
+  - list:
+    - listitem:
+      - link:
+        - /url: /blog/how-to-ask-for-a-letter-of-recommendation
+      - 'link "How to Ask for a Letter of Recommendation: Examples, Templates and Email Scripts"':
+        - /url: /blog/how-to-ask-for-a-letter-of-recommendation
+        - 'heading "How to Ask for a Letter of Recommendation: Examples, Templates and Email Scripts" [level=4]'
+      - text: Learn how to ask for a letter of recommendation, who to ask, what to include and how to use email templates.
+      - link "Read More":
+        - /url: /blog/how-to-ask-for-a-letter-of-recommendation
+    - listitem:
+      - link:
+        - /url: /blog/two-weeks-notice-letter
+      - 'link "Two Weeks Notice Letter: Examples, Template and How to Write One"':
+        - /url: /blog/two-weeks-notice-letter
+        - 'heading "Two Weeks Notice Letter: Examples, Template and How to Write One" [level=4]'
+      - text: Learn how to write a two weeks notice letter, what to include, what to avoid and how to use simple templates and examples.
+      - link "Read More":
+        - /url: /blog/two-weeks-notice-letter
+    - listitem:
+      - link:
+        - /url: /blog/thank-you-email-after-interview
+      - 'link "Thank You Email After Interview: Examples, Templates and What to Say"':
+        - /url: /blog/thank-you-email-after-interview
+        - 'heading "Thank You Email After Interview: Examples, Templates and What to Say" [level=4]'
+      - text: Learn when to send a thank-you email after an interview, what to say, what to avoid, and how to use templates and examples.
+      - link "Read More":
+        - /url: /blog/thank-you-email-after-interview
+  - link "View more":
+    - /url: /blog
+  - heading "Land More Interviews with an Optimized LinkedIn Profile" [level=2]
+  - text: Join over 1 million job seekers who've polished their LinkedIn profiles with Careerflow. Scan yours in one click and start fixing what's holding it back, for free.
+  - link "Sign up FOR FREE":
+    - /url: https://app.careerflow.ai/signup/
+  - text: Your Career Copilot. AI-assisted tools and resources to get hired at FAANG, top tech, and startup companies 10X faster.
+  - link:
+    - /url: https://linkedin.com/company/careerflow123
+    - img
+  - link:
+    - /url: https://twitter.com/careerflow_ai
+    - img
+  - link:
+    - /url: https://www.instagram.com/careerflow.ai/
+    - img
+  - link:
+    - /url: https://www.youtube.com/@careerflowai
+    - img
+  - link:
+    - /url: https://www.pinterest.com/Careerflowai/?invite_code=cdf2d480397a4708a9b46910404feea5&sender=1045609375894354122
+    - img
+  - link:
+    - /url: https://www.facebook.com/faangpath
+    - img
+  - heading "Products" [level=4]
+  - link "LinkedIn Optimizer":
+    - /url: /linkedin-optimizer
+  - link "Who's Hiring":
+    - /url: https://hiring-search.careerflow.ai
+  - link "Resume Review":
+    - /url: /resume-review
+  - link "Job Tracker":
+    - /url: /job-tracker
+  - link "Resume Builder":
+    - /url: /resume-builder
+  - link "Cover Letter Writer":
+    - /url: /cover-letter-writer
+  - link "AI Mock Interview":
+    - /url: /mock-interview
+  - link "Resume ATS Checker":
+    - /url: /resume-ats-score-checker
+  - link "Browser Extension":
+    - /url: /browser-extension
+  - link "LinkedIn to Resume":
+    - /url: /linkedin-to-resume-converter
+  - link "Coach Portal":
+    - /url: /organizations
+  - link "All Features":
+    - /url: https://www.careerflow.ai/features
+  - heading "Free Tools" [level=4]
+  - link "Free LinkedIn Review":
+    - /url: /linkedin-optimizer
+  - link "LinkedIn Profile Checklist":
+    - /url: /profile-checklist
+  - link "Headline Generator":
+    - /url: /headline-generator
+  - link "Summary Generator":
+    - /url: /summary-generator
+  - link "AI Post Writer":
+    - /url: /ai-post-writer
+  - link "Job Skill Match":
+    - /url: /skill-match
+  - link "Job Description Summarizer":
+    - /url: /job-description-summarizer
+  - heading "Resources" [level=4]
+  - link "Help Center":
+    - /url: https://help.careerflow.ai
+  - link "Blog":
+    - /url: /blog
+  - link "Resume Templates":
+    - /url: /resume-templates
+  - link "Resume Examples":
+    - /url: /resume-examples
+  - link "Cover Letter Examples":
+    - /url: /cover-letters
+  - link "Community":
+    - /url: https://discord.gg/X4USnanjFD
+  - link "Interview Guides":
+    - /url: /interview-guides
+  - link "Job Search Tips":
+    - /url: /job-search-tips
+  - link "ChatGPT Guides":
+    - /url: /chatgpt-guides
+  - link "Career Resources":
+    - /url: /career-resources
+  - link "Human Data Research":
+    - /url: /human-data
+  - link "How It Works":
+    - /url: /how-it-works
+  - link "FAQ":
+    - /url: /faq
+  - link "Gift Cards":
+    - /url: /gift-cards
+  - heading "For" [level=4]
+  - link "For Students":
+    - /url: /for-students
+  - link "For Executives":
+    - /url: /for-executives
+  - link "For Career Changers":
+    - /url: /for-career-changers
+  - link "For Organizations":
+    - /url: /organizations
+  - link "For Career Coaches":
+    - /url: /organizations/career-coaches
+  - link "For Bootcamps":
+    - /url: /organizations/bootcamps
+  - link "For Universities":
+    - /url: /organizations/higher-ed
+  - link "For Outplacement":
+    - /url: /organizations/outplacement
+  - link "For Workforce Development":
+    - /url: /organizations/workforce-development
+  - heading "Company" [level=4]
+  - link "About":
+    - /url: /about
+  - link "Press":
+    - /url: /press
+  - link "Contact Us":
+    - /url: /contact
+  - link "Privacy Policy":
+    - /url: /privacy
+  - link "Your Privacy Rights":
+    - /url: https://www.careerflow.ai/privacy#section-8
+  - link "Terms of Service":
+    - /url: /terms
+  - link "Become an Affiliate":
+    - /url: https://refer.careerflow.ai/signup
+  - link "Do Not Sell or Share My Personal Information":
+    - /url: https://www.careerflow.ai/privacy#section-8
+  - heading "Developers" [level=4]
+  - link "API Docs":
+    - /url: https://docs.careerflow.ai
+  - link "Trust Center":
+    - /url: https://trust.careerflow.ai
+  - link "Integrations":
+    - /url: /organizations/integrations
+  - link "Do Not Sell or Share My Personal Information":
+    - /url: javascript:void(0)
+  - text: © 2026 Careerflow Inc • All Rights Reserved
+  - link:
+    - /url: "#"
+  - img "Fomo"
+  - paragraph: Our AI Resume Builder is now live! Try it out!
+  - complementary "Fomo notifications":
+    - text: What's happening on this website Maryam from the United States just bought Careerflow Premium Subscription
+    - link "Open related page":
+      - /url: https://careerflow.ai/premium?utm_source=fomo&utm_medium=notification
+    - subscript:
+      - link "by Fomo.com":
+        - /url: https://usefomo.com

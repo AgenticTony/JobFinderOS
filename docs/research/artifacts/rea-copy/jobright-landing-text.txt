@@ -1,0 +1,406 @@
+- document:
+  - main:
+    - link "Introducing Jobright AI Recruiter for Employers. Explore Now":
+      - /url: /employers?utm_source=jobright_toc&utm_medium=launch_banner&utm_campaign=tob_public_launch_2026
+      - paragraph: Introducing Jobright AI Recruiter for Employers.
+      - text: Explore Now
+    - link "Jobright home":
+      - /url: /
+      - img "logo"
+    - group "Choose Jobright audience":
+      - link "Job seekers":
+        - /url: /
+      - link "Employers":
+        - /url: /employers
+    - navigation "Job seeker navigation":
+      - button "Features"
+      - link "AI Agent":
+        - /url: /ai-agent
+      - link "Resume AI":
+        - /url: /ai-resume-builder
+    - button "SIGN IN"
+    - button "JOIN NOW"
+    - heading "No More Solo Job Hunting Do it with AI" [level=1]:
+      - text: No More Solo Job Hunting
+      - strong: Do it with AI
+    - text: Get matched jobs, autofill applications, tailored resume, and recommended insider connections in less than 1 min!
+    - button "Try For Free"
+    - link "Jobright featured on Product Hunt":
+      - /url: https://www.producthunt.com/products/jobright-ai-2#jobright-ai-2
+      - img "Jobright featured on Product Hunt"
+    - img "Jobright featured by OpenAI"
+    - link "Jobright Trustpilot review badge":
+      - /url: https://www.trustpilot.com/review/jobright.ai
+      - img "Jobright Trustpilot review badge"
+    - text: Real Results, Not Just Promises
+    - img "main-section-below-left-image"
+    - heading "3,000,000" [level=3]
+    - img "3,000,000"
+    - text: trusted users
+    - heading "3x" [level=3]
+    - img "3x"
+    - text: interviews landed
+    - heading "80%" [level=3]
+    - img "80%"
+    - text: time saved on job search
+    - heading "No.1 Choice" [level=3]
+    - img "No.1 Choice"
+    - text: for 80% of job seekers after their first use Access The
+    - strong: largest job hub!
+    - img "rush"
+    - text: total jobs 8,000,000+
+    - separator
+    - text: Today's new jobs 400,000+
+    - link "company-logo Ford Motor Company · 3 minutes ago Attendance SPOC":
+      - /url: /jobs/info/6ab285418254c44790e55817
+      - img "company-logo"
+      - text: Ford Motor Company · 3 minutes ago Attendance SPOC
+    - link "company-logo Smithfield Foods · 4 minutes ago Talent Acquisition Specialist":
+      - /url: /jobs/info/6ab4526364816213f2d98920
+      - img "company-logo"
+      - text: Smithfield Foods · 4 minutes ago Talent Acquisition Specialist
+    - link "company-logo Charlie Health · 5 minutes ago Growth Strategy Analyst, GTM Data":
+      - /url: /jobs/info/6a5791b3efb06a45240db0a5
+      - img "company-logo"
+      - text: Charlie Health · 5 minutes ago Growth Strategy Analyst, GTM Data
+    - link "company-logo Ericsson · 5 minutes ago People Specialist Intern":
+      - /url: /jobs/info/6aa6f7b9654b2a9424cf84bb
+      - img "company-logo"
+      - text: Ericsson · 5 minutes ago People Specialist Intern
+    - link "company-logo Braze · 5 minutes ago Lead Product Marketing, Decisioning Studio":
+      - /url: /jobs/info/6ab40c6fd2f5fbd604be137b
+      - img "company-logo"
+      - text: Braze · 5 minutes ago Lead Product Marketing, Decisioning Studio
+    - link "company-logo Genius AI · 5 minutes ago Staff Software Engineer, Frontend":
+      - /url: /jobs/info/6a97cd991e082875c173e91d
+      - img "company-logo"
+      - text: Genius AI · 5 minutes ago Staff Software Engineer, Frontend
+    - link "company-logo OpenAI · 6 minutes ago Software Engineer, Dev Productivity":
+      - /url: /jobs/info/67e59f65eff21432b119910d
+      - img "company-logo"
+      - text: OpenAI · 6 minutes ago Software Engineer, Dev Productivity
+    - link "company-logo Hinge Health · 6 minutes ago Staff Engineer/Tech Lead, MSK Verticals":
+      - /url: /jobs/info/6a7b575377e6b569c61bff09
+      - img "company-logo"
+      - text: Hinge Health · 6 minutes ago Staff Engineer/Tech Lead, MSK Verticals
+    - link "company-logo Google · 6 minutes ago Senior Software Engineer, Infrastructure, Google Cloud Storage":
+      - /url: /jobs/info/697aebc417b11b1c2e41ca26
+      - img "company-logo"
+      - text: Google · 6 minutes ago Senior Software Engineer, Infrastructure, Google Cloud Storage
+    - link "company-logo The Wall Street Journal · 7 minutes ago Senior Analyst, Newsroom Data":
+      - /url: /jobs/info/6ad0c520614121de7d947f10
+      - img "company-logo"
+      - text: The Wall Street Journal · 7 minutes ago Senior Analyst, Newsroom Data
+    - link "company-logo Corcept Therapeutics · 9 minutes ago Director, Business Systems - Biometrics":
+      - /url: /jobs/info/6a63de90979290281c70492d
+      - img "company-logo"
+      - text: Corcept Therapeutics · 9 minutes ago Director, Business Systems - Biometrics
+    - link "company-logo Cisco · 9 minutes ago Software Engineer Full Stack / Backend II (Full-Time) - United States":
+      - /url: /jobs/info/6ad007a078d51ae69ce09744
+      - img "company-logo"
+      - text: Cisco · 9 minutes ago Software Engineer Full Stack / Backend II (Full-Time) - United States
+    - link "company-logo Axiom Space · 10 minutes ago Benefits Project Manager":
+      - /url: /jobs/info/6ab401760e0ae54eeea45e29
+      - img "company-logo"
+      - text: Axiom Space · 10 minutes ago Benefits Project Manager
+    - link "company-logo NYC Health + Hospitals · 11 minutes ago Wage and Salary Specialist":
+      - /url: /jobs/info/6ab473ba55e9168cf5ea66ed
+      - img "company-logo"
+      - text: NYC Health + Hospitals · 11 minutes ago Wage and Salary Specialist
+    - link "company-logo Amazon · 11 minutes ago Software Development Engineer II (ADBL186)":
+      - /url: /jobs/info/6a6d012b57120971bf3ae6be
+      - img "company-logo"
+      - text: Amazon · 11 minutes ago Software Development Engineer II (ADBL186)
+    - link "company-logo FurtherAI · 11 minutes ago Founding Product Lead":
+      - /url: /jobs/info/6a7b67bcecfd297707538a91
+      - img "company-logo"
+      - text: FurtherAI · 11 minutes ago Founding Product Lead
+    - link "company-logo Fluidstack · 13 minutes ago Production Engineer, Facilities":
+      - /url: /jobs/info/6a598c344da96a42cfd91a28
+      - img "company-logo"
+      - text: Fluidstack · 13 minutes ago Production Engineer, Facilities
+    - link "company-logo Intel · 14 minutes ago Sales and Marketing - Intern, Graduate":
+      - /url: /jobs/info/6a99b003551435518ebf060d
+      - img "company-logo"
+      - text: Intel · 14 minutes ago Sales and Marketing - Intern, Graduate
+    - link "company-logo Anduril Industries · 16 minutes ago Senior Software Engineer, Robotics Data Foundation (Cloud)":
+      - /url: /jobs/info/6ab406040e0ae54eeea46172
+      - img "company-logo"
+      - text: Anduril Industries · 16 minutes ago Senior Software Engineer, Robotics Data Foundation (Cloud)
+    - link "company-logo Fivetran · 18 minutes ago Senior Software Engineer - Orchestration":
+      - /url: /jobs/info/6ab42bcd55e9168cf5ea4d84
+      - img "company-logo"
+      - text: Fivetran · 18 minutes ago Senior Software Engineer - Orchestration
+    - link "company-logo Ford Motor Company · 3 minutes ago Attendance SPOC":
+      - /url: /jobs/info/6ab285418254c44790e55817
+      - img "company-logo"
+      - text: Ford Motor Company · 3 minutes ago Attendance SPOC
+    - link "company-logo Smithfield Foods · 4 minutes ago Talent Acquisition Specialist":
+      - /url: /jobs/info/6ab4526364816213f2d98920
+      - img "company-logo"
+      - text: Smithfield Foods · 4 minutes ago Talent Acquisition Specialist
+    - link "company-logo Charlie Health · 5 minutes ago Growth Strategy Analyst, GTM Data":
+      - /url: /jobs/info/6a5791b3efb06a45240db0a5
+      - img "company-logo"
+      - text: Charlie Health · 5 minutes ago Growth Strategy Analyst, GTM Data
+    - link "company-logo Ericsson · 5 minutes ago People Specialist Intern":
+      - /url: /jobs/info/6aa6f7b9654b2a9424cf84bb
+      - img "company-logo"
+      - text: Ericsson · 5 minutes ago People Specialist Intern
+    - link "company-logo Braze · 5 minutes ago Lead Product Marketing, Decisioning Studio":
+      - /url: /jobs/info/6ab40c6fd2f5fbd604be137b
+      - img "company-logo"
+      - text: Braze · 5 minutes ago Lead Product Marketing, Decisioning Studio
+    - link "company-logo Genius AI · 5 minutes ago Staff Software Engineer, Frontend":
+      - /url: /jobs/info/6a97cd991e082875c173e91d
+      - img "company-logo"
+      - text: Genius AI · 5 minutes ago Staff Software Engineer, Frontend
+    - link "company-logo OpenAI · 6 minutes ago Software Engineer, Dev Productivity":
+      - /url: /jobs/info/67e59f65eff21432b119910d
+      - img "company-logo"
+      - text: OpenAI · 6 minutes ago Software Engineer, Dev Productivity
+    - link "company-logo Hinge Health · 6 minutes ago Staff Engineer/Tech Lead, MSK Verticals":
+      - /url: /jobs/info/6a7b575377e6b569c61bff09
+      - img "company-logo"
+      - text: Hinge Health · 6 minutes ago Staff Engineer/Tech Lead, MSK Verticals
+    - link "company-logo Google · 6 minutes ago Senior Software Engineer, Infrastructure, Google Cloud Storage":
+      - /url: /jobs/info/697aebc417b11b1c2e41ca26
+      - img "company-logo"
+      - text: Google · 6 minutes ago Senior Software Engineer, Infrastructure, Google Cloud Storage
+    - link "company-logo The Wall Street Journal · 7 minutes ago Senior Analyst, Newsroom Data":
+      - /url: /jobs/info/6ad0c520614121de7d947f10
+      - img "company-logo"
+      - text: The Wall Street Journal · 7 minutes ago Senior Analyst, Newsroom Data
+    - link "company-logo Corcept Therapeutics · 9 minutes ago Director, Business Systems - Biometrics":
+      - /url: /jobs/info/6a63de90979290281c70492d
+      - img "company-logo"
+      - text: Corcept Therapeutics · 9 minutes ago Director, Business Systems - Biometrics
+    - link "company-logo Cisco · 9 minutes ago Software Engineer Full Stack / Backend II (Full-Time) - United States":
+      - /url: /jobs/info/6ad007a078d51ae69ce09744
+      - img "company-logo"
+      - text: Cisco · 9 minutes ago Software Engineer Full Stack / Backend II (Full-Time) - United States
+    - link "company-logo Axiom Space · 10 minutes ago Benefits Project Manager":
+      - /url: /jobs/info/6ab401760e0ae54eeea45e29
+      - img "company-logo"
+      - text: Axiom Space · 10 minutes ago Benefits Project Manager
+    - link "company-logo NYC Health + Hospitals · 11 minutes ago Wage and Salary Specialist":
+      - /url: /jobs/info/6ab473ba55e9168cf5ea66ed
+      - img "company-logo"
+      - text: NYC Health + Hospitals · 11 minutes ago Wage and Salary Specialist
+    - link "company-logo Amazon · 11 minutes ago Software Development Engineer II (ADBL186)":
+      - /url: /jobs/info/6a6d012b57120971bf3ae6be
+      - img "company-logo"
+      - text: Amazon · 11 minutes ago Software Development Engineer II (ADBL186)
+    - link "company-logo FurtherAI · 11 minutes ago Founding Product Lead":
+      - /url: /jobs/info/6a7b67bcecfd297707538a91
+      - img "company-logo"
+      - text: FurtherAI · 11 minutes ago Founding Product Lead
+    - link "company-logo Fluidstack · 13 minutes ago Production Engineer, Facilities":
+      - /url: /jobs/info/6a598c344da96a42cfd91a28
+      - img "company-logo"
+      - text: Fluidstack · 13 minutes ago Production Engineer, Facilities
+    - link "company-logo Intel · 14 minutes ago Sales and Marketing - Intern, Graduate":
+      - /url: /jobs/info/6a99b003551435518ebf060d
+      - img "company-logo"
+      - text: Intel · 14 minutes ago Sales and Marketing - Intern, Graduate
+    - link "company-logo Anduril Industries · 16 minutes ago Senior Software Engineer, Robotics Data Foundation (Cloud)":
+      - /url: /jobs/info/6ab406040e0ae54eeea46172
+      - img "company-logo"
+      - text: Anduril Industries · 16 minutes ago Senior Software Engineer, Robotics Data Foundation (Cloud)
+    - link "company-logo Fivetran · 18 minutes ago Senior Software Engineer - Orchestration":
+      - /url: /jobs/info/6ab42bcd55e9168cf5ea4d84
+      - img "company-logo"
+      - text: Fivetran · 18 minutes ago Senior Software Engineer - Orchestration
+    - img "rocket"
+    - heading "No.1 ai Job hunting Platform" [level=2]:
+      - strong: No.1 ai Job hunting Platform
+    - heading "Personalized AI Job Matches" [level=3]
+    - text: See jobs you’re truly qualified for, matched to your real skills, with no fake listings and early alerts.
+    - button "Find My Matches"
+    - img "Personalized AI Job Matches"
+    - heading "1-Click Application Autofill" [level=3]
+    - text: Apply to hundreds of jobs daily across all major ATS platforms. Skip repetitive data entry and save 80% of your time.
+    - button "Start Autofilling"
+    - img "1-Click Application Autofill"
+    - heading "Job Specific Tailored Resume" [level=3]
+    - text: Get a perfectly tailored, professional resume that passes ATS and highlights your strengths in just 6 seconds.
+    - button "Upgrade My Resume"
+    - img "Job Specific Tailored Resume"
+    - heading "Get Your Insider Referrals" [level=3]
+    - text: Increase your chances of landing an interview by 4X with insider referrals as you find alumni and connect with hiring managers directly.
+    - button "Get Connected"
+    - img "Get Your Insider Referrals"
+    - heading "24/7 AI Career Copilot" [level=3]
+    - text: Never feel stuck in your job search again. Get 24/7 personalized guidance to find your perfect role and master every interview with confidence.
+    - button "Ask Orion"
+    - img "24/7 AI Career Copilot"
+    - heading "3,000,000+ happy users’ love" [level=2]:
+      - strong: 3,000,000+
+      - text: happy users’
+      - strong: love
+    - img "love"
+    - img "quote"
+    - text: I am able to find more relevant jobs faster, since using Jobright I have tripled my interview rate. I am truly impressed.
+    - img "Fred H."
+    - text: Fred H. Senior Software Engineer
+    - img "quote"
+    - text: Thanks to this platform I’ve landed a few interviews and accepted an offer within 1 week of interviewing!!
+    - img "Tracy C."
+    - text: Tracy C. Sr. Digital Marketing Manager
+    - img "quote"
+    - text: You must check out Jobright. It has been saving me hours in my job search! I’m blown away at how easy it is to use!!
+    - img "Tyler S."
+    - text: Tyler S. Instructional Designer
+    - img "quote"
+    - text: Jobright has transformed my job hunt! The resources available are top-notch and the support team is always ready to help.
+    - img "Chelsea L."
+    - text: Chelsea L. Senior Recruiter
+    - img "quote"
+    - text: I love the overall design and functionality of the platform. Very user friendly and delightful to use!
+    - img "Joshua C."
+    - text: Joshua C. Senior Product Manager
+    - img "quote"
+    - text: It’s a 10/10!! Especially the resume editor which helps me very easily write the content to match the job description. The AI guidance and support has been game changing. Loving it so far!
+    - img "Brandi G."
+    - text: Brandi G. Software Engineer
+    - img "quote"
+    - text: Not only does jobright show you the most relevant jobs it ALSO helps you network and get potential referrals! The matching system uses my experience, skills, and so much more to find the best fit. Definitely recommend!
+    - img "Gabriella B."
+    - text: Gabriella B. LinkedIn Strategist
+    - img "quote"
+    - text: I am able to find more relevant jobs faster, since using Jobright I have tripled my interview rate. I am truly impressed.
+    - img "Fred H."
+    - text: Fred H. Senior Software Engineer
+    - img "quote"
+    - text: Thanks to this platform I’ve landed a few interviews and accepted an offer within 1 week of interviewing!!
+    - img "Tracy C."
+    - text: Tracy C. Sr. Digital Marketing Manager
+    - img "quote"
+    - text: You must check out Jobright. It has been saving me hours in my job search! I’m blown away at how easy it is to use!!
+    - img "Tyler S."
+    - text: Tyler S. Instructional Designer
+    - img "quote"
+    - text: Jobright has transformed my job hunt! The resources available are top-notch and the support team is always ready to help.
+    - img "Chelsea L."
+    - text: Chelsea L. Senior Recruiter
+    - img "quote"
+    - text: I love the overall design and functionality of the platform. Very user friendly and delightful to use!
+    - img "Joshua C."
+    - text: Joshua C. Senior Product Manager
+    - img "quote"
+    - text: It’s a 10/10!! Especially the resume editor which helps me very easily write the content to match the job description. The AI guidance and support has been game changing. Loving it so far!
+    - img "Brandi G."
+    - text: Brandi G. Software Engineer
+    - img "quote"
+    - text: Not only does jobright show you the most relevant jobs it ALSO helps you network and get potential referrals! The matching system uses my experience, skills, and so much more to find the best fit. Definitely recommend!
+    - img "Gabriella B."
+    - text: Gabriella B. LinkedIn Strategist
+    - img "Alex XU"
+    - text: Alex XU Author of System Design Interview －Amazon Bestseller
+    - img "quote"
+    - text: "The toughest part of tech careers is the hunt: too many listings, zero feedback. Jobright.ai unifies smart matching and resume tuning, moving candidates to interviews."
+    - list:
+      - listitem:
+        - button "1"
+      - listitem:
+        - button "2"
+    - text: Frequently Asked Questions
+    - tablist:
+      - tab "add How is Jobright different from other job platforms like LinkedIn?":
+        - img "add"
+        - paragraph: How is Jobright different from other job platforms like LinkedIn?
+      - tab "add Will Jobright share my personal information?":
+        - img "add"
+        - paragraph: Will Jobright share my personal information?
+      - tab "add Is Jobright free to use?":
+        - img "add"
+        - paragraph: Is Jobright free to use?
+      - tab "add Where do Jobright's job listings come from?":
+        - img "add"
+        - paragraph: Where do Jobright's job listings come from?
+      - tab "add What regions does Jobright's service cover?":
+        - img "add"
+        - paragraph: What regions does Jobright's service cover?
+      - tab "add I have more questions!":
+        - img "add"
+        - paragraph: I have more questions!
+    - button "Try For Free"
+    - heading "Find Your Perfect Job in a Click!" [level=2]
+    - combobox
+    - text: Job Title
+    - combobox
+    - text: Work Model
+    - combobox
+    - text: United States
+    - combobox
+    - text: City
+    - combobox
+    - text: Experience Level
+    - button "GO"
+    - link "Jobright on LinkedIn":
+      - /url: https://www.linkedin.com/company/jobright-ai/
+    - link "Jobright on Instagram":
+      - /url: https://www.instagram.com/jobright.ai
+    - link "Jobright on TikTok":
+      - /url: https://www.tiktok.com/@jobright.ai
+    - link "Jobright on X":
+      - /url: https://twitter.com/jobrightai
+    - link "Jobright on YouTube":
+      - /url: https://www.youtube.com/@jobrightai
+    - link "Jobright on Facebook":
+      - /url: https://www.facebook.com/jobrightai
+    - heading "Features" [level=3]
+    - link "Resume AI":
+      - /url: /ai-resume-builder
+    - link "AI Job Match":
+      - /url: /ai-job-match
+    - link "Insider Connections":
+      - /url: /job-referral
+    - link "AI Copilot Orion":
+      - /url: /orion-copilot
+    - link "Job Autofill":
+      - /url: /job-autofill
+    - link "H1B Jobs":
+      - /url: /h1b-jobs
+    - link "TNT Network":
+      - /url: /tnt
+    - link "Interview Questions":
+      - /url: /interview-landing
+    - link "Blog":
+      - /url: https://jobright.ai/blog/
+      - heading "Blog" [level=3]
+    - link "Is Jobright Legit?":
+      - /url: https://jobright.ai/blog/is-jobright-legit/
+    - link "Success Stories from Jobright Users":
+      - /url: https://jobright.ai/blog/success-stories-that-started-with-jobright-real-people-real-results/
+    - link "What Top AI Companies Are Looking For":
+      - /url: https://jobright.ai/blog/inside-the-ai-hiring-boom-what-top-ai-companies-are-looking-for-in-2025/
+    - link "Jobright AI Agent Launch":
+      - /url: https://jobright.ai/blog/jobright-launches-first-ai-agent-to-put-job-search-on-autopilot/
+    - link "Top Entry Level Jobs":
+      - /url: /entry-level-jobs
+    - link "Top U.S. 100% Remote Jobs":
+      - /url: https://jobright.ai/remote-jobs
+    - link "Related Tools":
+      - /url: /tools
+      - heading "Related Tools" [level=3]
+    - link "AI Job Assistant":
+      - /url: /tools/ai-job-assistant
+    - link "AI Cover Letter Generator":
+      - /url: /tools/cover-letter-generator
+    - link "AI Resume Helper":
+      - /url: /tools/resume-helper
+    - link "AI Job Tracker":
+      - /url: /tools/job-tracker
+    - link "AI Fraud Detection":
+      - /url: /fake-candidate-detection
+    - heading "Information" [level=3]
+    - link "About Us":
+      - /url: /about
+    - link "Privacy Policy":
+      - /url: /legal/privacy
+    - link "Terms of Service":
+      - /url: /legal/service
+    - link "Partners":
+      - /url: /partners
+  - alert

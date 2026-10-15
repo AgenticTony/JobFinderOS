@@ -1,0 +1,898 @@
+- document:
+  - banner:
+    - link "Trustpilot reviews":
+      - /url: /
+      - img "Trustpilot reviews"
+    - searchbox "Search for another company…"
+    - link "Categories":
+      - /url: /categories
+    - link "Blog":
+      - /url: /blog
+    - button "Notifications"
+    - link "Log in":
+      - /url: /users/connect?redirect=%2freview%2fjobright.ai&source_cta=header
+    - link "For businesses":
+      - /url: https://business.trustpilot.com
+    - paragraph:
+      - text: Looks like you’re in Sweden.
+      - link "Go to the Swedish Trustpilot site":
+        - /url: https://se.trustpilot.com/review/jobright.ai
+    - button "Dismiss"
+  - main:
+    - navigation "Breadcrumb":
+      - list:
+        - listitem:
+          - link "Business Services":
+            - /url: /categories/business_services
+        - listitem
+        - listitem:
+          - link "HR & Recruiting":
+            - /url: /categories/hr_recruiting
+        - listitem
+        - listitem:
+          - link "Recruitment Service":
+            - /url: /categories/recruitment_service
+        - listitem
+        - listitem: Jobright
+    - navigation:
+      - button "Summary"
+      - button "About"
+      - button "Reviews"
+      - link "Visit website":
+        - /url: https://jobright.ai
+      - link "Write a review":
+        - /url: /evaluate/jobright.ai
+    - link "Claimed profileDec 2025 Paid Trustpilot subscription Jobright Reviews 3,609 • TrustScore 5 out of 5 4.8 Clickable button that opens a pop-up explaining how the Trustscore is calculated. Recruitment Service Write a review Visit website":
+      - /url: https://jobright.ai?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=logo_click
+      - img "Jobright logo"
+    - button "Claimed profileDec 2025"
+    - button "Paid Trustpilot subscription"
+    - heading "Jobright Reviews" [level=1]:
+      - text: Jobright
+      - link "Reviews"
+    - link "3,609"
+    - text: •
+    - link "TrustScore 5 out of 5 4.8":
+      - img "TrustScore 5 out of 5"
+      - paragraph: "4.8"
+    - button "Clickable button that opens a pop-up explaining how the Trustscore is calculated."
+    - link "Recruitment Service":
+      - /url: /categories/recruitment_service
+    - link "Write a review":
+      - /url: /evaluate/jobright.ai
+    - link "Visit website":
+      - /url: https://jobright.ai?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=domain_click
+    - heading "We use technology to protect platform integrity, but we don't fact-check reviews" [level=2]:
+      - button "We use technology to protect platform integrity, but we don't fact-check reviews"
+    - heading "Review summary" [level=2]
+    - button "Tooltip"
+    - paragraph: Created with AI, based on recent reviews
+    - paragraph:
+      - text: Considering 3,563 reviews, reviewers overwhelmingly had a great experience with this company. People love how easy it is to discover relevant job opportunities and quickly tailor their resumes using the smart artificial intelligence tools. Customers frequently mention that the clean layout, responsive website, and helpful application features save a ton of manual effort during job hunting. Howeve…
+      - button "See more"
+    - heading "What people talk about most" [level=3]
+    - button "Scroll forward"
+    - button "User experience Clients share satisfaction on user experience, noting that the platform is fast, clean, and makes job... See more":
+      - heading "User experience" [level=2]
+      - paragraph: Clients share satisfaction on user experience, noting that the platform is fast, clean, and makes job... See more
+    - button "Website Customers consistently note positive experiences with website navigation and layout, highlighting that it is... See more":
+      - heading "Website" [level=2]
+      - paragraph: Customers consistently note positive experiences with website navigation and layout, highlighting that it is... See more
+    - button "Application Reviewers mention positive feedback about application, highlighting a seamless process with convenient... See more":
+      - heading "Application" [level=2]
+      - paragraph: Reviewers mention positive feedback about application, highlighting a seamless process with convenient... See more
+    - button "Product Customers had positive experiences with product, noting that it is one of the best tools for finding relevant... See more":
+      - heading "Product" [level=2]
+      - paragraph: Customers had positive experiences with product, noting that it is one of the best tools for finding relevant... See more
+    - button "Artificial intelligence Reviewers highlight positive aspects of artificial intelligence, expressing high satisfaction with smart... See more":
+      - heading "Artificial intelligence" [level=2]
+      - paragraph: Reviewers highlight positive aspects of artificial intelligence, expressing high satisfaction with smart... See more
+    - heading "Reviews shaping this summary" [level=3]
+    - button "SCROLL FORWARD"
+    - article:
+      - complementary "Info for Scott Hayes":
+        - link "Scott Hayes 6 days ago":
+          - /url: /users/641a4d30812f8400125d0e95
+          - text: Scott Hayes
+          - time: 6 days ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - 'button "I haven''t used the paid version, just the free version, but this is one of the best tools for finding relevant job postings. Much better than LinkedIn, Simplify, Indeed, etc. Pro tip: you can use Jobr... See more Company replied"':
+        - paragraph: "I haven't used the paid version, just the free version, but this is one of the best tools for finding relevant job postings. Much better than LinkedIn, Simplify, Indeed, etc. Pro tip: you can use Jobr... See more"
+        - img
+        - paragraph: Company replied
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Abdulrrahman Babayemi":
+        - text: AB
+        - link "Abdulrrahman Babayemi Oct 2, 2026":
+          - /url: /users/6abef88ea9de7987bf231e43
+          - text: Abdulrrahman Babayemi
+          - time: Oct 2, 2026
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - button "I would recommend this website a million times for job seekers because it simplifies lots of steps for users. For example, it is recommendable to make one's resume suitable for each job application; i... See more Company replied":
+        - paragraph: I would recommend this website a million times for job seekers because it simplifies lots of steps for users. For example, it is recommendable to make one's resume suitable for each job application; i... See more
+        - img
+        - paragraph: Company replied
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Kaiden Laramie":
+        - text: KL
+        - link "Kaiden Laramie Sep 21, 2026":
+          - /url: /users/6ab16642dbb196c20291adb2
+          - text: Kaiden Laramie
+          - time: Sep 21, 2026
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - button "Genuinley the first job site I've used that A. Doesn't require a subscription to use their tools (Auto fill applications (even off site) and their AI resume tweaker. and B. Gives actual relevent jobs... See more Company replied":
+        - paragraph: Genuinley the first job site I've used that A. Doesn't require a subscription to use their tools (Auto fill applications (even off site) and their AI resume tweaker. and B. Gives actual relevent jobs... See more
+        - img
+        - paragraph: Company replied
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Mark Green":
+        - text: MG
+        - link "Mark Green Oct 6, 2026":
+          - /url: /users/6ac4f1e0bec42f1f4547644a
+          - text: Mark Green
+          - time: Oct 6, 2026
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - button "Like that it is free to use (purchase if want more advanced features). Interesting approach ranking postings based on your skills. Feels like a more helpful assistant than the other job platforms.... See more Company replied":
+        - paragraph: Like that it is free to use (purchase if want more advanced features). Interesting approach ranking postings based on your skills. Feels like a more helpful assistant than the other job platforms.... See more
+        - img
+        - paragraph: Company replied
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - button "See all 3,609 reviews"
+    - separator
+    - heading "Company details" [level=2]
+    - list:
+      - listitem:
+        - link "Recruitment Service":
+          - /url: /categories/recruitment_service
+      - listitem: also in
+      - listitem:
+        - link "Applicant Tracking System":
+          - /url: /categories/applicant_tracking_system
+      - listitem:
+        - link "Human Resource Consulting":
+          - /url: /categories/human_ressource_consulting
+      - listitem:
+        - link "Recruiter":
+          - /url: /categories/recruiter
+      - listitem:
+        - link "Software Company":
+          - /url: /categories/software_company
+      - listitem:
+        - button "Tooltip"
+    - heading "Written by the company" [level=3]
+    - paragraph:
+      - text: "Jobright is the first AI-native hiring platform that connects top talent with great employers faster than ever before. 𝐉𝐨𝐛 𝐬𝐞𝐞𝐤𝐞𝐫𝐬: Your AI job search agent that turns a solo, time-consuming hunt into a fast, expert-guided path to landing your ideal job. 𝐄𝐦𝐩𝐥𝐨𝐲𝐞𝐫𝐬: Your AI recruiting partner that delivers only active, qualified candidate…"
+      - button "See more"
+    - heading "Contact info" [level=2]
+    - list:
+      - listitem:
+        - paragraph: United States
+      - listitem:
+        - link "jobright.ai":
+          - /url: https://jobright.ai?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=domain_click
+    - paragraph: "4.8"
+    - heading "Excellent" [level=3]
+    - img "TrustScore 5 out of 5"
+    - paragraph: 4K reviews
+    - text: 5-star
+    - meter "Rating distribution for shared/rating/v2/star-5"
+    - text: 4-star
+    - meter "Rating distribution for shared/rating/v2/star-4"
+    - text: 3-star
+    - meter "Rating distribution for shared/rating/v2/star-3"
+    - text: 2-star
+    - meter "Rating distribution for shared/rating/v2/star-2"
+    - text: 1-star
+    - meter "Rating distribution for shared/rating/v2/star-1"
+    - separator
+    - button "How is the TrustScore calculated?":
+      - paragraph: How is the TrustScore calculated?
+    - paragraph: Asks customers to review
+    - paragraph: This company invites their customers to review, whether positive or negative
+    - paragraph: Replied to 98% of negative reviews
+    - paragraph: Typically replies within 1 week
+    - link "How this company uses Trustpilot See how their reviews and ratings are sourced, scored, and moderated.":
+      - /url: /review/jobright.ai/transparency
+      - paragraph: How this company uses Trustpilot
+      - paragraph: See how their reviews and ratings are sourced, scored, and moderated.
+    - heading "People also looked at Tooltip" [level=2]:
+      - text: People also looked at
+      - button "Tooltip"
+    - button "SCROLL BACK" [disabled]
+    - button "SCROLL FORWARD"
+    - link "AIApply logo AIApply aiapply.co TrustScore 4.5 out of 5 4.3 (2K)":
+      - /url: /review/aiapply.co
+      - img "AIApply logo"
+      - heading "AIApply" [level=3]
+      - paragraph: aiapply.co
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.3"
+      - paragraph: (2K)
+    - link "JobLeads logo JobLeads www.jobleads.com TrustScore 4.5 out of 5 4.5 (24K)":
+      - /url: /review/www.jobleads.com
+      - img "JobLeads logo"
+      - heading "JobLeads" [level=3]
+      - paragraph: www.jobleads.com
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.5"
+      - paragraph: (24K)
+    - link "JobCopilot logo JobCopilot jobcopilot.com TrustScore 2 out of 5 2 (99)":
+      - /url: /review/jobcopilot.com
+      - img "JobCopilot logo"
+      - heading "JobCopilot" [level=3]
+      - paragraph: jobcopilot.com
+      - img "TrustScore 2 out of 5"
+      - paragraph: "2"
+      - paragraph: (99)
+    - link "simplify.jobs logo simplify.jobs simplify.jobs TrustScore 3 out of 5 2.8 (21)":
+      - /url: /review/simplify.jobs
+      - img "simplify.jobs logo"
+      - heading "simplify.jobs" [level=3]
+      - paragraph: simplify.jobs
+      - img "TrustScore 3 out of 5"
+      - paragraph: "2.8"
+      - paragraph: (21)
+    - link "micro1 logo micro1 micro1.ai TrustScore 4.5 out of 5 4.7 (11K)":
+      - /url: /review/micro1.ai
+      - img "micro1 logo"
+      - heading "micro1" [level=3]
+      - paragraph: micro1.ai
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.7"
+      - paragraph: (11K)
+    - link "LoopCV logo LoopCV loopcv.pro TrustScore 4 out of 5 3.9 (131)":
+      - /url: /review/loopcv.pro
+      - img "LoopCV logo"
+      - heading "LoopCV" [level=3]
+      - paragraph: loopcv.pro
+      - img "TrustScore 4 out of 5"
+      - paragraph: "3.9"
+      - paragraph: (131)
+    - link "JobHire.AI - Automate Your Job Search logo JobHire.AI - Automate Your Job Search jobhire.ai TrustScore 4 out of 5 4.1 (1K)":
+      - /url: /review/jobhire.ai
+      - img "JobHire.AI - Automate Your Job Search logo"
+      - heading "JobHire.AI - Automate Your Job Search" [level=3]
+      - paragraph: jobhire.ai
+      - img "TrustScore 4 out of 5"
+      - paragraph: "4.1"
+      - paragraph: (1K)
+    - link "Teal logo Teal tealhq.com TrustScore 4 out of 5 4.2 (117)":
+      - /url: /review/tealhq.com
+      - img "Teal logo"
+      - heading "Teal" [level=3]
+      - paragraph: tealhq.com
+      - img "TrustScore 4 out of 5"
+      - paragraph: "4.2"
+      - paragraph: (117)
+    - text: "4.8"
+    - button "Clickable button that opens a pop-up explaining how the Trustscore is calculated."
+    - heading "All reviews" [level=2]
+    - paragraph: (3,609)
+    - paragraph: 3,600 reviews in the last 12 months
+    - link "Write a review":
+      - /url: /evaluate/jobright.ai
+    - complementary:
+      - checkbox "5-star 84%"
+      - paragraph: 5-star
+      - paragraph: 84%
+      - checkbox "4-star 11%"
+      - paragraph: 4-star
+      - paragraph: 11%
+      - checkbox "3-star 3%"
+      - paragraph: 3-star
+      - paragraph: 3%
+      - checkbox "2-star <1%"
+      - paragraph: 2-star
+      - paragraph: <1%
+      - checkbox "1-star 1%"
+      - paragraph: 1-star
+      - paragraph: 1%
+      - separator
+      - link "How Trustpilot labels reviews":
+        - /url: https://help.trustpilot.com/s/article/About-Trustpilots-review-labels?language=en_US
+        - paragraph: How Trustpilot labels reviews
+    - text: Companies on Trustpilot aren't allowed to offer incentives or pay to hide reviews. Reviews are the opinions of individual users and not of Trustpilot.
+    - link "Read more":
+      - /url: https://help.trustpilot.com/s/article/How-do-we-make-sure-reviews-are-trustworthy?language=en_US
+    - searchbox "Search by keyword..."
+    - button "More filters":
+      - paragraph: More filters
+    - button "Most recent":
+      - paragraph: Most recent
+    - heading "Top mentions" [level=3]
+    - checkbox "Application"
+    - checkbox "User experience"
+    - checkbox "Website"
+    - checkbox "Recommendation"
+    - checkbox "Location"
+    - checkbox "Value for money"
+    - checkbox "Service"
+    - checkbox "Inventory"
+    - checkbox "Social media"
+    - checkbox "Staff"
+    - separator
+    - article:
+      - complementary "Info for Samuel A. Kelemu":
+        - text: SA
+        - link "Samuel A. Kelemu ET • 1 review":
+          - /url: /users/6ad0a7f737e7801a4532b88f
+      - time: 13 minutes ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Guest service specialist":
+        - /url: /reviews/6ad0a7f880e8b6e04282caab
+        - heading "Guest service specialist" [level=2]
+      - paragraph: Great AI support more remote job options
+      - text: October 15, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for ROWAN RAGAEI":
+        - text: RR
+        - link "ROWAN RAGAEI EG • 1 review":
+          - /url: /users/6ad0150d37e7801a45321d79
+      - time: 11 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Fast & easiest":
+        - /url: /reviews/6ad0150e0fafe2a65fe2f09e
+        - heading "Fast & easiest" [level=2]
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: Rowan, hearing that the process felt fast and easy for you is exactly the experience we aim for. Job searching can be stressful, so we're really glad Jobright helped make things smoother. If you ever have feedback or questions, we're here to help. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for Shakira Roberts":
+        - text: SR
+        - link "Shakira Roberts US • 1 review":
+          - /url: /users/6ad00f9837e7801a453218c6
+      - time: 11 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "FAST, EASY, RELIABLE, HELPFUL":
+        - /url: /reviews/6ad00f99f7091ecea4e364bb
+        - heading "FAST, EASY, RELIABLE, HELPFUL" [level=2]
+      - paragraph: I was able to land several job interviews.
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: Landing several interviews, Shakira, is exactly the kind of result we want to see from Jobright. It means a lot to know our tools helped you get real opportunities. Wishing you the best with your job search. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for ABDOUL MAGIDE ADAMA YAYO":
+        - text: AM
+        - link "ABDOUL MAGIDE ADAMA YAYO CA • 1 review":
+          - /url: /users/6acfeec874904219c31a7f1a
+      - time: 13 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "SO EASY AND THIS WEBSITE HELP ME TO FIX…":
+        - /url: /reviews/6acfeec959ae26a0a269bd76
+        - heading "SO EASY AND THIS WEBSITE HELP ME TO FIX…" [level=2]
+      - paragraph: SO EASY AND THIS WEBSITE HELP ME TO FIX MY RESUME
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: ABDOUL, it’s awesome to hear that Jobright made it easy for you to update your resume. That’s exactly what we’re here for. Good luck with your job search. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for Jason Guo":
+        - text: JG
+        - link "Jason Guo US • 2 reviews":
+          - /url: /users/698b33b30eb45cc58a8f391d
+      - time: 14 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "I can explore a lot of job…":
+        - /url: /reviews/6acfe8c9fd0cb947a23b6f5a
+        - heading "I can explore a lot of job…" [level=2]
+      - paragraph: I can explore a lot of job opportunities in one platform. It's very convenient.
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: Jason, being able to explore many jobs in one place is exactly what we set out to do, so we're really pleased to hear it's making your search more convenient. If you ever have ideas for features that could make Jobright even better, just let us know. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - button "See 1 more review by Jason"
+    - article:
+      - complementary "Info for Oz Barhama":
+        - button "Oz Barhama"
+        - link "Oz Barhama US • 1 review":
+          - /url: /users/69dff1bf0a02e7e38b78af27
+      - time: 16 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Very easy to use interface and helpful…":
+        - /url: /reviews/6acfcb782ac1288e06121653
+        - heading "Very easy to use interface and helpful…" [level=2]
+      - paragraph: Very easy to use interface and helpful information provided. AI is fast and accurate.
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: Oz, it's awesome to hear the interface felt easy and the AI delivered helpful, accurate results for you. Making job search tools fast and straightforward is exactly what we aim for. Really appreciate you taking the time to share your experience. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for anna m":
+        - text: AM
+        - link "anna m US • 2 reviews":
+          - /url: /users/6919616908dabd58dccae5aa
+      - time: 17 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "This tool beats any other service for…":
+        - /url: /reviews/6acfbeec4e52b52dffc945eb
+        - heading "This tool beats any other service for…" [level=2]
+      - paragraph: This tool beats any other service for looking for a job and sending applications. Hands down, the best tool I've ever used. I don't remember the last time was that I checked on other services like LinkedIn, BuiltIn, Indeed, etc. This one just does all of that. All the filters are done right. I can see all the statistics and all the roles I applied to. I can filter out companies that I am not interested in and never see any spam from them again. This is a fantastic tool. I recommend it to everyone.
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: Anna, reading how Jobright has replaced other job boards for you means a lot to us. The filtering and tracking features are exactly what we hoped would make job searching a lot less stressful. It’s awesome to hear you’re finding it helpful and recommending it to others. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for TANMAY SHEKHAR":
+        - text: TS
+        - link "TANMAY SHEKHAR IN • 2 reviews":
+          - /url: /users/6a1ddd108dd5c4dbc490b21d
+      - time: 17 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "i like that the site puts out the…":
+        - /url: /reviews/6acfb524219839d2cf3b3443
+        - heading "i like that the site puts out the…" [level=2]
+      - paragraph: i like that the site puts out the latest job postings
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: TANMAY SHEKHAR, seeing you mention the latest job postings means a lot since staying current is a big focus for us. We hope Jobright keeps making your job search smoother. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - button "See 1 more review by TANMAY"
+    - article:
+      - complementary "Info for Christina":
+        - text: CH
+        - link "Christina US • 3 reviews":
+          - /url: /users/56a281cc0000ff0001fef21b
+      - time: 18 hours ago
+      - img "Rated 4 out of 5 stars"
+      - button "Invited"
+      - link "The jobs listed":
+        - /url: /reviews/6acfb16355b14746a5b00185
+        - heading "The jobs listed" [level=2]
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - button "See 1 more review by Christina"
+    - article:
+      - complementary "Info for ANIRUDDHA BISWAS ATANU":
+        - text: AB
+        - link "ANIRUDDHA BISWAS ATANU US • 2 reviews":
+          - /url: /users/69c4cb2f1a47fa3797b63aec
+      - time: 21 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Great at finding jobs.":
+        - /url: /reviews/6acf8709d16a77effdd50c3d
+        - heading "Great at finding jobs." [level=2]
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: Spotting more jobs is exactly what we set out to do, ANIRUDDHA. We're really pleased Jobright is helping make your search easier. If you ever run into questions or need support, we're here for you. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - button "See 1 more review by ANIRUDDHA"
+    - button "Dismiss"
+    - heading "See if a website is trustworthy without leaving the page" [level=3]
+    - link "Get Chrome extension":
+      - /url: https://chrome.google.com/webstore/detail/trustpilot-reviews-rating/dimkjjladgaekdlfebknbaooicmfalke?utm_source=trustpilot&utm_medium=cpp_promotion&utm_campaign=cpp_promotion
+    - article:
+      - complementary "Info for Thembeni":
+        - link "Thembeni ZA • 6 reviews":
+          - /url: /users/5f11450364b005248e83acc3
+      - time: 21 hours ago
+      - img "Rated 4 out of 5 stars"
+      - button "Invited"
+      - link "Simple process":
+        - /url: /reviews/6acf86f4b9c1ed8cc7260ef5
+        - heading "Simple process" [level=2]
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Wanqi Peng":
+        - text: WP
+        - link "Wanqi Peng US • 1 review":
+          - /url: /users/6acf853974904219c3199d55
+      - time: 21 hours ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Excellent":
+        - /url: /reviews/6acf853a8994416e949f74f3
+        - heading "Excellent" [level=2]
+      - paragraph: Excellent Good
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: 6 hours ago
+      - paragraph: Wanqi, seeing your short and positive review means a lot to us. We're really pleased that Jobright is working well for you. If you ever have ideas or questions, just let us know. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for LAVELL THOMPSON JR":
+        - text: LT
+        - link "LAVELL THOMPSON JR US • 1 review":
+          - /url: /users/6acf057d27cfc8cd47599d3e
+      - time: A day ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Very nice":
+        - /url: /reviews/6acf057e523a9ca38a154d9c
+        - heading "Very nice" [level=2]
+      - paragraph: Very nice, Very easy to apply.
+      - text: October 14, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: A day ago
+      - paragraph: LAVELL THOMPSON JR, it's awesome to hear you found the application process easy and straightforward. That's exactly the experience we're aiming for. If you ever need help or have ideas on how we can make things even smoother, just let us know. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for Arun Natesan":
+        - text: AN
+        - link "Arun Natesan US • 1 review":
+          - /url: /users/6acef046cc7681262a6e4c1b
+      - time: A day ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Awesome feature":
+        - /url: /reviews/6acef047425551fd4737bb59
+        - heading "Awesome feature" [level=2]
+      - paragraph: Its resume tailoring feature is great.
+      - text: October 12, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: A day ago
+      - paragraph: Arun, it’s awesome to hear the resume tailoring feature is working well for you. That’s exactly what we hoped would make job searching a little easier. If you have any ideas for improvements or run into any issues, just let us know. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for Sonya Navarrete":
+        - text: SN
+        - link "Sonya Navarrete US • 1 review":
+          - /url: /users/6acec284cc7681262a6e3087
+      - time: A day ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Absolutely love the resume score and…":
+        - /url: /reviews/6acec2859e7a09e44abfd757
+        - heading "Absolutely love the resume score and…" [level=2]
+      - paragraph: Absolutely love the resume score and keyword indicator to help tailor.
+      - text: October 13, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: A day ago
+      - paragraph: Sonya, seeing the resume score and keyword indicator help you tailor your applications is exactly what we hoped for. Those tools are there to make things a bit easier in a tough job market. Really appreciate you taking a moment to share your experience. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for Yeswanth C":
+        - text: YC
+        - link "Yeswanth C US • 1 review":
+          - /url: /users/6acebc1e27cfc8cd475972c8
+      - time: 1 days ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Good UI experience":
+        - /url: /reviews/6acebc1e4a35d72c42799ce8
+        - heading "Good UI experience" [level=2]
+      - paragraph: Good UI experience, Job search made easy
+      - text: October 13, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: A day ago
+      - paragraph: Yeswanth, it’s really encouraging to hear the UI worked well for you and that job searching felt smoother with Jobright. That’s exactly what we’re aiming for. If you ever have ideas on how we can make things even easier, let us know. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for LT":
+        - text: LT
+        - link "LT US • 2 reviews":
+          - /url: /users/5dd3258047f9aaa5614e00a2
+      - time: 2 days ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "I’m really enjoying Jobright.ai":
+        - /url: /reviews/6ace98c7331e27b3459a78c1
+        - heading "I’m really enjoying Jobright.ai" [level=2]
+      - paragraph: I’m really enjoying Jobright.ai. I’m finding roles I haven’t seen on other platforms, and the matching insights are genuinely helpful. The site is easy to use and makes the search feel smoother.
+      - text: October 13, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: A day ago
+      - paragraph: LT, seeing that you’re discovering new roles and finding the matching insights helpful is exactly what we hoped Jobright would offer. Making job searching smoother for you is top of mind for us. If you have any suggestions as you keep using the site, we’re always listening. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for Chris JunQing Ma":
+        - text: CJ
+        - link "Chris JunQing Ma US • 1 review":
+          - /url: /users/6ace79be4813d3d39092c1f9
+      - time: 2 days ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "good":
+        - /url: /reviews/6ace79bf47e3b43d39e292dd
+        - heading "good" [level=2]
+      - paragraph: good, good, good
+      - text: October 13, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: A day ago
+      - paragraph: Chris, seeing your “good, good, good” made our day. We’re really glad Jobright is hitting the mark for you. If you ever have ideas or run into any bumps, just let us know. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for Iftikhar Ahmad":
+        - text: IA
+        - link "Iftikhar Ahmad PK • 1 review":
+          - /url: /users/6ace37244813d3d39092314e
+      - time: 2 days ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "trustworthy":
+        - /url: /reviews/6ace3725bf40b8038cedec82
+        - heading "trustworthy" [level=2]
+      - paragraph: trustworthy platform not fake job posting
+      - text: October 13, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: A day ago
+      - paragraph: Iftikhar, hearing that you find Jobright trustworthy and free from fake job postings means a lot to us. Making sure our listings are real and reliable is a top priority. If you ever have suggestions or spot any issues, just let us know. Feel free to reach out to us at support@jobright.ai to discuss more.
+    - article:
+      - complementary "Info for Anthony Viscovich":
+        - text: AV
+        - link "Anthony Viscovich US • 2 reviews":
+          - /url: /users/5f4d4e86da53a4755af8974e
+      - time: 2 days ago
+      - img "Rated 5 out of 5 stars"
+      - button "Invited"
+      - link "Made applying to jobs much easier!":
+        - /url: /reviews/6ace3198165df59292ab1dd8
+        - heading "Made applying to jobs much easier!" [level=2]
+      - text: October 13, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Jobright logo"
+      - paragraph: Reply from Jobright
+      - time: A day ago
+      - paragraph: Anthony, making the job hunt easier is exactly what we’re aiming for, so it’s awesome to see your experience matched that. If you ever want tips for getting even more out of Jobright, feel free to reach out to us at support@jobright.ai to discuss more.
+    - navigation "Pagination":
+      - text: Previous
+      - link "Page number 1":
+        - /url: /review/jobright.ai
+        - text: "1"
+      - link "Page number 2":
+        - /url: /review/jobright.ai?page=2
+        - text: "2"
+      - link "Page number 3":
+        - /url: /review/jobright.ai?page=3
+        - text: "3"
+      - link "Page number 4":
+        - /url: /review/jobright.ai?page=4
+        - text: "4"
+      - link "Next page":
+        - /url: /review/jobright.ai?page=2
+    - heading "The Trustpilot Experience" [level=3]:
+      - text: The Trustpilot Experience
+      - img
+    - heading "We're open to all" [level=4]:
+      - button "We're open to all"
+    - heading "We fight fake reviews" [level=4]:
+      - button "We fight fake reviews"
+    - heading "We show the latest reviews" [level=4]:
+      - button "We show the latest reviews"
+    - heading "We encourage constructive feedback" [level=4]:
+      - button "We encourage constructive feedback"
+    - heading "We verify reviewers" [level=4]:
+      - button "We verify reviewers"
+    - heading "We advocate against bias" [level=4]:
+      - button "We advocate against bias"
+    - link "Take a closer look":
+      - /url: /trust
+  - contentinfo:
+    - img "Trustpilot reviews"
+    - paragraph:
+      - text: This site is protected by reCAPTCHA. We collect device and interaction signals for security purposes as described in our
+      - link "Privacy Policy":
+        - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - text: .
+    - heading "Choose country" [level=3]
+    - term:
+      - button "United States":
+        - text: United States
+        - img
+    - definition
+    - heading "About" [level=3]
+    - list:
+      - listitem:
+        - link "About us":
+          - /url: https://corporate.trustpilot.com
+      - listitem:
+        - link "Jobs":
+          - /url: https://business.trustpilot.com/jobs
+      - listitem:
+        - link "Contact":
+          - /url: https://www.trustpilot.com/contact
+      - listitem:
+        - link "Blog":
+          - /url: https://www.trustpilot.com/blog
+      - listitem:
+        - link "How Trustpilot works":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Press":
+          - /url: https://corporate.trustpilot.com/press
+      - listitem:
+        - link "Investor relations":
+          - /url: https://corporate.trustpilot.com/investors
+      - listitem:
+        - link "Download the Trustpilot iOS app":
+          - /url: https://apps.apple.com/app/trustpilot-reviews-ratings/id1608392803
+          - img "Download the Trustpilot iOS app"
+    - heading "Community" [level=3]
+    - list:
+      - listitem:
+        - link "Trust in reviews":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Help Center":
+          - /url: https://help.trustpilot.com/s?language=en_US
+      - listitem:
+        - link "Log in":
+          - /url: https://www.trustpilot.com/users/connect
+      - listitem:
+        - link "Sign up":
+          - /url: https://www.trustpilot.com/users/connect?signup=True
+    - heading "Businesses" [level=3]
+    - list:
+      - listitem:
+        - link "Trustpilot Business":
+          - /url: https://business.trustpilot.com
+      - listitem:
+        - link "Products":
+          - /url: https://business.trustpilot.com/features
+      - listitem:
+        - link "Plans & pricing":
+          - /url: https://business.trustpilot.com/pricing
+      - listitem:
+        - link "Business login":
+          - /url: https://businessapp.b2b.trustpilot.com/?locale=en-us
+      - listitem:
+        - link "Blog for business":
+          - /url: https://business.trustpilot.com/blog
+      - listitem:
+        - link "Data Solutions":
+          - /url: https://business.trustpilot.com/datasolutions
+    - heading "Follow us on" [level=3]
+    - list:
+      - listitem:
+        - link "Facebook":
+          - /url: https://www.facebook.com/Trustpilot/
+      - listitem:
+        - link "X":
+          - /url: https://x.com/Trustpilot
+      - listitem:
+        - link "Instagram":
+          - /url: https://www.instagram.com/trustpilot/
+      - listitem:
+        - link "LinkedIn":
+          - /url: https://www.linkedin.com/company/trustpilot/
+      - listitem:
+        - link "Youtube":
+          - /url: https://www.youtube.com/c/trustpilotreviews
+    - list:
+      - listitem:
+        - link "Legal":
+          - /url: https://corporate.trustpilot.com/legal
+      - listitem:
+        - link "Privacy Policy":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - listitem:
+        - link "Terms & Conditions":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/terms-of-use-for-consumers
+      - listitem:
+        - link "Guidelines for Reviewers":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/guidelines-for-reviewers
+      - listitem:
+        - link "System status":
+          - /url: https://status.trustpilot.com/
+      - listitem:
+        - button "Manage cookies"
+      - listitem:
+        - link "Modern Slavery Statement":
+          - /url: https://corporate.trustpilot.com/legal/for-everyone/modern-slavery-and-human-trafficking-statement
+    - text: © 2026 Trustpilot, Inc. All rights reserved.
+  - alert
+  - dialog "Here’s how we use cookies":
+    - heading "Here’s how we use cookies" [level=2]
+    - text: "Trustpilot and our partners use certain necessary cookies stored on your device to deliver our services. We’d also like to use additional cookies to:"
+    - list:
+      - listitem: Enhance your experience
+      - listitem: Provide social media features
+      - listitem: Analyze, monitor, and improve our services
+      - listitem: Show personalized content and ads, depending on your settings
+    - text: If you choose Accept all, you consent to our use of additional cookies for these purposes. If you choose Reject all, we won’t use additional cookies for these purposes. You can change or withdraw consent at any time in Manage cookies. Learn more in our
+    - link "Cookie Policy":
+      - /url: "https://legal.trustpilot.com/for-everyone/cookie-policy "
+    - text: .
+    - button "Manage cookies, Opens the preference center dialog": Manage cookies
+    - button "Reject all"
+    - button "Accept all"

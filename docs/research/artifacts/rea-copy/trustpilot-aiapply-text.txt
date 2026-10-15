@@ -1,0 +1,155 @@
+- document:
+  - banner:
+    - link "Trustpilot reviews":
+      - /url: /
+      - img "Trustpilot reviews"
+    - searchbox "Search for a company or category…"
+    - link "Categories":
+      - /url: /categories
+    - link "Blog":
+      - /url: /blog
+    - link "Log in":
+      - /url: /users/connect?redirect=%2freview%2faiapply.io&source_cta=header
+    - link "For businesses":
+      - /url: https://business.trustpilot.com
+    - paragraph:
+      - text: Looks like you’re in Sweden.
+      - link "Go to the Swedish Trustpilot site":
+        - /url: https://se.trustpilot.com/review/aiapply.io
+    - button "Dismiss"
+  - main:
+    - img "404"
+    - heading "Whoops!" [level=1]
+    - paragraph:
+      - text: The page you're looking for could not be found.
+      - link "Go back?":
+        - /url: /
+  - contentinfo:
+    - img "Trustpilot reviews"
+    - paragraph:
+      - text: This site is protected by reCAPTCHA. We collect device and interaction signals for security purposes as described in our
+      - link "Privacy Policy":
+        - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - text: .
+    - heading "Choose country" [level=3]
+    - term:
+      - button "United States":
+        - text: United States
+        - img
+    - definition
+    - heading "About" [level=3]
+    - list:
+      - listitem:
+        - link "About us":
+          - /url: https://corporate.trustpilot.com
+      - listitem:
+        - link "Jobs":
+          - /url: https://business.trustpilot.com/jobs
+      - listitem:
+        - link "Contact":
+          - /url: https://www.trustpilot.com/contact
+      - listitem:
+        - link "Blog":
+          - /url: https://www.trustpilot.com/blog
+      - listitem:
+        - link "How Trustpilot works":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Press":
+          - /url: https://corporate.trustpilot.com/press
+      - listitem:
+        - link "Investor relations":
+          - /url: https://corporate.trustpilot.com/investors
+      - listitem:
+        - link "Download the Trustpilot iOS app":
+          - /url: https://apps.apple.com/app/trustpilot-reviews-ratings/id1608392803
+          - img "Download the Trustpilot iOS app"
+    - heading "Community" [level=3]
+    - list:
+      - listitem:
+        - link "Trust in reviews":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Help Center":
+          - /url: https://help.trustpilot.com/s?language=en_US
+      - listitem:
+        - link "Log in":
+          - /url: https://www.trustpilot.com/users/connect
+      - listitem:
+        - link "Sign up":
+          - /url: https://www.trustpilot.com/users/connect?signup=True
+    - heading "Businesses" [level=3]
+    - list:
+      - listitem:
+        - link "Trustpilot Business":
+          - /url: https://business.trustpilot.com
+      - listitem:
+        - link "Products":
+          - /url: https://business.trustpilot.com/features
+      - listitem:
+        - link "Plans & pricing":
+          - /url: https://business.trustpilot.com/pricing
+      - listitem:
+        - link "Business login":
+          - /url: https://businessapp.b2b.trustpilot.com/?locale=en-us
+      - listitem:
+        - link "Blog for business":
+          - /url: https://business.trustpilot.com/blog
+      - listitem:
+        - link "Data Solutions":
+          - /url: https://business.trustpilot.com/datasolutions
+    - heading "Follow us on" [level=3]
+    - list:
+      - listitem:
+        - link "Facebook":
+          - /url: https://www.facebook.com/Trustpilot/
+      - listitem:
+        - link "X":
+          - /url: https://x.com/Trustpilot
+      - listitem:
+        - link "Instagram":
+          - /url: https://www.instagram.com/trustpilot/
+      - listitem:
+        - link "LinkedIn":
+          - /url: https://www.linkedin.com/company/trustpilot/
+      - listitem:
+        - link "Youtube":
+          - /url: https://www.youtube.com/c/trustpilotreviews
+    - list:
+      - listitem:
+        - link "Legal":
+          - /url: https://corporate.trustpilot.com/legal
+      - listitem:
+        - link "Privacy Policy":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - listitem:
+        - link "Terms & Conditions":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/terms-of-use-for-consumers
+      - listitem:
+        - link "Guidelines for Reviewers":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/guidelines-for-reviewers
+      - listitem:
+        - link "System status":
+          - /url: https://status.trustpilot.com/
+      - listitem:
+        - button "Manage cookies"
+      - listitem:
+        - link "Modern Slavery Statement":
+          - /url: https://corporate.trustpilot.com/legal/for-everyone/modern-slavery-and-human-trafficking-statement
+    - text: © 2026 Trustpilot, Inc. All rights reserved.
+  - alert
+  - dialog "Here’s how we use cookies":
+    - heading "Here’s how we use cookies" [level=2]
+    - text: "Trustpilot and our partners use certain necessary cookies stored on your device to deliver our services. We’d also like to use additional cookies to:"
+    - list:
+      - listitem: Enhance your experience
+      - listitem: Provide social media features
+      - listitem: Analyze, monitor, and improve our services
+      - listitem: Show personalized content and ads, depending on your settings
+    - text: If you choose Accept all, you consent to our use of additional cookies for these purposes. If you choose Reject all, we won’t use additional cookies for these purposes. You can change or withdraw consent at any time in Manage cookies. Learn more in our
+    - link "Cookie Policy":
+      - /url: "https://legal.trustpilot.com/for-everyone/cookie-policy "
+    - text: .
+    - button "Manage cookies, Opens the preference center dialog": Manage cookies
+    - button "Reject all"
+    - button "Accept all"

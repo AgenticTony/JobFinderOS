@@ -1,0 +1,692 @@
+- document:
+  - banner:
+    - link "Trustpilot reviews":
+      - /url: /
+      - img "Trustpilot reviews"
+    - searchbox "Search for another company…"
+    - link "Categories":
+      - /url: /categories
+    - link "Blog":
+      - /url: /blog
+    - button "Notifications"
+    - link "Log in":
+      - /url: /users/connect?redirect=%2freview%2fcareerflow.ai&source_cta=header
+    - link "For businesses":
+      - /url: https://business.trustpilot.com
+    - paragraph:
+      - text: Looks like you’re in Sweden.
+      - link "Go to the Swedish Trustpilot site":
+        - /url: https://se.trustpilot.com/review/careerflow.ai
+    - button "Dismiss"
+  - main:
+    - navigation "Breadcrumb":
+      - list:
+        - listitem:
+          - link "Electronics & Technology":
+            - /url: /categories/electronics_technology
+        - listitem
+        - listitem:
+          - link "Internet & Software":
+            - /url: /categories/internet_software
+        - listitem
+        - listitem:
+          - link "Software Company":
+            - /url: /categories/software_company
+        - listitem
+        - listitem: Careerflow.ai
+    - navigation:
+      - button "Summary"
+      - button "About"
+      - button "Reviews"
+      - link "Visit website":
+        - /url: https://careerflow.ai
+      - link "Write a review":
+        - /url: /evaluate/careerflow.ai
+    - link "Claimed profileFeb 2026 Careerflow.ai Reviews 20 • TrustScore 4 out of 5 3.8 Clickable button that opens a pop-up explaining how the Trustscore is calculated. Software Company Write a review Visit website":
+      - /url: https://careerflow.ai?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=logo_click
+      - img "Careerflow.ai logo"
+    - button "Claimed profileFeb 2026"
+    - heading "Careerflow.ai Reviews" [level=1]:
+      - text: Careerflow.ai
+      - link "Reviews"
+    - link "20"
+    - text: •
+    - link "TrustScore 4 out of 5 3.8":
+      - img "TrustScore 4 out of 5"
+      - paragraph: "3.8"
+    - button "Clickable button that opens a pop-up explaining how the Trustscore is calculated."
+    - link "Software Company":
+      - /url: /categories/software_company
+    - link "Write a review":
+      - /url: /evaluate/careerflow.ai
+    - link "Visit website":
+      - /url: https://careerflow.ai?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=domain_click
+    - heading "We use technology to protect platform integrity, but we don't fact-check reviews" [level=2]:
+      - button "We use technology to protect platform integrity, but we don't fact-check reviews"
+    - heading "Company details" [level=2]
+    - list:
+      - listitem:
+        - link "Software Company":
+          - /url: /categories/software_company
+      - listitem: also in
+      - listitem:
+        - link "Recruitment Service":
+          - /url: /categories/recruitment_service
+      - listitem:
+        - link "Software Vendor":
+          - /url: /categories/software_vendor
+      - listitem:
+        - button "Tooltip"
+    - heading "Written by the company" [level=3]
+    - paragraph:
+      - text: Careerflow.ai is the leading AI-powered job search platform trusted by over 1 million professionals, recent graduates, and career changers worldwide to streamline every stage of landing their next role—from discovery to interviews and offers. Our intelligent Job Tracker sits at the core, using intuitive Kanban boards to manage applications across 45+ platfo…
+      - button "See more"
+    - heading "Contact info" [level=2]
+    - list:
+      - listitem:
+        - paragraph: United States
+      - listitem:
+        - link "careerflow.ai":
+          - /url: https://careerflow.ai?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=domain_click
+    - paragraph: "3.8"
+    - heading "Great" [level=3]
+    - img "TrustScore 4 out of 5"
+    - paragraph: 20 reviews
+    - text: 5-star
+    - meter "Rating distribution for shared/rating/v2/star-5"
+    - text: 4-star
+    - meter "Rating distribution for shared/rating/v2/star-4"
+    - text: 3-star
+    - meter "Rating distribution for shared/rating/v2/star-3"
+    - text: 2-star
+    - meter "Rating distribution for shared/rating/v2/star-2"
+    - text: 1-star
+    - meter "Rating distribution for shared/rating/v2/star-1"
+    - separator
+    - button "How is the TrustScore calculated?":
+      - paragraph: How is the TrustScore calculated?
+    - paragraph: Asks customers to review
+    - paragraph: This company invites their customers to review, whether positive or negative
+    - paragraph: Replied to 60% of negative reviews
+    - paragraph: Typically replies within 1 week
+    - link "How this company uses Trustpilot See how their reviews and ratings are sourced, scored, and moderated.":
+      - /url: /review/careerflow.ai/transparency
+      - paragraph: How this company uses Trustpilot
+      - paragraph: See how their reviews and ratings are sourced, scored, and moderated.
+    - heading "People also looked at Tooltip" [level=2]:
+      - text: People also looked at
+      - button "Tooltip"
+    - button "SCROLL BACK" [disabled]
+    - button "SCROLL FORWARD"
+    - link "Teal logo Teal tealhq.com TrustScore 4 out of 5 4.2 (117)":
+      - /url: /review/tealhq.com
+      - img "Teal logo"
+      - heading "Teal" [level=3]
+      - paragraph: tealhq.com
+      - img "TrustScore 4 out of 5"
+      - paragraph: "4.2"
+      - paragraph: (117)
+    - link "Huntr logo Huntr huntr.co TrustScore 4.5 out of 5 4.5 (21)":
+      - /url: /review/huntr.co
+      - img "Huntr logo"
+      - heading "Huntr" [level=3]
+      - paragraph: huntr.co
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.5"
+      - paragraph: (21)
+    - link "simplify.jobs logo simplify.jobs simplify.jobs TrustScore 3 out of 5 2.8 (21)":
+      - /url: /review/simplify.jobs
+      - img "simplify.jobs logo"
+      - heading "simplify.jobs" [level=3]
+      - paragraph: simplify.jobs
+      - img "TrustScore 3 out of 5"
+      - paragraph: "2.8"
+      - paragraph: (21)
+    - link "Jobright logo Jobright jobright.ai TrustScore 5 out of 5 4.8 (4K)":
+      - /url: /review/jobright.ai
+      - img "Jobright logo"
+      - heading "Jobright" [level=3]
+      - paragraph: jobright.ai
+      - img "TrustScore 5 out of 5"
+      - paragraph: "4.8"
+      - paragraph: (4K)
+    - link "Jobscan.co logo Jobscan.co jobscan.co TrustScore 4.5 out of 5 4.3 (345)":
+      - /url: /review/jobscan.co
+      - img "Jobscan.co logo"
+      - heading "Jobscan.co" [level=3]
+      - paragraph: jobscan.co
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.3"
+      - paragraph: (345)
+    - link "AIApply logo AIApply aiapply.co TrustScore 4.5 out of 5 4.3 (2K)":
+      - /url: /review/aiapply.co
+      - img "AIApply logo"
+      - heading "AIApply" [level=3]
+      - paragraph: aiapply.co
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.3"
+      - paragraph: (2K)
+    - link "lazyapply.com logo lazyapply.com lazyapply.com TrustScore 2 out of 5 2.1 (110)":
+      - /url: /review/lazyapply.com
+      - img "lazyapply.com logo"
+      - heading "lazyapply.com" [level=3]
+      - paragraph: lazyapply.com
+      - img "TrustScore 2 out of 5"
+      - paragraph: "2.1"
+      - paragraph: (110)
+    - link "Kickresume - AI Resume builder, ATS Resume Checker logo Kickresume - AI Resume builder, ATS Resume Checker kickresume.com TrustScore 4.5 out of 5 4.6 (4K)":
+      - /url: /review/kickresume.com
+      - img "Kickresume - AI Resume builder, ATS Resume Checker logo"
+      - heading "Kickresume - AI Resume builder, ATS Resume Checker" [level=3]
+      - paragraph: kickresume.com
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.6"
+      - paragraph: (4K)
+    - text: "3.8"
+    - button "Clickable button that opens a pop-up explaining how the Trustscore is calculated."
+    - heading "All reviews" [level=2]
+    - paragraph: (20)
+    - paragraph: 19 reviews in the last 12 months
+    - link "Write a review":
+      - /url: /evaluate/careerflow.ai
+    - paragraph: We perform checks on reviews
+    - button "Information about trustworthy reviews"
+    - complementary:
+      - checkbox "5-star 70%"
+      - paragraph: 5-star
+      - paragraph: 70%
+      - checkbox "4-star 0%" [disabled]
+      - paragraph: 4-star
+      - paragraph: 0%
+      - checkbox "3-star 0%" [disabled]
+      - paragraph: 3-star
+      - paragraph: 0%
+      - checkbox "2-star 5%"
+      - paragraph: 2-star
+      - paragraph: 5%
+      - checkbox "1-star 25%"
+      - paragraph: 1-star
+      - paragraph: 25%
+      - separator
+      - insertion
+      - text: Advertisement
+      - link "How Trustpilot labels reviews":
+        - /url: https://help.trustpilot.com/s/article/About-Trustpilots-review-labels?language=en_US
+        - paragraph: How Trustpilot labels reviews
+    - text: Companies on Trustpilot aren't allowed to offer incentives or pay to hide reviews. Reviews are the opinions of individual users and not of Trustpilot.
+    - link "Read more":
+      - /url: https://help.trustpilot.com/s/article/How-do-we-make-sure-reviews-are-trustworthy?language=en_US
+    - searchbox "Search by keyword..."
+    - button "More filters":
+      - paragraph: More filters
+    - button "Most recent":
+      - paragraph: Most recent
+    - heading "Top mentions" [level=3]
+    - checkbox "Application"
+    - checkbox "Payment"
+    - checkbox "Response time"
+    - checkbox "Social media"
+    - checkbox "Solution"
+    - checkbox "Spam"
+    - checkbox "Staff"
+    - checkbox "User experience"
+    - separator
+    - article:
+      - complementary "Info for Israel Abegunde":
+        - link "Israel Abegunde NG • 1 review":
+          - /url: /users/6ac9800e27cfc8cd4753126f
+      - time: 5 days ago
+      - img "Rated 5 out of 5 stars"
+      - link "Excellent team members and great support system.":
+        - /url: /reviews/6ac980729945676092e02a8c
+        - heading "Excellent team members and great support system." [level=2]
+      - paragraph: Participated in a Careerflow.ai project, and had no cause to regret. Communication was great. Payment was fast. Puneet Kohli, in particular, was a great team player. He was supportive throughout the project duration.
+      - text: October 10, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Rizki Fadilah":
+        - link "Rizki Fadilah ID • 1 review":
+          - /url: /users/6ac21326a9de7987bf268c16
+      - time: Oct 6, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Working here has been a great…":
+        - /url: /reviews/6ac2143ca363469f6da398dd
+        - heading "Working here has been a great…" [level=2]
+      - paragraph: Working here has been a great experience! The team is super supportive, which makes day-to-day work feel smooth and encouraging. I also really appreciate how easy the platform is to use, everything is well-organized, and the information you need is always clear and right where you expect it to be.
+      - text: October 4, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Adil Arundaya":
+        - link "Adil Arundaya ID • 1 review":
+          - /url: /users/6ac19e1031a38a1c9e363924
+      - time: Oct 5, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Such a great experience work here":
+        - /url: /reviews/6ac19e4472342bb20338641d
+        - heading "Such a great experience work here" [level=2]
+      - paragraph: My experience working with Careerflow as a freelancer has been very valuable and professionally rewarding. The platform provided opportunities to work on real-world projects with clear workflows, well-defined tasks, and a strong emphasis on quality and consistency. Throughout the engagement, I was able to improve my attention to detail, time management, communication, and ability to work independently while maintaining performance standards. I also appreciated the supportive coordination and professional working environment, which made the overall experience well-organized and enjoyable. Overall, Careerflow has given me meaningful practical experience and valuable exposure to professional project-based work, and I would recommend it to anyone looking for a flexible opportunity to develop their skills while contributing to real projects.
+      - text: October 4, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Adam Nelson":
+        - link "Adam Nelson US • 1 review":
+          - /url: /users/6aa1de1a452b16209f5b0175
+      - time: Sep 10, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Customer Support was quick to respond":
+        - /url: /reviews/6aa1df7cf4d3bba75700139c
+        - heading "Customer Support was quick to respond" [level=2]
+      - paragraph: I've been using Careerflow.ai's resume builder and job tracker for several months and have been impressed by what it offers. After having an error with creating a targeted resume I contacted support through their chat program. The ai system transferred me to live support within a few minutes, and they quickly resolved my problem.
+      - text: September 9, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Emmanuel Otieno":
+        - link "Emmanuel Otieno KE • 1 review":
+          - /url: /users/6a9ef369a2898061719d6be7
+      - time: Sep 9, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Reliable, fair, and genuinely great to work with":
+        - /url: /reviews/6a9ef376f5358493f85e777b
+        - heading "Reliable, fair, and genuinely great to work with" [level=2]
+      - paragraph: I've had an excellent experience working with Careerflow. Communication has always been clear, expectations were well defined from the start, and the whole engagement has felt professional and respectful throughout. What stood out most to me was how reliable they are - payments always came through on time, exactly as agreed, no delays or chasing needed. The full contract was honored completely, no surprises. On top of that, it's genuinely been rewarding to work on meaningful projects with a team that values trust. I'd happily work with Careerflow again and recommend them to anyone looking for a dependable company to work with.
+      - text: September 7, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Jacob Holben":
+        - link "Jacob Holben US • 2 reviews":
+          - /url: /users/6a9e7645186db6423b3bddb5
+      - time: Sep 7, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "The company refused to pay me for projects":
+        - /url: /reviews/6a9e7726bbabf6272b95936f
+        - heading "The company refused to pay me for projects" [level=2]
+      - paragraph: He company hired me for Image Annotation Project that lasted a month and a half and then refused to pay me. Very bad experience with it. They also stole some of my work hours from an Egocentric Videos Project.
+      - text: July 1, 2026 Unprompted review
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Careerflow.ai logo"
+      - paragraph: Reply from Careerflow.ai
+      - time: Sep 7, 2026
+      - paragraph: "Hi Jacob, We’re sorry you’re unhappy with how this ended. To be accurate on the facts: you were paid for the work that was accepted. Our freelance projects have quality standards that are set out in the project guidelines and agreed at onboarding, and payment is tied to work meeting them. The adjustment to your hours was communicated to you, confirmed in writing, and recorded on our payment system. We’re not going to go into the specifics of your case publicly for your own privacy. If you’d like to have a further discussion, please reach out to your project lead directly. For context for other readers: this review relates to freelance contract work, which is a separate and unrelated from our career platform, for which this review platform is intended."
+    - article:
+      - complementary "Info for charles gabriel":
+        - link "charles gabriel KE • 1 review":
+          - /url: /users/682577424db5a05d6ff7c2b8
+      - time: Sep 6, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "Careerflow AI Jobs are total scam":
+        - /url: /reviews/6a9d40ea82cacda39d6011f4
+        - heading "Careerflow AI Jobs are total scam" [level=2]
+      - paragraph: Careerflow AI has jobs board that they hire remote workers which is a total scam. They will pay you well at first but when you make money exceeding $1k they will hold off your money with excuses. They will RIP YOU OFF. I have evidence--record of hours worked, conversations, verifications that I passed, everything. They made away with above 150 hours of my work and only paid half the rate for another 150 hours. They are blood suckers.
+      - text: August 1, 2026 Unprompted review
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Noah Awino":
+        - text: NA
+        - link "Noah Awino KE • 1 review":
+          - /url: /users/6a7b0449cca2c3267246a84a
+      - time: Aug 11, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Customer service":
+        - /url: /reviews/6a7b04636c78c586c5727d78
+        - heading "Customer service" [level=2]
+      - paragraph: The allocation of projects through use of assessment is a plus for me since other companies only use interviews which end up not being a guarantee to be given a job,,the payment methods and the process are swift and easy to use, the communication method through slack is a plus since you get to talk to the project heads and leads
+      - text: August 8, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Andrea - Career Coach":
+        - text: A-
+        - link "Andrea - Career Coach ZA • 1 review":
+          - /url: /users/6a54a7c9515c4d43bb628133
+      - time: Jul 13, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Career Coach Perspective of Careerflow and Clients Usage :)":
+        - /url: /reviews/6a54a7fc080159a1cce5f863
+        - heading "Career Coach Perspective of Careerflow and Clients Usage :)" [level=2]
+      - paragraph: "I am a long-time Career Coach who has used Careerflow as a Career tool to help clients improve their employability: I found the tool very easy to manage in terms of caseload; I could see at a glance where each client was in their milestones. The premium version of Careerflow is really an outstanding add-on to a job seeker's toolbox. I saw really strong results from clients who personalised their CV to the job description because it gave clear context to the application process. The Application tracking not only helped the client understand where they were in the job search but it also assisted me as the Coach to see, from a data perspective, where they were, assisting in guiding their goals The Mock Interview Tool is TOP KNOTCH! It was used to save time by having clients complete various interview practice sessions, and the actual interview feedback was so robust! This was then fed back into 121 or group coaching sessions, so clients could action what they learnt in live sessions and give a stronger interview. The Chrome extension is easy to navigate, and the LinkedIn scoring is so helpful, as you can quickly see what the client needs to optimise on their LinkedIn profile. I would definitely recommend Careerflow. Oh yes, and I did I mention that the Careerflow team are always there to answer every question, no matter how big or small!)"
+      - text: July 13, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Joyce Tabby":
+        - link "Joyce Tabby KE • 1 review":
+          - /url: /users/6a195a208dd5c4ff3c8c171b
+      - time: May 29, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "They breech you data":
+        - /url: /reviews/6a195a2c2a18d2c6fa0c45e2
+        - heading "They breech you data" [level=2]
+      - paragraph: They breech you data, and there is no way to delete your account. They don't have a support team and are purely scammers. Those involved in Word doc maestro project are not paid after submitting documents. It's purely and Indian run scam
+      - text: May 28, 2026 Unprompted review
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+    - button "Dismiss"
+    - heading "See if a website is trustworthy without leaving the page" [level=3]
+    - link "Get Chrome extension":
+      - /url: https://chrome.google.com/webstore/detail/trustpilot-reviews-rating/dimkjjladgaekdlfebknbaooicmfalke?utm_source=trustpilot&utm_medium=cpp_promotion&utm_campaign=cpp_promotion
+    - article:
+      - complementary "Info for Deepthi kolipaka":
+        - button "Deepthi kolipaka"
+        - link "Deepthi kolipaka US • 1 review":
+          - /url: /users/69b0bd30513e8159267acb37
+      - time: Mar 16, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "A Stress Reducer & A Career Catalyst":
+        - /url: /reviews/69b744a43d68cb51970198c3
+        - heading "A Stress Reducer & A Career Catalyst" [level=2]
+      - paragraph: If you are like me the most soul-crushing part during job hunting isn't interviews, it's the endless and meticulous tweaking of the resumes, not just to match the role, but the formatting. But, this is the answer for being ready to attack that problem and send the resumes without having your recruiter send you reminders. It's absolutely easy to use and smooth. I have subscribed to other resume tools, but this is the best.Simply hassle-free
+      - text: June 18, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Jae Kwon":
+        - text: JK
+        - link "Jae Kwon US • 1 review":
+          - /url: /users/69af1631e100ee405d5a6d49
+      - time: Mar 9, 2026
+      - img "Rated 5 out of 5 stars"
+      - button "Verified"
+      - link "Prompt reply":
+        - /url: /reviews/69af1632d146d4ec56674d34
+        - heading "Prompt reply" [level=2]
+      - paragraph: Prompt reply, great user experience of being able to reply not only through careerflow but also email, the agent understood my issue and was able to quickly resolve it. Thank you so much!
+      - text: March 9, 2026
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Siya Siju":
+        - link "Siya Siju GB • 2 reviews":
+          - /url: /users/69a8515b513e8172a37145e7
+      - time: Mar 4, 2026
+      - img "Rated 2 out of 5 stars"
+      - link "Renewal and Refund concerns- Lack of Support from the team.":
+        - /url: /reviews/69a85164662006451938a6fb
+        - heading "Renewal and Refund concerns- Lack of Support from the team." [level=2]
+      - paragraph: I signed up for Careerflow to explore their career development tools, which are generally well-organized and useful. However, I faced an unexpected subscription renewal charge. I reached out to the support team to resolve the issue. While the initial response included a request to leave a review before processing the refund, I maintained clear communication about the circumstances. The team has now agreed to process the refund, which I appreciate and now I am waiting for the refund and whats scary is the team is not responding. My advice for new users is to check subscription settings carefully. Overall, the platform has potential, and I appreciate the support team addressing my concern. I hope Careerflow continues to improve its billing and support processes.
+      - text: February 27, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Careerflow.ai logo"
+      - paragraph: Reply from Careerflow.ai
+      - time: Mar 25, 2026
+      - paragraph: Hi Siya, Thank you for sharing your experience and for being a user of Careerflow’s AI resume builder, job tracker, and career development tools. We’re happy our team was able to assist with your concern, and we completely understand how unexpected renewals can be frustrating. Our records show that we responded to your request within 24 hours and processed your refund shortly after. Some of your follow‑up messages came in outside our regular support hours (9 AM to 5 PM PST), which may have caused a short delay. You should have already received your refund, but if not, please contact us again at support@careerflow.ai so we can confirm it immediately. Careerflow follows a transparent billing policy, and we send automatic renewal reminders seven days before each renewal so users have time to review or cancel their subscription if needed. However, we understand that sometimes those emails can be missed or filtered, and we always aim to resolve any confusion as quickly as possible. As a fast‑growing career coaching platform with over one million users worldwide, we proudly support top career‑focused institutions such as universities, bootcamps, outplacement firms, and executive recruiters. We are constantly improving our AI‑powered tools, billing processes, and customer support to make job search management easier and more effective. We sincerely appreciate your feedback because it helps us continue building a platform that empowers job seekers everywhere to take control of their careers. The Careerflow Team www.careerflow.ai
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for fidel castro":
+        - button "fidel castro"
+        - link "fidel castro KE • 3 reviews":
+          - /url: /users/69a61ac7dcbdac0d30d01b85
+      - time: Mar 4, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "honestly my experience with…":
+        - /url: /reviews/69a75aae1829c55c5a5bc452
+        - heading "honestly my experience with…" [level=2]
+      - paragraph: honestly my experience with careerflow.ai is one of the best experience..and this has really bern so helpfull due to the fact that ist ai powered improving accuracy and saves much time due to its quick resume formation .careerflow.ai is also easy to use just by one click everything is accurately done..careerflow.ai also improve skills and candidacy
+      - text: March 4, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Collins":
+        - button "Collins": CO
+        - link "Collins KE • 2 reviews":
+          - /url: /users/69985c0ad6c35219635bee3d
+      - time: Feb 23, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "LinkedIn Profile Optimized":
+        - /url: /reviews/699c56709c350b5fe2c1a70b
+        - heading "LinkedIn Profile Optimized" [level=2]
+      - paragraph: It has greatly enhanced my profile views on LinkedIn, and I have since received offers from recruiters in my industry.
+      - text: February 13, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Winnie Kawira":
+        - link "Winnie Kawira KE • 1 review":
+          - /url: /users/699acc823cdc495729ca43be
+      - time: Feb 22, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "A Comprehensive Career Partner, Not Just a Resume Tool":
+        - /url: /reviews/699ae35daaee20d4d53be92f
+        - heading "A Comprehensive Career Partner, Not Just a Resume Tool" [level=2]
+      - paragraph: Careerflow.ai stands out by offering more than just aesthetic resume scoring. What I find most valuable is its ability to help you tailor your resume specifically to a job description, significantly increasing your chances of reaching the interview stage. Beyond document optimization, the platform allows you to identify personal "weak points" and provides actionable ways to improve them. It doesn’t just help you find a job; it helps you evolve into a more competitive candidate. I highly recommend it to anyone looking to polish every corner of their professional path.
+      - text: February 22, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Rohit Garg":
+        - link "Rohit Garg US • 1 review":
+          - /url: /users/6995eac9dcbdac400abdfff5
+      - time: Feb 18, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Excellent for job seeker":
+        - /url: /reviews/6995ead08e3a21cabb38bdae
+        - heading "Excellent for job seeker" [level=2]
+      - paragraph: I have used the platform for LinkedIn optimization, job tracking and resume building time to time for my job search and landed multiple offers. Highly recommend a job seeker to use this platform.
+      - text: January 14, 2026 Unprompted review
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Dylan":
+        - text: DY
+        - link "Dylan US • 2 reviews":
+          - /url: /users/69954537d6c352dbf6580466
+      - time: Feb 18, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "I’m a senior professional and haven’t…":
+        - /url: /reviews/699545b10e243ca6fa573655
+        - heading "I’m a senior professional and haven’t…" [level=2]
+      - paragraph: I’m a senior professional and haven’t had to find a job in over 10 years. I usually got jobs directly from my network and recruiters - so navigating the job search was a pain. My career coach swears by Careerflow and I totally see why! I really enjoyed using the Careerflow platform especially for the resume building and interview practice aspects. I loved how it not only had the basics down but the AI and browser extension are really solid to easily click through and get everything into my tracker, it fills applications, and the easy access to cover letters.
+      - text: January 14, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for CAMILO":
+        - text: CA
+        - link "CAMILO US • 11 reviews":
+          - /url: /users/599c9e270000ff000abf0e62
+      - time: May 2, 2025
+      - img "Rated 1 out of 5 stars"
+      - button "Verified"
+      - link "Poor Data Practices and No Easy Way to Delete Account":
+        - /url: /reviews/681403dc681f64bb2497edec
+        - heading "Poor Data Practices and No Easy Way to Delete Account" [level=2]
+      - paragraph: Besides having a subpar resume building tool that won't stop trying to shove bullets where they don't belong. Careerflow.ai is a frustrating and opaque platform when it comes to user privacy. There’s no option to delete your account directly, which is a basic feature every service handling personal data should offer. Instead, they require you to email support and wait until the end of the month to be added to some “deletion queue.” That’s not just inconvenient—it’s unacceptable and borderline negligent in terms of data protection.Poor Data Practices and No Easy Way to Delete Account
+      - text: May 1, 2025
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+    - link "Show reviews in all languages. (20 reviews)":
+      - /url: /review/careerflow.ai?languages=all
+    - navigation "Pagination":
+      - text: Previous
+      - link "Page number 1":
+        - /url: /review/careerflow.ai
+        - text: "1"
+      - text: Next page
+    - heading "The Trustpilot Experience" [level=3]:
+      - text: The Trustpilot Experience
+      - img
+    - heading "We're open to all" [level=4]:
+      - button "We're open to all"
+    - heading "We fight fake reviews" [level=4]:
+      - button "We fight fake reviews"
+    - heading "We show the latest reviews" [level=4]:
+      - button "We show the latest reviews"
+    - heading "We encourage constructive feedback" [level=4]:
+      - button "We encourage constructive feedback"
+    - heading "We verify reviewers" [level=4]:
+      - button "We verify reviewers"
+    - heading "We advocate against bias" [level=4]:
+      - button "We advocate against bias"
+    - link "Take a closer look":
+      - /url: /trust
+  - contentinfo:
+    - img "Trustpilot reviews"
+    - paragraph:
+      - text: This site is protected by reCAPTCHA. We collect device and interaction signals for security purposes as described in our
+      - link "Privacy Policy":
+        - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - text: .
+    - heading "Choose country" [level=3]
+    - term:
+      - button "United States":
+        - text: United States
+        - img
+    - definition
+    - heading "About" [level=3]
+    - list:
+      - listitem:
+        - link "About us":
+          - /url: https://corporate.trustpilot.com
+      - listitem:
+        - link "Jobs":
+          - /url: https://business.trustpilot.com/jobs
+      - listitem:
+        - link "Contact":
+          - /url: https://www.trustpilot.com/contact
+      - listitem:
+        - link "Blog":
+          - /url: https://www.trustpilot.com/blog
+      - listitem:
+        - link "How Trustpilot works":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Press":
+          - /url: https://corporate.trustpilot.com/press
+      - listitem:
+        - link "Investor relations":
+          - /url: https://corporate.trustpilot.com/investors
+      - listitem:
+        - link "Download the Trustpilot iOS app":
+          - /url: https://apps.apple.com/app/trustpilot-reviews-ratings/id1608392803
+          - img "Download the Trustpilot iOS app"
+    - heading "Community" [level=3]
+    - list:
+      - listitem:
+        - link "Trust in reviews":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Help Center":
+          - /url: https://help.trustpilot.com/s?language=en_US
+      - listitem:
+        - link "Log in":
+          - /url: https://www.trustpilot.com/users/connect
+      - listitem:
+        - link "Sign up":
+          - /url: https://www.trustpilot.com/users/connect?signup=True
+    - heading "Businesses" [level=3]
+    - list:
+      - listitem:
+        - link "Trustpilot Business":
+          - /url: https://business.trustpilot.com
+      - listitem:
+        - link "Products":
+          - /url: https://business.trustpilot.com/features
+      - listitem:
+        - link "Plans & pricing":
+          - /url: https://business.trustpilot.com/pricing
+      - listitem:
+        - link "Business login":
+          - /url: https://businessapp.b2b.trustpilot.com/?locale=en-us
+      - listitem:
+        - link "Blog for business":
+          - /url: https://business.trustpilot.com/blog
+      - listitem:
+        - link "Data Solutions":
+          - /url: https://business.trustpilot.com/datasolutions
+    - heading "Follow us on" [level=3]
+    - list:
+      - listitem:
+        - link "Facebook":
+          - /url: https://www.facebook.com/Trustpilot/
+      - listitem:
+        - link "X":
+          - /url: https://x.com/Trustpilot
+      - listitem:
+        - link "Instagram":
+          - /url: https://www.instagram.com/trustpilot/
+      - listitem:
+        - link "LinkedIn":
+          - /url: https://www.linkedin.com/company/trustpilot/
+      - listitem:
+        - link "Youtube":
+          - /url: https://www.youtube.com/c/trustpilotreviews
+    - list:
+      - listitem:
+        - link "Legal":
+          - /url: https://corporate.trustpilot.com/legal
+      - listitem:
+        - link "Privacy Policy":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - listitem:
+        - link "Terms & Conditions":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/terms-of-use-for-consumers
+      - listitem:
+        - link "Guidelines for Reviewers":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/guidelines-for-reviewers
+      - listitem:
+        - link "System status":
+          - /url: https://status.trustpilot.com/
+      - listitem:
+        - button "Manage cookies"
+      - listitem:
+        - link "Modern Slavery Statement":
+          - /url: https://corporate.trustpilot.com/legal/for-everyone/modern-slavery-and-human-trafficking-statement
+    - text: © 2026 Trustpilot, Inc. All rights reserved.
+  - alert
+  - dialog "Here’s how we use cookies":
+    - heading "Here’s how we use cookies" [level=2]
+    - text: "Trustpilot and our partners use certain necessary cookies stored on your device to deliver our services. We’d also like to use additional cookies to:"
+    - list:
+      - listitem: Enhance your experience
+      - listitem: Provide social media features
+      - listitem: Analyze, monitor, and improve our services
+      - listitem: Show personalized content and ads, depending on your settings
+    - text: If you choose Accept all, you consent to our use of additional cookies for these purposes. If you choose Reject all, we won’t use additional cookies for these purposes. You can change or withdraw consent at any time in Manage cookies. Learn more in our
+    - link "Cookie Policy":
+      - /url: "https://legal.trustpilot.com/for-everyone/cookie-policy "
+    - text: .
+    - button "Manage cookies, Opens the preference center dialog": Manage cookies
+    - button "Reject all"
+    - button "Accept all"

@@ -1,0 +1,233 @@
+- document:
+  - banner:
+    - navigation "Main":
+      - link "Home":
+        - /url: /
+        - img "Simplify"
+      - link "Copilot":
+        - /url: /copilot
+      - link "Job Tracker":
+        - /url: /job-application-tracker
+      - link "Resume Builder":
+        - /url: /resume-builder
+      - link "Talent Scout":
+        - /url: /talent-scout
+      - link "Employers":
+        - /url: /employers
+      - link "Blog":
+        - /url: /blog
+      - link "Log in":
+        - /url: /auth/login
+      - link "Join now":
+        - /url: /auth/register
+  - main:
+    - heading "Get hired 3x faster with your AI job search partner." [level=1]
+    - paragraph: Simplify proactively matches better-fit roles, customize your resume, and applies for you.
+    - link "Try for free":
+      - /url: /auth/register?from=landing
+    - text: 4.9/5 Trusted by 2M+ job seekers
+    - heading "90% of your job search automated with one profile." [level=2]
+    - paragraph: 5+ hours
+    - paragraph: Saved on job applications each week
+    - paragraph: 3×
+    - paragraph: Higher interview rate with applications tailored by Simplify
+    - paragraph: 2M+
+    - paragraph: People have joined Simplify to find their next job
+    - region "Fresh roles, added hourly":
+      - heading "Fresh roles, added hourly" [level=2]
+      - text: New jobs added today —
+      - link "Software Engineering — roles added today":
+        - /url: /jobs?category=Software%20Engineering
+      - link "Product & Design — roles added today":
+        - /url: /jobs?category=Product%3BUI%2FUX%20%26%20Design
+      - link "Data & Analytics — roles added today":
+        - /url: /jobs?category=Data%20%26%20Analytics
+      - link "Marketing — roles added today":
+        - /url: /jobs?category=Growth%20%26%20Marketing
+      - link "Sales — roles added today":
+        - /url: /jobs?category=Sales%20%26%20Account%20Management
+      - link "Finance & Strategy — roles added today":
+        - /url: /jobs?category=Finance%20%26%20Banking%3BBusiness%20%26%20Strategy
+      - link "Operations — roles added today":
+        - /url: /jobs?category=Operations%20%26%20Logistics
+      - link "Explore all jobs — fresh roles across every function":
+        - /url: /jobs
+    - region "Job searching is busywork. Your Simplify agent takes it on.":
+      - heading "Job searching is busywork. Your Simplify agent takes it on." [level=2]
+    - heading "Your own AI job search expert" [level=3]
+    - paragraph: Simplify reads your resume the way a recruiter would — scoring it, naming the skills and keywords you're missing, and surfacing the people you already know at the company. You get a personalized plan for every role, not generic advice.
+    - link "Get my search plan":
+      - /url: /auth/register?from=landing
+    - region "Helping 2 million job seekers move forward.":
+      - heading "Helping 2 million job seekers move forward." [level=2]
+      - region "Job seeker testimonials":
+        - figure "Divya joined Insight Summer Associate":
+          - blockquote: Simplify was definitely the most helpful platform I used during my job search.
+          - text: Divya joined Insight Summer Associate
+        - figure "Albert joined Jane Street Software Engineer Intern":
+          - blockquote: I love the curated matches on Simplify. Makes it super easy to find jobs in specific industries!
+          - text: Albert joined Jane Street Software Engineer Intern
+        - button "Page 1"
+        - button "Page 2"
+        - button "Page 3"
+      - paragraph: Where Simplify users got hired this week
+      - img "Airbnb"
+      - img "Anthropic"
+      - img "Spotify"
+      - img "OpenAI"
+      - img "The Walt Disney Company"
+      - img "KPMG"
+      - img "Coinbase"
+      - img "McKinsey & Company"
+      - img "Apple"
+      - img "Harvey"
+    - region "Everything else your job search needs":
+      - heading "Everything else your job search needs" [level=2]
+      - link "Job Tracker Track every application":
+        - /url: /job-application-tracker
+      - link "Resume Score See your resume the way an ATS does.":
+        - /url: /resume-builder
+      - link "Generate your cover letter Tailored to the role and your experience.":
+        - /url: /cover-letter-builder
+      - link "Track your career wins Save accomplishments while they’re still fresh.":
+        - /url: /auth/register?from=landing
+      - link "Browse curated job lists Explore internships, new grad, remote, and more.":
+        - /url: /lists
+      - link "Find people who can refer you Discover connections with your Network Copilot.":
+        - /url: /networking
+    - region "Got questions?":
+      - heading "Got questions?" [level=2]
+      - paragraph: Everything people ask us before they sign up.
+      - heading "Is Simplify free? How do you make money?" [level=3]:
+        - button "Is Simplify free? How do you make money?"
+      - heading "How does Simplify work?" [level=3]:
+        - button "How does Simplify work?"
+      - heading "How does Simplify handle my data?" [level=3]:
+        - button "How does Simplify handle my data?"
+      - heading "How does Simplify get the job postings it recommends me?" [level=3]:
+        - button "How does Simplify get the job postings it recommends me?"
+      - heading "Do I need the Chrome extension?" [level=3]:
+        - button "Do I need the Chrome extension?"
+      - heading "Where can I subscribe to Simplify+?" [level=3]:
+        - button "Where can I subscribe to Simplify+?"
+    - region "Get hired 3x faster with your AI job search partner.":
+      - heading "Get hired 3x faster with your AI job search partner." [level=2]
+      - link "Try for free":
+        - /url: /auth/register?from=landing
+  - contentinfo:
+    - navigation "Features":
+      - heading "Features" [level=3]
+      - list:
+        - listitem:
+          - link "AI Talent Agent":
+            - /url: /ai-talent-agent
+        - listitem:
+          - link "AI Job Search":
+            - /url: /ai-job-search
+        - listitem:
+          - link "AI Interviewer":
+            - /url: /ai-interviewer
+        - listitem:
+          - link "Networking & Intros":
+            - /url: /networking
+        - listitem:
+          - link "Talent Scout":
+            - /url: /talent-scout
+        - listitem:
+          - link "Copilot":
+            - /url: /copilot
+        - listitem:
+          - link "Resume Builder":
+            - /url: /resume-builder
+        - listitem:
+          - link "Job Tracker":
+            - /url: /job-application-tracker
+    - navigation "Opportunities":
+      - heading "Opportunities" [level=3]
+      - list:
+        - listitem:
+          - link "Search All Jobs":
+            - /url: /jobs
+        - listitem:
+          - link "Internships":
+            - /url: /internships
+        - listitem:
+          - link "Entry Level & New Grad":
+            - /url: /entry-level
+        - listitem:
+          - link "Experienced Job Seeker":
+            - /url: /experienced-job-seekers
+        - listitem:
+          - link "Remote Work":
+            - /url: /remote
+        - listitem:
+          - link "Discover Companies":
+            - /url: /companies
+    - navigation "Toolkit":
+      - heading "Toolkit" [level=3]
+      - list:
+        - listitem:
+          - link "Cover Letter Generator":
+            - /url: /cover-letter-builder
+        - listitem:
+          - link "Email Generator":
+            - /url: /email-generator-tool
+        - listitem:
+          - link "Question Response Generator":
+            - /url: /question-response-generator
+        - listitem:
+          - link "Resume Review":
+            - /url: /services/resume
+        - listitem:
+          - link "Earn with AI":
+            - /url: /earn
+    - navigation "Company":
+      - heading "Company" [level=3]
+      - list:
+        - listitem:
+          - link "Blog":
+            - /url: /blog
+        - listitem:
+          - link "About":
+            - /url: /about
+        - listitem:
+          - link "Careers":
+            - /url: /c/Simplify
+        - listitem:
+          - link "Support & FAQ":
+            - /url: https://help.simplify.jobs
+        - listitem:
+          - link "Privacy":
+            - /url: /privacy
+        - listitem:
+          - link "Refund Policy":
+            - /url: /refund-policy
+    - list:
+      - listitem:
+        - link "Instagram":
+          - /url: https://www.instagram.com/simplify.jobs/
+      - listitem:
+        - link "TikTok":
+          - /url: https://www.tiktok.com/@joinsimplify
+      - listitem:
+        - link "LinkedIn":
+          - /url: https://www.linkedin.com/company/simplifyjobs/
+      - listitem:
+        - link "X":
+          - /url: https://x.com/joinsimplify/
+      - listitem:
+        - link "Reddit":
+          - /url: https://www.reddit.com/r/simplify/
+    - paragraph: © 2026 Simplify Jobs, Inc. All rights reserved.
+    - link "Privacy":
+      - /url: /privacy
+    - link "Terms":
+      - /url: /terms
+    - link "Your Privacy Choices":
+      - /url: /privacy-choices
+  - alert
+  - dialog "We value your privacy":
+    - text: We value your privacy This site uses cookies for analytics and to measure our advertising. You can accept or reject them — the choice is yours.
+    - button "Reject All"
+    - button "Accept All"
+    - button "Customize"

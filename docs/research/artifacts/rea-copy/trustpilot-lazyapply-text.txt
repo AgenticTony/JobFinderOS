@@ -1,0 +1,737 @@
+- document:
+  - banner:
+    - link "Trustpilot reviews":
+      - /url: /
+      - img "Trustpilot reviews"
+    - searchbox "Search for another company…"
+    - link "Categories":
+      - /url: /categories
+    - link "Blog":
+      - /url: /blog
+    - button "Notifications"
+    - link "Log in":
+      - /url: /users/connect?redirect=%2freview%2flazyapply.com&source_cta=header
+    - link "For businesses":
+      - /url: https://business.trustpilot.com
+    - paragraph:
+      - text: Looks like you’re in Sweden.
+      - link "Go to the Swedish Trustpilot site":
+        - /url: https://se.trustpilot.com/review/lazyapply.com
+    - button "Dismiss"
+  - main:
+    - navigation "Breadcrumb":
+      - list:
+        - listitem:
+          - link "Business Services":
+            - /url: /categories/business_services
+        - listitem
+        - listitem:
+          - link "IT & Communication":
+            - /url: /categories/it_communication
+        - listitem
+        - listitem:
+          - link "Mailing Service":
+            - /url: /categories/mailing_service
+        - listitem
+        - listitem: lazyapply.com
+    - navigation:
+      - button "Summary"
+      - button "About"
+      - button "Reviews"
+      - link "Visit website":
+        - /url: https://lazyapply.com
+      - link "Write a review":
+        - /url: /evaluate/lazyapply.com
+    - link "Claimed profileJan 2022 lazyapply.com Reviews 110 • TrustScore 2 out of 5 2.1 Clickable button that opens a pop-up explaining how the Trustscore is calculated. Mailing Service Write a review Visit website":
+      - /url: https://lazyapply.com?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=logo_click
+      - img "lazyapply.com logo"
+    - button "Claimed profileJan 2022"
+    - heading "lazyapply.com Reviews" [level=1]:
+      - text: lazyapply.com
+      - link "Reviews"
+    - link "110"
+    - text: •
+    - link "TrustScore 2 out of 5 2.1":
+      - img "TrustScore 2 out of 5"
+      - paragraph: "2.1"
+    - button "Clickable button that opens a pop-up explaining how the Trustscore is calculated."
+    - link "Mailing Service":
+      - /url: /categories/mailing_service
+    - link "Write a review":
+      - /url: /evaluate/lazyapply.com
+    - link "Visit website":
+      - /url: https://lazyapply.com?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=domain_click
+    - heading "We use technology to protect platform integrity, but we don't fact-check reviews" [level=2]:
+      - button "We use technology to protect platform integrity, but we don't fact-check reviews"
+    - heading "See what reviewers are saying" [level=2]
+    - button "Tooltip"
+    - article:
+      - complementary "Info for William Andrés Castellanos":
+        - link "William Andrés Castellanos Jun 25, 2026":
+          - /url: /users/67070a2bcc68823e6387f054
+          - text: William Andrés Castellanos
+          - time: Jun 25, 2026
+      - img "Rated 1 out of 5 stars"
+      - button "I signed up and paid for LazyApply over 5 days ago. To this day, I have never been able to use their service — not once. The problem? Their platform only works with Gmail accounts. Th... See more":
+        - paragraph: I signed up and paid for LazyApply over 5 days ago. To this day, I have never been able to use their service — not once. The problem? Their platform only works with Gmail accounts. Th... See more
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Jason Gunner":
+        - link "Jason Gunner Jun 16, 2026":
+          - /url: /users/6a3153758c034d2db1bbb41b
+          - text: Jason Gunner
+          - time: Jun 16, 2026
+      - img "Rated 1 out of 5 stars"
+      - button "Horrible-Horrible-Horrible Customer service. I bought a membership, and felt the platform made consistent mistakes when applying for jobs for me. I asked for a refund within the 30-day window, and to... See more":
+        - paragraph: Horrible-Horrible-Horrible Customer service. I bought a membership, and felt the platform made consistent mistakes when applying for jobs for me. I asked for a refund within the 30-day window, and to... See more
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Terry Lee":
+        - text: TL
+        - link "Terry Lee Mar 22, 2022":
+          - /url: /users/623a2471dae13a0013210e2c
+          - text: Terry Lee
+          - time: Mar 22, 2022
+      - img "Rated 5 out of 5 stars"
+      - button "This is a massive time saver. Also, you avoid the annoyance of manual applications. True it only works for jobs take \"easy apply\" (Linkedin), also \"apply with your indeed resume\" (Indeed); however i... See more":
+        - paragraph: This is a massive time saver. Also, you avoid the annoyance of manual applications. True it only works for jobs take "easy apply" (Linkedin), also "apply with your indeed resume" (Indeed); however i... See more
+      - button "Useful"
+      - text: "3"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Dobson Dunavant":
+        - link "Dobson Dunavant Aug 25, 2024":
+          - /url: /users/66ca93ddbb92bd71092dadda
+          - text: Dobson Dunavant
+          - time: Aug 25, 2024
+      - img "Rated 3 out of 5 stars"
+      - 'button "Issue 1: I see it get hung up on things as simple as \"Enter Today''s Date\" and other simple and common fields in applications. I have also seen glaring, and I mean glaring issues across some of the a... See more"':
+        - paragraph: "Issue 1: I see it get hung up on things as simple as \"Enter Today's Date\" and other simple and common fields in applications. I have also seen glaring, and I mean glaring issues across some of the a... See more"
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - button "See all 110 reviews"
+    - heading "Company details" [level=2]
+    - list:
+      - listitem:
+        - link "Mailing Service":
+          - /url: /categories/mailing_service
+      - listitem:
+        - button "Tooltip"
+    - heading "Contact info" [level=2]
+    - list:
+      - listitem:
+        - paragraph: India
+      - listitem:
+        - link "lazyapply.com":
+          - /url: https://lazyapply.com?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=domain_click
+    - paragraph: "2.1"
+    - heading "Poor" [level=3]
+    - img "TrustScore 2 out of 5"
+    - paragraph: 110 reviews
+    - text: 5-star
+    - meter "Rating distribution for shared/rating/v2/star-5"
+    - text: 4-star
+    - meter "Rating distribution for shared/rating/v2/star-4"
+    - text: 3-star
+    - meter "Rating distribution for shared/rating/v2/star-3"
+    - text: 2-star
+    - meter "Rating distribution for shared/rating/v2/star-2"
+    - text: 1-star
+    - meter "Rating distribution for shared/rating/v2/star-1"
+    - separator
+    - button "How is the TrustScore calculated?":
+      - paragraph: How is the TrustScore calculated?
+    - paragraph: No recent history of asking for reviews
+    - paragraph: This company hasn't invited customers recently, so reviews may not be representative
+    - paragraph: Hasn’t replied to negative reviews
+    - link "How this company uses Trustpilot See how their reviews and ratings are sourced, scored, and moderated.":
+      - /url: /review/lazyapply.com/transparency
+      - paragraph: How this company uses Trustpilot
+      - paragraph: See how their reviews and ratings are sourced, scored, and moderated.
+    - heading "People also looked at Tooltip" [level=2]:
+      - text: People also looked at
+      - button "Tooltip"
+    - button "SCROLL BACK" [disabled]
+    - button "SCROLL FORWARD"
+    - link "AIApply logo AIApply aiapply.co TrustScore 4.5 out of 5 4.3 (2K)":
+      - /url: /review/aiapply.co
+      - img "AIApply logo"
+      - heading "AIApply" [level=3]
+      - paragraph: aiapply.co
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.3"
+      - paragraph: (2K)
+    - link "Jobright logo Jobright jobright.ai TrustScore 5 out of 5 4.8 (4K)":
+      - /url: /review/jobright.ai
+      - img "Jobright logo"
+      - heading "Jobright" [level=3]
+      - paragraph: jobright.ai
+      - img "TrustScore 5 out of 5"
+      - paragraph: "4.8"
+      - paragraph: (4K)
+    - link "JobCopilot logo JobCopilot jobcopilot.com TrustScore 2 out of 5 2 (99)":
+      - /url: /review/jobcopilot.com
+      - img "JobCopilot logo"
+      - heading "JobCopilot" [level=3]
+      - paragraph: jobcopilot.com
+      - img "TrustScore 2 out of 5"
+      - paragraph: "2"
+      - paragraph: (99)
+    - link "LoopCV logo LoopCV loopcv.pro TrustScore 4 out of 5 3.9 (131)":
+      - /url: /review/loopcv.pro
+      - img "LoopCV logo"
+      - heading "LoopCV" [level=3]
+      - paragraph: loopcv.pro
+      - img "TrustScore 4 out of 5"
+      - paragraph: "3.9"
+      - paragraph: (131)
+    - link "simplify.jobs logo simplify.jobs simplify.jobs TrustScore 3 out of 5 2.8 (21)":
+      - /url: /review/simplify.jobs
+      - img "simplify.jobs logo"
+      - heading "simplify.jobs" [level=3]
+      - paragraph: simplify.jobs
+      - img "TrustScore 3 out of 5"
+      - paragraph: "2.8"
+      - paragraph: (21)
+    - link "Teal logo Teal tealhq.com TrustScore 4 out of 5 4.2 (117)":
+      - /url: /review/tealhq.com
+      - img "Teal logo"
+      - heading "Teal" [level=3]
+      - paragraph: tealhq.com
+      - img "TrustScore 4 out of 5"
+      - paragraph: "4.2"
+      - paragraph: (117)
+    - link "Sonara.ai - AI Job Search Automation logo Sonara.ai - AI Job Search Automation sonara.ai TrustScore 4 out of 5 3.8 (100)":
+      - /url: /review/sonara.ai
+      - img "Sonara.ai - AI Job Search Automation logo"
+      - heading "Sonara.ai - AI Job Search Automation" [level=3]
+      - paragraph: sonara.ai
+      - img "TrustScore 4 out of 5"
+      - paragraph: "3.8"
+      - paragraph: (100)
+    - link "Massive logo Massive usemassive.com TrustScore 1.5 out of 5 1.7 (43)":
+      - /url: /review/usemassive.com
+      - img "Massive logo"
+      - heading "Massive" [level=3]
+      - paragraph: usemassive.com
+      - img "TrustScore 1.5 out of 5"
+      - paragraph: "1.7"
+      - paragraph: (43)
+    - text: "2.1"
+    - button "Clickable button that opens a pop-up explaining how the Trustscore is calculated."
+    - heading "All reviews" [level=2]
+    - paragraph: (110)
+    - paragraph: 9 reviews in the last 12 months
+    - link "Write a review":
+      - /url: /evaluate/lazyapply.com
+    - complementary:
+      - checkbox "5-star 37%"
+      - paragraph: 5-star
+      - paragraph: 37%
+      - checkbox "4-star <1%"
+      - paragraph: 4-star
+      - paragraph: <1%
+      - checkbox "3-star <1%"
+      - paragraph: 3-star
+      - paragraph: <1%
+      - checkbox "2-star 3%"
+      - paragraph: 2-star
+      - paragraph: 3%
+      - checkbox "1-star 58%"
+      - paragraph: 1-star
+      - paragraph: 58%
+      - separator
+      - insertion
+      - text: Advertisement
+      - link "How Trustpilot labels reviews":
+        - /url: https://help.trustpilot.com/s/article/About-Trustpilots-review-labels?language=en_US
+        - paragraph: How Trustpilot labels reviews
+    - text: Companies on Trustpilot aren't allowed to offer incentives or pay to hide reviews. Reviews are the opinions of individual users and not of Trustpilot.
+    - link "Read more":
+      - /url: https://help.trustpilot.com/s/article/How-do-we-make-sure-reviews-are-trustworthy?language=en_US
+    - searchbox "Search by keyword..."
+    - button "More filters":
+      - paragraph: More filters
+    - button "Most recent":
+      - paragraph: Most recent
+    - heading "Top mentions" [level=3]
+    - checkbox "Customer service"
+    - checkbox "Customer communications"
+    - checkbox "Mistake"
+    - checkbox "Application"
+    - checkbox "Refund"
+    - checkbox "Spam"
+    - separator
+    - article:
+      - complementary "Info for William Andrés Castellanos":
+        - link "William Andrés Castellanos ES • 3 reviews":
+          - /url: /users/67070a2bcc68823e6387f054
+      - time: Jun 25, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "I signed up and paid for LazUnusable product. Zero customer support. Never got access.yApply over…":
+        - /url: /reviews/6a3d56a24ef2a37d670b03dd
+        - heading "I signed up and paid for LazUnusable product. Zero customer support. Never got access.yApply over…" [level=2]
+      - paragraph: "I signed up and paid for LazyApply over 5 days ago. To this day, I have never been able to use their service — not once. The problem? Their platform only works with Gmail accounts. This restriction is nowhere to be found during signup or checkout. I only discovered it after paying. I signed up with a Hotmail email and was simply locked out. Since then, I have sent more than three emails to their support team offering to switch my account to a Gmail address. The response? Absolute silence. Not a single reply. Not even an automated acknowledgment. Let me be clear about what happened: I paid for a service I have never been able to use. A critical technical limitation (Gmail only) was never disclosed before payment. Their customer support is nonexistent — multiple emails completely ignored. When you actually read their refund policy, they claim they offer refunds if the product \"fails to function as advertised.\" Well, a product you cannot even log into definitely qualifies. I have now formally requested a full refund. If this is not resolved promptly, I will be filing a chargeback with my payment provider. My advice to anyone considering LazyApply: do not pay until they are transparent about their technical requirements and actually prove they have a functioning support team. Based on my experience, I cannot recommend this service. Date of experience: June 2026"
+      - text: June 21, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Jason Gunner":
+        - link "Jason Gunner US • 1 review":
+          - /url: /users/6a3153758c034d2db1bbb41b
+      - time: Jun 16, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "Horrible-Horrible-Horrible Customer…":
+        - /url: /reviews/6a3153ab196d0687a14ef068
+        - heading "Horrible-Horrible-Horrible Customer…" [level=2]
+      - paragraph: Horrible-Horrible-Horrible Customer service. I bought a membership, and felt the platform made consistent mistakes when applying for jobs for me. I asked for a refund within the 30-day window, and to cancel my membership, and it took two weeks to even get a response to let me know I was in the Queue. I would def not recommend this platform
+      - text: May 27, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Z Finlez":
+        - link "Z Finlez US • 1 review":
+          - /url: /users/6a0e171a621914aecc723003
+      - time: May 20, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "Don't waste your money - Customer Service is non existent":
+        - /url: /reviews/6a0e1724c92080ffa4e45bc7
+        - heading "Don't waste your money - Customer Service is non existent" [level=2]
+      - paragraph: It started off well, but in the last year, customer service has been nonexistent. The fields are blanked out even when filled in correctly on LinkedIn applications - not just any fields, but the first and last name. Other errors include setting "yes" as the default, even though it's incorrect, on questions like "Will you require a visa to work?" or "Are you a veteran?" My profile was filled in with the correct responses, but somehow it is not reading them. I've reached out 3x and have not received any responses. The chat sends you to do an email, and nothing happens when you do. Don't waste your money. I'm looking for another alternative. This will only make you look embarrassingly bad to potential employers.
+      - text: May 20, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Roberto Rivara Dominguez":
+        - text: RR
+        - link "Roberto Rivara Dominguez IT • 4 reviews":
+          - /url: /users/5ae6f53f4de5666d3470d99f
+      - time: Mar 26, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "IT´S A SCAM!!":
+        - /url: /reviews/69c5a7a1048dbc54270b670f
+        - heading "IT´S A SCAM!!" [level=2]
+      - paragraph: IT´S A SCAM!!! DO NOT SUBSCRIBE!! There are always issues with their platform, and there is NO customer service at all!! I have sent several emails and notifications for weeks, and nothing! I am escalating the case with the European Consumer Centre
+      - text: March 16, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Dorian Semencic":
+        - link "Dorian Semencic GB • 4 reviews":
+          - /url: /users/5f5653f8fb69525e095b19ee
+      - time: Mar 13, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "Scam":
+        - /url: /reviews/69b4377541b63373311a1831
+        - heading "Scam" [level=2]
+      - paragraph: Awful, scam, it doesn't work, and the people "working" for this company don't answer queries at all. How this company is on Google and is still allowed to run is beyond me. That they don't have moderators that check these things and even on gemini, they say it's legit, I'm baffled Scam scam scam
+      - text: March 12, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for clod borger":
+        - link "clod borger US • 1 review":
+          - /url: /users/6999abcdb2781e709d33d307
+      - time: Feb 21, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "TOTAL FRAUD, AVOID. Does not function to automate, total waste of time and $$$":
+        - /url: /reviews/6999abd6df51ff8b4ef26c96
+        - heading "TOTAL FRAUD, AVOID. Does not function to automate, total waste of time and $$$" [level=2]
+      - paragraph: The software has only worked properly for me one day out of over 15 that I have been subscribed. It fails at automation of completing application form - for example, on my first 25 applications it could not even enter my *First Name* and/or *Last Name*. It typically fails (90% of the time), leaving you to apply manually *AND FIX ITS MISTAKES ON THE FIELDS IT DID MANAGE TO FILL IN*. There is no "support". Period. They do not respond. Avoid this platform - it is a waste of time and money - **it will actually slow your job search down** dramatically. I am calling my bank to dispute/refund the charge based on the fact that 1) no working service was ever provided 2) no responses were made to my complaints/no improvements were implemented 3) this is in all legal respects, a fraud.
+      - text: February 18, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Nathan Binkley":
+        - link "Nathan Binkley US • 1 review":
+          - /url: /users/69821f9645115dda9753fc88
+      - time: Feb 3, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "Software returns errors -- No customer support":
+        - /url: /reviews/69821f9b04e392f9df07b7d8
+        - heading "Software returns errors -- No customer support" [level=2]
+      - paragraph: Software returns errors. basic searches do not return anything. Console logs show a 500 internal server error on the search, while the depth logs show a 403 for their scraping service. It's been down for over a month and I'm at 3 weeks waiting for customer support to respond to my multiple messages I've left for them. They got my money and ran. Do not give them any money.
+      - text: February 3, 2026 Unprompted review
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Jay Dee":
+        - link "Jay Dee US • 1 review":
+          - /url: /users/69701b796a04ca3fe45a007e
+      - time: Jan 21, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "Hasn't worked for a month now":
+        - /url: /reviews/69701bf7a25241139d03eb20
+        - heading "Hasn't worked for a month now" [level=2]
+      - paragraph: Hasn't worked for a month now. I have had it for years and they keep reducing the level of service that you paid for. If you started off with a lifetime service they reduce the jobs from unlimited to just 150 per day. Now it hasn't worked for weeks. It never finds any jobs at all any more. Customer service doesn't respond to emails. The Indian authorities so far have not wanted to help either after they took payment and won't refund.
+      - text: January 19, 2026 Unprompted review
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Matt Horany":
+        - link "Matt Horany US • 1 review":
+          - /url: /users/696cea576a04caf0315601ea
+      - time: Jan 18, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "The software is complete garbage":
+        - /url: /reviews/696cea5e1b3aadc3f739060f
+        - heading "The software is complete garbage" [level=2]
+      - paragraph: The software is complete garbage. It doesn’t work at all in most cases. You try to automate the application, but it typically fails and never does anything leaving you with having to apply manually. Additionally, the company doesn’t respond to any type of support emails or request for refund. Avoid this company because it’s a complete scam.
+      - text: January 6, 2026 Unprompted review
+      - button "Useful"
+      - text: "2"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Customer1":
+        - text: CU
+        - link "Customer1 US • 2 reviews":
+          - /url: /users/5b48f72f4de5666d347650ea
+      - time: Oct 23, 2025
+      - img "Rated 5 out of 5 stars"
+      - link "This tool is by far the most efficient…":
+        - /url: /reviews/68fa6aba49492e8213cee83b
+        - heading "This tool is by far the most efficient…" [level=2]
+      - paragraph: This tool is by far the most efficient / effective way to apply to jobs. It automates the most frustrating aspect of the job search, sending applications, so you can focus on preparing for interviews.
+      - text: October 23, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - button "Dismiss"
+    - heading "See if a website is trustworthy without leaving the page" [level=3]
+    - link "Get Chrome extension":
+      - /url: https://chrome.google.com/webstore/detail/trustpilot-reviews-rating/dimkjjladgaekdlfebknbaooicmfalke?utm_source=trustpilot&utm_medium=cpp_promotion&utm_campaign=cpp_promotion
+    - article:
+      - complementary "Info for Viral Videos":
+        - link "Viral Videos ES • 3 reviews":
+          - /url: /users/5beb49845483f4b8a9a0dda1
+      - time: Oct 8, 2025
+      - img "Rated 5 out of 5 stars"
+      - link "It saved me up a lot of work":
+        - /url: /reviews/68e68ce72d2571e3e5abc1a9
+        - heading "It saved me up a lot of work" [level=2]
+      - paragraph: It saved me up a lot of work. Got a few interviews after some days applying. Totally worth it
+      - text: October 8, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for David Johnson":
+        - link "David Johnson IE • 1 review":
+          - /url: /users/68e495118a838c560f878de1
+      - time: Oct 7, 2025
+      - img "Rated 1 out of 5 stars"
+      - link "There is no support team to promptly…":
+        - /url: /reviews/68e495646ed779834a30c097
+        - heading "There is no support team to promptly…" [level=2]
+      - paragraph: There is no support team to promptly respond to enquiries.... so many bugs!
+      - text: October 7, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Yuri":
+        - button "Yuri": YU
+        - link "Yuri NL • 11 reviews":
+          - /url: /users/6255380c1023750012d99769
+      - time: Sep 13, 2025
+      - img "Rated 5 out of 5 stars"
+      - link "Must have":
+        - /url: /reviews/68c53a652e99a4e0c30bd050
+        - heading "Must have" [level=2]
+      - paragraph: Must have! Strong recommend, I find a Job with this service! This service is a must-have! I highly recommend it;
+      - text: September 13, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Arun Jangir":
+        - link "Arun Jangir IN • 1 review":
+          - /url: /users/68b46d70b7b81774d890f5af
+      - time: Aug 31, 2025
+      - img "Rated 5 out of 5 stars"
+      - link "Good service and team is really helpful.":
+        - /url: /reviews/68b46d7ee8a345ae6077c75e
+        - heading "Good service and team is really helpful." [level=2]
+      - paragraph: Good service and team is really helpful.
+      - text: August 31, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for A S":
+        - link "A S IN • 1 review":
+          - /url: /users/68888e66960069f181e9db8b
+      - time: Jul 29, 2025
+      - img "Rated 1 out of 5 stars"
+      - link "He is a scammer and has a vague refund…":
+        - /url: /reviews/68888f09dcc46cabc7392ae9
+        - heading "He is a scammer and has a vague refund…" [level=2]
+      - paragraph: He is a scammer and has a vague refund policy. Also makes you subscribe forever without notice through paddle. I am trying to get in touch with RBI and local authorities in India. Dont get carried away by fake reviews. Does not clearly disclose that this is just a chrome extension.
+      - text: June 1, 2025 Unprompted review
+      - button "Useful"
+      - text: "2"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Mohamed Sayed":
+        - link "Mohamed Sayed EG • 1 review":
+          - /url: /users/687c3f26285b6c6f9187af8f
+      - time: Jul 20, 2025
+      - img "Rated 5 out of 5 stars"
+      - link "The lazy apply app is better than chat…":
+        - /url: /reviews/687c3f64a72c729e8a19893e
+        - heading "The lazy apply app is better than chat…" [level=2]
+      - paragraph: The lazy apply app is better than chat gpt . Very useful and affective tool
+      - text: July 20, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Tejaskumar Dave":
+        - link "Tejaskumar Dave US • 3 reviews":
+          - /url: /users/64cbbaa8a7f8ec0012518856
+      - time: Jul 16, 2025
+      - img "Rated 5 out of 5 stars"
+      - link "Game-Changer for Job Applications!":
+        - /url: /reviews/6877cda42f0b3d1f8a61d634
+        - heading "Game-Changer for Job Applications!" [level=2]
+      - paragraph: "LazyApply has completely transformed my job search experience. What used to take me hours every day—filling out repetitive job applications—now gets done automatically while I focus on preparing for interviews. What I love: Massive Time Saver: I applied to hundreds of jobs in just a few days with minimal effort. Custom Cover Letters: The AI-generated and editable templates make every application feel personalized. Multi-Platform Support: Works seamlessly with LinkedIn, Indeed, and most importantly applying directly to their web posting. Simple Setup: Easy Chrome extension and intuitive dashboard. GREATEST SUPPORT EXPERIANCE: Anytime I had a question, their team responded quickly and clearly. If you're serious about landing a job without burning out on the process, LazyApply is absolutely worth it. I wish I had found this sooner!"
+      - text: July 15, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Devin Holloway":
+        - text: DH
+        - link "Devin Holloway US • 1 review":
+          - /url: /users/683c18088a537561c858de70
+      - time: Jun 1, 2025
+      - img "Rated 5 out of 5 stars"
+      - button "Verified"
+      - link "I’ve been using LazyApply for about 3…":
+        - /url: /reviews/683c18186fefb464fbc71b05
+        - heading "I’ve been using LazyApply for about 3…" [level=2]
+      - paragraph: I’ve been using LazyApply for about 3 months, here’s my review • Once my filters were set, a single click fired off applicaitons on LinkedIn, Indeed, ZipRecruiter and a few smaller sites. Saves me loads of time • The Chrome add-on fills most forms fine, auto generated cover letters are ok but I still proof read them. • The analytics page shows how many jobs went out, the dates, and what resume version was used so tracking progress is easy Getting started took patience. I kicked off the automation too quick and a couple answer fields looked weird. Support said parts of my profile were not answered. Filled that in and the quality got heaps better. • It still skips listings that force a login to an employer portal unless you flip on All Platforms mode. That option finds those jobs, but its filters can be hit or miss • About one in twenty submissions has a small error like wrong phone nr format. No recruiter has called me out yet • Support usually reply the same day, though I once waited 36 hrs before I recieved an answer LazyApply isn’t perfect, but for high volume job hunting its pretty close. For the price of a decent dinner, it has saved me dozens of hours and landed 15 plus interviews. Worth a shot if you need to blast out apps fast.
+      - text: June 1, 2025
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Andrew Funk":
+        - link "Andrew Funk US • 1 review":
+          - /url: /users/683c0b9b2824b55a07fdf2dd
+      - time: Jun 1, 2025
+      - img "Rated 1 out of 5 stars"
+      - link "Poor Job and Location Filters":
+        - /url: /reviews/683c0cd25af3e427cfd00b15
+        - heading "Poor Job and Location Filters" [level=2]
+      - paragraph: For reference, I was trying to find entry level remote/Denver based jobs in CADD. The category filters continually pulled up senior position roles and on-site only roles even when both filters were selected correctly. Basically, the filters just don't work as intended, which makes finding the correct jobs/location a lot harder. The autofill portion of the extension works ok, but only when the job app is simple.
+      - text: April 28, 2025 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Albert del":
+        - text: AD
+        - link "Albert del GB • 1 review":
+          - /url: /users/68377a612f24785b20052cb6
+      - time: May 30, 2025
+      - img "Rated 5 out of 5 stars"
+      - button "Verified"
+      - link "LazyApply is honestly pretty great":
+        - /url: /reviews/68377a6cb3e5e3d0c459278b
+        - heading "LazyApply is honestly pretty great" [level=2]
+      - paragraph: LazyApply is honestly pretty great. It saves me tons of time applying directly through company career pages. Customer support is chill and always quick to help.
+      - text: May 29, 2025
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - navigation "Pagination":
+      - text: Previous
+      - link "Page number 1":
+        - /url: /review/lazyapply.com
+        - text: "1"
+      - link "Page number 2":
+        - /url: /review/lazyapply.com?page=2
+        - text: "2"
+      - link "Page number 3":
+        - /url: /review/lazyapply.com?page=3
+        - text: "3"
+      - link "Page number 4":
+        - /url: /review/lazyapply.com?page=4
+        - text: "4"
+      - link "Next page":
+        - /url: /review/lazyapply.com?page=2
+    - heading "The Trustpilot Experience" [level=3]:
+      - text: The Trustpilot Experience
+      - img
+    - heading "We're open to all" [level=4]:
+      - button "We're open to all"
+    - heading "We fight fake reviews" [level=4]:
+      - button "We fight fake reviews"
+    - heading "We show the latest reviews" [level=4]:
+      - button "We show the latest reviews"
+    - heading "We encourage constructive feedback" [level=4]:
+      - button "We encourage constructive feedback"
+    - heading "We verify reviewers" [level=4]:
+      - button "We verify reviewers"
+    - heading "We advocate against bias" [level=4]:
+      - button "We advocate against bias"
+    - link "Take a closer look":
+      - /url: /trust
+  - contentinfo:
+    - img "Trustpilot reviews"
+    - paragraph:
+      - text: This site is protected by reCAPTCHA. We collect device and interaction signals for security purposes as described in our
+      - link "Privacy Policy":
+        - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - text: .
+    - heading "Choose country" [level=3]
+    - term:
+      - button "United States":
+        - text: United States
+        - img
+    - definition
+    - heading "About" [level=3]
+    - list:
+      - listitem:
+        - link "About us":
+          - /url: https://corporate.trustpilot.com
+      - listitem:
+        - link "Jobs":
+          - /url: https://business.trustpilot.com/jobs
+      - listitem:
+        - link "Contact":
+          - /url: https://www.trustpilot.com/contact
+      - listitem:
+        - link "Blog":
+          - /url: https://www.trustpilot.com/blog
+      - listitem:
+        - link "How Trustpilot works":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Press":
+          - /url: https://corporate.trustpilot.com/press
+      - listitem:
+        - link "Investor relations":
+          - /url: https://corporate.trustpilot.com/investors
+      - listitem:
+        - link "Download the Trustpilot iOS app":
+          - /url: https://apps.apple.com/app/trustpilot-reviews-ratings/id1608392803
+          - img "Download the Trustpilot iOS app"
+    - heading "Community" [level=3]
+    - list:
+      - listitem:
+        - link "Trust in reviews":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Help Center":
+          - /url: https://help.trustpilot.com/s?language=en_US
+      - listitem:
+        - link "Log in":
+          - /url: https://www.trustpilot.com/users/connect
+      - listitem:
+        - link "Sign up":
+          - /url: https://www.trustpilot.com/users/connect?signup=True
+    - heading "Businesses" [level=3]
+    - list:
+      - listitem:
+        - link "Trustpilot Business":
+          - /url: https://business.trustpilot.com
+      - listitem:
+        - link "Products":
+          - /url: https://business.trustpilot.com/features
+      - listitem:
+        - link "Plans & pricing":
+          - /url: https://business.trustpilot.com/pricing
+      - listitem:
+        - link "Business login":
+          - /url: https://businessapp.b2b.trustpilot.com/?locale=en-us
+      - listitem:
+        - link "Blog for business":
+          - /url: https://business.trustpilot.com/blog
+      - listitem:
+        - link "Data Solutions":
+          - /url: https://business.trustpilot.com/datasolutions
+    - heading "Follow us on" [level=3]
+    - list:
+      - listitem:
+        - link "Facebook":
+          - /url: https://www.facebook.com/Trustpilot/
+      - listitem:
+        - link "X":
+          - /url: https://x.com/Trustpilot
+      - listitem:
+        - link "Instagram":
+          - /url: https://www.instagram.com/trustpilot/
+      - listitem:
+        - link "LinkedIn":
+          - /url: https://www.linkedin.com/company/trustpilot/
+      - listitem:
+        - link "Youtube":
+          - /url: https://www.youtube.com/c/trustpilotreviews
+    - list:
+      - listitem:
+        - link "Legal":
+          - /url: https://corporate.trustpilot.com/legal
+      - listitem:
+        - link "Privacy Policy":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - listitem:
+        - link "Terms & Conditions":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/terms-of-use-for-consumers
+      - listitem:
+        - link "Guidelines for Reviewers":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/guidelines-for-reviewers
+      - listitem:
+        - link "System status":
+          - /url: https://status.trustpilot.com/
+      - listitem:
+        - button "Manage cookies"
+      - listitem:
+        - link "Modern Slavery Statement":
+          - /url: https://corporate.trustpilot.com/legal/for-everyone/modern-slavery-and-human-trafficking-statement
+    - text: © 2026 Trustpilot, Inc. All rights reserved.
+  - alert
+  - dialog "Here’s how we use cookies":
+    - heading "Here’s how we use cookies" [level=2]
+    - text: "Trustpilot and our partners use certain necessary cookies stored on your device to deliver our services. We’d also like to use additional cookies to:"
+    - list:
+      - listitem: Enhance your experience
+      - listitem: Provide social media features
+      - listitem: Analyze, monitor, and improve our services
+      - listitem: Show personalized content and ads, depending on your settings
+    - text: If you choose Accept all, you consent to our use of additional cookies for these purposes. If you choose Reject all, we won’t use additional cookies for these purposes. You can change or withdraw consent at any time in Manage cookies. Learn more in our
+    - link "Cookie Policy":
+      - /url: "https://legal.trustpilot.com/for-everyone/cookie-policy "
+    - text: .
+    - button "Manage cookies, Opens the preference center dialog": Manage cookies
+    - button "Reject all"
+    - button "Accept all"

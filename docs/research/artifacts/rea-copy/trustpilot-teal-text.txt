@@ -1,0 +1,825 @@
+- document:
+  - banner:
+    - link "Trustpilot reviews":
+      - /url: /
+      - img "Trustpilot reviews"
+    - searchbox "Search for another company…"
+    - link "Categories":
+      - /url: /categories
+    - link "Blog":
+      - /url: /blog
+    - button "Notifications"
+    - link "Log in":
+      - /url: /users/connect?redirect=%2freview%2ftealhq.com&source_cta=header
+    - link "For businesses":
+      - /url: https://business.trustpilot.com
+    - paragraph:
+      - text: Looks like you’re in Sweden.
+      - link "Go to the Swedish Trustpilot site":
+        - /url: https://se.trustpilot.com/review/tealhq.com
+    - button "Dismiss"
+  - main:
+    - navigation "Breadcrumb":
+      - list:
+        - listitem:
+          - link "Electronics & Technology":
+            - /url: /categories/electronics_technology
+        - listitem
+        - listitem:
+          - link "Internet & Software":
+            - /url: /categories/internet_software
+        - listitem
+        - listitem:
+          - link "Software Company":
+            - /url: /categories/software_company
+        - listitem
+        - listitem: Teal
+    - navigation:
+      - button "Summary"
+      - button "About"
+      - button "Reviews"
+      - link "Visit website":
+        - /url: https://tealhq.com
+      - link "Write a review":
+        - /url: /evaluate/tealhq.com
+    - link "Claimed profileJun 2020 Teal Reviews 117 • TrustScore 4 out of 5 4.2 Clickable button that opens a pop-up explaining how the Trustscore is calculated. Software Company Write a review Visit website":
+      - /url: https://tealhq.com?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=logo_click
+      - img "Teal logo"
+    - button "Claimed profileJun 2020"
+    - heading "Teal Reviews" [level=1]:
+      - text: Teal
+      - link "Reviews"
+    - link "117"
+    - text: •
+    - link "TrustScore 4 out of 5 4.2":
+      - img "TrustScore 4 out of 5"
+      - paragraph: "4.2"
+    - button "Clickable button that opens a pop-up explaining how the Trustscore is calculated."
+    - link "Software Company":
+      - /url: /categories/software_company
+    - link "Write a review":
+      - /url: /evaluate/tealhq.com
+    - link "Visit website":
+      - /url: https://tealhq.com?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=domain_click
+    - heading "We use technology to protect platform integrity, but we don't fact-check reviews" [level=2]:
+      - button "We use technology to protect platform integrity, but we don't fact-check reviews"
+    - heading "Review summary" [level=2]
+    - button "Tooltip"
+    - paragraph: Created with AI, based on recent reviews
+    - paragraph:
+      - text: Evaluating 57 reviews, reviewers had a great experience with this company. People truly love how remarkably easy it is to keep all their job applications, helpful follow-up reminders, and multiple resume versions neatly organized in one convenient place. Users frequently mention that the platform saves them plenty of time, keeps them motivated, and helps reduce stress during a busy job search. Ho…
+      - button "See more"
+    - heading "What people talk about most" [level=3]
+    - button "Scroll forward"
+    - button "User experience Reviewers express general satisfaction regarding the user experience, highlighting how the platform keeps job... See more":
+      - heading "User experience" [level=2]
+      - paragraph: Reviewers express general satisfaction regarding the user experience, highlighting how the platform keeps job... See more
+    - button "Application Customers had positive experiences with application features, praising how the platform simplifies job... See more":
+      - heading "Application" [level=2]
+      - paragraph: Customers had positive experiences with application features, praising how the platform simplifies job... See more
+    - button "Website Users describe satisfaction with the website, highlighting that the interface is great, well-organized, and... See more":
+      - heading "Website" [level=2]
+      - paragraph: Users describe satisfaction with the website, highlighting that the interface is great, well-organized, and... See more
+    - button "Value for money People report positive experiences with value for money, expressing amazement that such an amazing tool is... See more":
+      - heading "Value for money" [level=2]
+      - paragraph: People report positive experiences with value for money, expressing amazement that such an amazing tool is... See more
+    - heading "Reviews shaping this summary" [level=3]
+    - button "SCROLL FORWARD"
+    - article:
+      - complementary "Info for Bryant Sheehy":
+        - link "Bryant Sheehy Nov 14, 2025":
+          - /url: /users/68225d7fbf768b7708f8c60e
+          - text: Bryant Sheehy
+          - time: Nov 14, 2025
+      - img "Rated 4 out of 5 stars"
+      - button "I like it! It's a pretty good system for tracking applications and company contacts. I like the reminder system for followups. If they could add an application auto-fill feature and a more robust Link... See more Company replied":
+        - paragraph: I like it! It's a pretty good system for tracking applications and company contacts. I like the reminder system for followups. If they could add an application auto-fill feature and a more robust Link... See more
+        - img
+        - paragraph: Company replied
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for J Webb":
+        - text: JW
+        - link "J Webb Nov 7, 2025":
+          - /url: /users/639315e3df80b5001273173c
+          - text: J Webb
+          - time: Nov 7, 2025
+      - img "Rated 4 out of 5 stars"
+      - button "I've been using the free tracker on Teal for about a week. It helps me feel like my job search is a job in itself with its own tool that I come to. I can clearly see which jobs I need to apply for bef... See more Company replied":
+        - paragraph: I've been using the free tracker on Teal for about a week. It helps me feel like my job search is a job in itself with its own tool that I come to. I can clearly see which jobs I need to apply for bef... See more
+        - img
+        - paragraph: Company replied
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Jennifer":
+        - text: JE
+        - link "Jennifer Oct 21, 2025":
+          - /url: /users/58bd879a0000ff000a7e93f5
+          - text: Jennifer
+          - time: Oct 21, 2025
+      - img "Rated 4 out of 5 stars"
+      - button "The resume builder is amazing. Not only does it keep me from having to do all the annoying alignment things I was doing in Canva, but it also saves all my bullets, so I just have to click what I wan... See more Company replied":
+        - paragraph: The resume builder is amazing. Not only does it keep me from having to do all the annoying alignment things I was doing in Canva, but it also saves all my bullets, so I just have to click what I wan... See more
+        - img
+        - paragraph: Company replied
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Daksh Raval":
+        - text: DR
+        - link "Daksh Raval Nov 10, 2025":
+          - /url: /users/691125cb51678e98a28c1287
+          - text: Daksh Raval
+          - time: Nov 10, 2025
+      - img "Rated 4 out of 5 stars"
+      - button "GOATED. Can’t go back to the spreadsheet now. Helps me offload the whole remembering to apply, circling back to intriguing jobs, etc. so I can focus on applying. A few UI quirks here and there but ama... See more Company replied":
+        - paragraph: GOATED. Can’t go back to the spreadsheet now. Helps me offload the whole remembering to apply, circling back to intriguing jobs, etc. so I can focus on applying. A few UI quirks here and there but ama... See more
+        - img
+        - paragraph: Company replied
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - button "See all 117 reviews"
+    - separator
+    - heading "Company details" [level=2]
+    - list:
+      - listitem:
+        - link "Software Company":
+          - /url: /categories/software_company
+      - listitem: also in
+      - listitem:
+        - link "Career Guidance Service":
+          - /url: /categories/career_guidance_service
+      - listitem:
+        - button "Tooltip"
+    - heading "Written by the company" [level=3]
+    - paragraph:
+      - text: Teal is a personal career growth platform that gives you the tools and recommendations you need to accelerate your career, starting with the job search. We're on a mission to empower you to grow your career on your terms—and to be equipped with the purpose-built tools and resources you need to navigate every step of the way. With an AI Resume Builder, Cov…
+      - button "See more"
+    - heading "Contact info" [level=2]
+    - list:
+      - listitem:
+        - paragraph: 7800 SW 57th Ave., 33143, Miami, United States
+      - listitem:
+        - link "membersupport@tealhq.com":
+          - /url: mailto:membersupport@tealhq.com
+      - listitem:
+        - link "tealhq.com":
+          - /url: https://tealhq.com?utm_medium=company_profile&utm_source=trustpilot&utm_campaign=domain_click
+    - paragraph: "4.2"
+    - heading "Great" [level=3]
+    - img "TrustScore 4 out of 5"
+    - paragraph: 117 reviews
+    - text: 5-star
+    - meter "Rating distribution for shared/rating/v2/star-5"
+    - text: 4-star
+    - meter "Rating distribution for shared/rating/v2/star-4"
+    - text: 3-star
+    - meter "Rating distribution for shared/rating/v2/star-3"
+    - text: 2-star
+    - meter "Rating distribution for shared/rating/v2/star-2"
+    - text: 1-star
+    - meter "Rating distribution for shared/rating/v2/star-1"
+    - separator
+    - button "How is the TrustScore calculated?":
+      - paragraph: How is the TrustScore calculated?
+    - paragraph: No recent history of asking for reviews
+    - paragraph: This company hasn't invited customers recently, so reviews may not be representative
+    - paragraph: Replied to 100% of negative reviews
+    - paragraph: Typically replies within 24 hours
+    - link "How this company uses Trustpilot See how their reviews and ratings are sourced, scored, and moderated.":
+      - /url: /review/tealhq.com/transparency
+      - paragraph: How this company uses Trustpilot
+      - paragraph: See how their reviews and ratings are sourced, scored, and moderated.
+    - heading "People also looked at Tooltip" [level=2]:
+      - text: People also looked at
+      - button "Tooltip"
+    - button "SCROLL BACK" [disabled]
+    - button "SCROLL FORWARD"
+    - link "Jobscan.co logo Jobscan.co jobscan.co TrustScore 4.5 out of 5 4.3 (345)":
+      - /url: /review/jobscan.co
+      - img "Jobscan.co logo"
+      - heading "Jobscan.co" [level=3]
+      - paragraph: jobscan.co
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.3"
+      - paragraph: (345)
+    - link "Jobright logo Jobright jobright.ai TrustScore 5 out of 5 4.8 (4K)":
+      - /url: /review/jobright.ai
+      - img "Jobright logo"
+      - heading "Jobright" [level=3]
+      - paragraph: jobright.ai
+      - img "TrustScore 5 out of 5"
+      - paragraph: "4.8"
+      - paragraph: (4K)
+    - link "Kickresume - AI Resume builder, ATS Resume Checker logo Kickresume - AI Resume builder, ATS Resume Checker kickresume.com TrustScore 4.5 out of 5 4.6 (4K)":
+      - /url: /review/kickresume.com
+      - img "Kickresume - AI Resume builder, ATS Resume Checker logo"
+      - heading "Kickresume - AI Resume builder, ATS Resume Checker" [level=3]
+      - paragraph: kickresume.com
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.6"
+      - paragraph: (4K)
+    - link "Huntr logo Huntr huntr.co TrustScore 4.5 out of 5 4.5 (21)":
+      - /url: /review/huntr.co
+      - img "Huntr logo"
+      - heading "Huntr" [level=3]
+      - paragraph: huntr.co
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.5"
+      - paragraph: (21)
+    - link "AIApply logo AIApply aiapply.co TrustScore 4.5 out of 5 4.3 (2K)":
+      - /url: /review/aiapply.co
+      - img "AIApply logo"
+      - heading "AIApply" [level=3]
+      - paragraph: aiapply.co
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.3"
+      - paragraph: (2K)
+    - link "simplify.jobs logo simplify.jobs simplify.jobs TrustScore 3 out of 5 2.8 (21)":
+      - /url: /review/simplify.jobs
+      - img "simplify.jobs logo"
+      - heading "simplify.jobs" [level=3]
+      - paragraph: simplify.jobs
+      - img "TrustScore 3 out of 5"
+      - paragraph: "2.8"
+      - paragraph: (21)
+    - link "Rezi logo Rezi rezi.io TrustScore 4.5 out of 5 4.7 (272)":
+      - /url: /review/rezi.io
+      - img "Rezi logo"
+      - heading "Rezi" [level=3]
+      - paragraph: rezi.io
+      - img "TrustScore 4.5 out of 5"
+      - paragraph: "4.7"
+      - paragraph: (272)
+    - link "Careerflow.ai logo Careerflow.ai careerflow.ai TrustScore 4 out of 5 3.8 (20)":
+      - /url: /review/careerflow.ai
+      - img "Careerflow.ai logo"
+      - heading "Careerflow.ai" [level=3]
+      - paragraph: careerflow.ai
+      - img "TrustScore 4 out of 5"
+      - paragraph: "3.8"
+      - paragraph: (20)
+    - text: "4.2"
+    - button "Clickable button that opens a pop-up explaining how the Trustscore is calculated."
+    - heading "All reviews" [level=2]
+    - paragraph: (117)
+    - paragraph: 49 reviews in the last 12 months
+    - link "Write a review":
+      - /url: /evaluate/tealhq.com
+    - complementary:
+      - checkbox "5-star 71%"
+      - paragraph: 5-star
+      - paragraph: 71%
+      - checkbox "4-star 13%"
+      - paragraph: 4-star
+      - paragraph: 13%
+      - checkbox "3-star <1%"
+      - paragraph: 3-star
+      - paragraph: <1%
+      - checkbox "2-star 2%"
+      - paragraph: 2-star
+      - paragraph: 2%
+      - checkbox "1-star 13%"
+      - paragraph: 1-star
+      - paragraph: 13%
+      - separator
+      - insertion
+      - text: Advertisement
+      - link "How Trustpilot labels reviews":
+        - /url: https://help.trustpilot.com/s/article/About-Trustpilots-review-labels?language=en_US
+        - paragraph: How Trustpilot labels reviews
+    - text: Companies on Trustpilot aren't allowed to offer incentives or pay to hide reviews. Reviews are the opinions of individual users and not of Trustpilot.
+    - link "Read more":
+      - /url: https://help.trustpilot.com/s/article/How-do-we-make-sure-reviews-are-trustworthy?language=en_US
+    - searchbox "Search by keyword..."
+    - button "More filters":
+      - paragraph: More filters
+    - button "Most recent":
+      - paragraph: Most recent
+    - heading "Top mentions" [level=3]
+    - checkbox "Application"
+    - checkbox "User experience"
+    - checkbox "Recommendation"
+    - checkbox "Service"
+    - checkbox "Customer communications"
+    - checkbox "Location"
+    - checkbox "Social media"
+    - checkbox "Subscription"
+    - checkbox "Value for money"
+    - checkbox "Solution"
+    - separator
+    - article:
+      - complementary "Info for Sara Canright":
+        - text: SC
+        - link "Sara Canright US • 1 review":
+          - /url: /users/67ddfff03b8c1630ee9f223f
+      - time: 10 hours ago
+      - img "Rated 5 out of 5 stars"
+      - link "I’m in a director-level job search":
+        - /url: /reviews/6ad01cd0f4057fa91f3b420e
+        - heading "I’m in a director-level job search" [level=2]
+      - paragraph: I’m in a director-level job search, and Teal has become part of my daily process. The standout feature is the keyword analysis. For every job description I save, Teal separates keywords into requirements, responsibilities, and preferred qualifications, counts how often each appears, and highlights them in the posting. That tells me at a glance what an employer actually cares about, not just what’s in the title. I use those keywords to tailor each resume, and it has made my applications sharper and faster to build. I also use Teal to track my search. With multiple applications moving at once, having every role, status, and posting in one place keeps me organized and saves me from rebuilding notes every time a recruiter calls. Five stars for the keywords alone. The tracker makes it an easy recommendation for anyone running a serious search.
+      - text: October 14, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for arsalan ahmed":
+        - link "arsalan ahmed GB • 1 review":
+          - /url: /users/6ab45537e947d3a83475dea2
+      - time: Sep 24, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "seamless and convenient to use":
+        - /url: /reviews/6ab4553db11756428e2260c0
+        - heading "seamless and convenient to use" [level=2]
+      - paragraph: So seamless and convenient to use. I appreciate just how simple and clean the User Interface is, having a section for notes is something that i will not take for granted. also no cap on how many job listings i can store, unlike some apps that have a hard limit unless you pay for premium
+      - text: September 23, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Cj Okpala":
+        - link "Cj Okpala NL • 5 reviews":
+          - /url: /users/64fb2c7dd207240012ca0227
+      - time: Aug 25, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Great tool":
+        - /url: /reviews/6a8d43effdb074e7443c0db9
+        - heading "Great tool" [level=2]
+      - paragraph: Great tool. It simplies job application and reviewing of CV to better match job descriptions.
+      - text: August 17, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Daniela Ramirez":
+        - text: DR
+        - link "Daniela Ramirez US • 1 review":
+          - /url: /users/6a7f5ccd4d2c9f5d4ea829c3
+      - time: Aug 14, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "This site is honestly amazing":
+        - /url: /reviews/6a7f5cde1446505b17e9c0e7
+        - heading "This site is honestly amazing" [level=2]
+      - paragraph: This site is honestly amazing, I've been using it to track all of my job applications and they make it so so easy. Highly recommend for anyone fed up with using excel for tracking purposes!
+      - text: August 14, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Steve Koonce":
+        - link "Steve Koonce US • 1 review":
+          - /url: /users/6a5f9d0dc2526c6e1f9427ae
+      - time: Jul 21, 2026
+      - img "Rated 4 out of 5 stars"
+      - link "I would like it to be a little more…":
+        - /url: /reviews/6a5f9d160f3299c445b24aa1
+        - heading "I would like it to be a little more…" [level=2]
+      - paragraph: I would like it to be a little more automatic. It’s sort of tedious going through and adding words to every resume. The interface is great and the job board is pretty good. Overall, it’s an excellent app for job hunting.
+      - text: July 21, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Kimberly Bailey":
+        - text: KB
+        - link "Kimberly Bailey US • 4 reviews":
+          - /url: /users/649e576fe4b8c60012ca2845
+      - time: Jul 21, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "It's a great platform to keep…":
+        - /url: /reviews/6a5ea9801cff6f8b1aaa1f7a
+        - heading "It's a great platform to keep…" [level=2]
+      - paragraph: It's a great platform to keep everything organized and allows tracking for not only jobs but networking with people and companies as well. It's easy to use.
+      - text: July 20, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Evelyn Romero":
+        - link "Evelyn Romero ES • 1 review":
+          - /url: /users/6a5a8550c2526cb6b68ede85
+      - time: Jul 17, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Useful to keep my applications organized":
+        - /url: /reviews/6a5a8557dd76ff4f51031f9f
+        - heading "Useful to keep my applications organized" [level=2]
+      - paragraph: So useful to keep my applications organized. I use it to track where I've applied to and what stage of the process I'm in. I've never had an issue with it, and it's been super helpful to keep me on top of things when I'm 70+ applications in and swimming in autorejection emails.
+      - text: July 17, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for G D":
+        - link "G D US • 2 reviews":
+          - /url: /users/6a456c6c9371bfa21d6e1940
+      - time: Jul 16, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Great tool for organizing my job search":
+        - /url: /reviews/6a582a45e6f25f78ff771b3f
+        - heading "Great tool for organizing my job search" [level=2]
+      - paragraph: Teal has been a great help in my job search! It keeps everything organized and makes tracking applications much easier. I really appreciate how simple it is to manage resumes, job links, and follow‑ups all in one place. It’s saved me time and reduced stress during the process. Highly recommend it to anyone actively applying for jobs!
+      - text: July 15, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Sherouk Abdelsalam":
+        - link "Sherouk Abdelsalam AE • 1 review":
+          - /url: /users/6a575ca5236e3d155ad432e6
+      - time: Jul 15, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "I do love teal":
+        - /url: /reviews/6a575cb264cf0ecb3311bac3
+        - heading "I do love teal" [level=2]
+      - paragraph: I do love teal. No ads, straightforward, and well-organized. Wish I could also view the notes I've left on each job in the main tracker table view.
+      - text: July 15, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Artyom Ivashchenko":
+        - link "Artyom Ivashchenko UZ • 1 review":
+          - /url: /users/6a4f899d24460ecff82ba926
+      - time: Jul 9, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Helpful Tool":
+        - /url: /reviews/6a4f89a96fb83b733b896891
+        - heading "Helpful Tool" [level=2]
+      - text: July 9, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - button "Dismiss"
+    - heading "See if a website is trustworthy without leaving the page" [level=3]
+    - link "Get Chrome extension":
+      - /url: https://chrome.google.com/webstore/detail/trustpilot-reviews-rating/dimkjjladgaekdlfebknbaooicmfalke?utm_source=trustpilot&utm_medium=cpp_promotion&utm_campaign=cpp_promotion
+    - article:
+      - complementary "Info for Jeremy":
+        - text: JE
+        - link "Jeremy US • 1 review":
+          - /url: /users/5a1d7c870000ff000ae8cb92
+      - time: Jun 23, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Easy to use and does the trick":
+        - /url: /reviews/6a3ae81c0cd2137c67670039
+        - heading "Easy to use and does the trick" [level=2]
+      - paragraph: Easy to use and does the trick. Very lightweight!
+      - text: June 23, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - article:
+      - complementary "Info for Albert":
+        - text: AL
+        - link "Albert DE • 32 reviews":
+          - /url: /users/667b5316b605fac6a0a19f8e
+      - time: Jun 16, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "every day a new spam email":
+        - /url: /reviews/6a31683757dfcabbc6fa11e9
+        - heading "every day a new spam email" [level=2]
+      - paragraph: every day a new spam email. Unsubscribe disfunctional
+      - text: June 16, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Teal logo"
+      - paragraph: Reply from Teal
+      - time: Jun 16, 2026
+      - paragraph: Hey, Albert! I'm so sorry for the trouble! We try to make unsubscribing as easy as possible. If you haven't already, will you send me an email to membersupport@tealhq.com? Happy to help. - Emily @ Teal
+    - article:
+      - complementary "Info for Mark Baker":
+        - text: MB
+        - link "Mark Baker US • 2 reviews":
+          - /url: /users/65b00d1703d53f0012b720c3
+      - time: Jun 4, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "So far I have really enjoyed the tool":
+        - /url: /reviews/6a21adf3c5e15f35db934479
+        - heading "So far I have really enjoyed the tool" [level=2]
+      - paragraph: So far I have really enjoyed the tool. It makes it easy to find (Via Chrome Ext), add and track progress on jobs. Makes it easy to prioritize and they have great resources on customizing resumes. I haven't used all the features yet but this tool has been super helpful thus far.
+      - text: June 4, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Sara":
+        - text: SA
+        - link "Sara US • 2 reviews":
+          - /url: /users/6a19e25bc1f598eb981598be
+      - time: May 29, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "The job listings on their site feel like ghost listings":
+        - /url: /reviews/6a19e2ee8bbebbb7eb960a99
+        - heading "The job listings on their site feel like ghost listings" [level=2]
+      - paragraph: The job listings on their site feel like mostly ghost listings. I didn't get a single email back
+      - text: May 25, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Teal logo"
+      - paragraph: Reply from Teal
+      - time: May 29, 2026
+      - paragraph: "Hi, Sara! I'm so bummed to hear this, I'm sorry that the quality didn't feel up to par. If possible, we would LOVE to capture a few of those URLs to postings you're referring to? If they're handy, please send them our way: membersupport@tealhq.com. We try our best to remove postings that aren't currently active or feel spammy, and any additional reports are always taken seriously. If there are any additional details you can share, we'd love to hear from you and would greatly appreciate it! I'm sorry again it was a rough go but we're here to support if we can. - Emily @ Teal"
+    - article:
+      - complementary "Info for Fran":
+        - text: FR
+        - link "Fran US • 6 reviews":
+          - /url: /users/586321ed0000ff000a661061
+      - time: May 23, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Teal is providing a better list of job…":
+        - /url: /reviews/6a10f3a45020f9c1e7e7f408
+        - heading "Teal is providing a better list of job…" [level=2]
+      - paragraph: Teal is providing a better list of job postings, adhering to my filter. I'm finding it more useful than GlassDoor or LinkedIn!
+      - text: May 22, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Teal logo"
+      - paragraph: Reply from Teal
+      - time: May 29, 2026
+      - paragraph: Hi, Fran! Woohoo! We're so thrilled to hear this. We really want to provide value and it's great to hear that our quality assurance is shining through :-) If there's any feedback that comes up, please don't hesitate to reach out! membersupport@tealhq.com
+    - article:
+      - complementary "Info for Goncalo":
+        - text: GO
+        - link "Goncalo US • 5 reviews":
+          - /url: /users/61b24f4cdf96ce001268af97
+      - time: May 11, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Teal is excellent":
+        - /url: /reviews/6a020ca50090e9ec84bf3c43
+        - heading "Teal is excellent" [level=2]
+      - paragraph: Teal is excellent. It really helps to keep all the applications organized and knowing which stage of the process each one is.
+      - text: May 11, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Teal logo"
+      - paragraph: Reply from Teal
+      - time: May 29, 2026
+      - paragraph: Hi, Goncalo! This is wonderful, I'm glad you've been finding Teal to be useful as you work through your job search. We're here to help, and if there's anything else you want to share with our team don't hesitate to reach out! membersupport@tealhq.com
+    - article:
+      - complementary "Info for Koflan D":
+        - text: KD
+        - link "Koflan D US • 6 reviews":
+          - /url: /users/69b98d761a47fa0efaa9ac18
+      - time: May 10, 2026
+      - img "Rated 4 out of 5 stars"
+      - link "It's a solid tool.":
+        - /url: /reviews/6a00cd77bab82fb406d5749c
+        - heading "It's a solid tool." [level=2]
+      - paragraph: Just hopped off a strategy call with a VP candidate. Their tracking sheet was a disaster. Look, if you're still using a manual spreadsheet for your pipeline in 2026, you’re making it harder than it needs to be. I started pushing my clients toward Teal's job tracker. It pulls the JD data instantly and flags keyword gaps for the ATS. Super actionable. But, to be fair, the AI-generated cover letters usually need a heavy edit—they come off a bit robotic sometimes. Still, for keeping 50+ applications organized without losing your mind, it's a solid tool.
+      - text: May 9, 2026 Unprompted review
+      - button "Useful"
+      - text: "1"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Teal logo"
+      - paragraph: Reply from Teal
+      - time: May 29, 2026
+      - paragraph: Hey, Koflan! We're stoked you shared this with us - super excited you've been encouraging your clients to use our tracker. We really believe that strong tracking makes the biggest difference in a search. Totally hear you on the cover letters! We'll look into any issues with our configuration. We did recently add the ability to select the model you'd like to use for the generation, so we hope that gives you a bit more personalization! Thanks again and please let us know if anything else comes up! - Emily @ Teal
+    - insertion
+    - text: Advertisement
+    - article:
+      - complementary "Info for Bryan Tisdale":
+        - link "Bryan Tisdale US • 1 review":
+          - /url: /users/69f801682c172772fe7ff87f
+      - time: May 4, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "Teal HQ gets the job done":
+        - /url: /reviews/69f80171c0aac910e7ad39a2
+        - heading "Teal HQ gets the job done" [level=2]
+      - paragraph: Teal HQ gets the job done. I've been using it to search for jobs, track my applications, and fine-tune my resume — and for the most part, it delivers on all three. The resume improvement suggestions are genuinely useful, and having everything in one place beats juggling spreadsheets and sticky notes. It's not perfect, and there's definitely a learning curve getting everything set up the way you want it. But once you're in a rhythm, it makes the job search feel a lot more manageable. For a free tool, the value is hard to argue with. Worth trying if you're actively job hunting and want some structure to the process.
+      - text: May 3, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Teal logo"
+      - paragraph: Reply from Teal
+      - time: May 4, 2026
+      - paragraph: Hi, Bryan! We're so thrilled to hear that Teal has been a good fit for you. :) And, this is awesome feedback for our team!! We really appreciate you sharing and don't hesitate to let us know if there are improvements we can work towards to make your experience even better. :) - Emily
+    - article:
+      - complementary "Info for Gavin":
+        - text: GA
+        - link "Gavin CA • 1 review":
+          - /url: /users/69f691156219141b37578382
+      - time: May 3, 2026
+      - img "Rated 1 out of 5 stars"
+      - link "Scam":
+        - /url: /reviews/69f6915a6e2232bd1d9f9e95
+        - heading "Scam" [level=2]
+      - paragraph: Scam. Get you to sign up for subscriptions and get you when your forget. And don’t help afterwards.
+      - text: May 2, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Teal logo"
+      - paragraph: Reply from Teal
+      - time: May 4, 2026
+      - paragraph: Hey, Gavin! I'm so sorry for the experience you're having here and that you feel left hanging! We're always happy to provide cancellation & refund support if you're unhappy with the subscription. Do you mind sending a note to membersupport@tealhq.com so we can look into it ASAP? Thanks, Gavin! I'm sorry again for the inconvenience. - Emily
+    - article:
+      - complementary "Info for Mita Halankar":
+        - text: MH
+        - link "Mita Halankar IN • 2 reviews":
+          - /url: /users/62fc9151ee8f770012b111bb
+      - time: Apr 24, 2026
+      - img "Rated 5 out of 5 stars"
+      - link "The job tracker has significantly…":
+        - /url: /reviews/69ebcdffa17e7cdde8d11c3c
+        - heading "The job tracker has significantly…" [level=2]
+      - paragraph: The job tracker has significantly streamlined my workflow. By keeping my applications and their respective descriptions in one place, I’ve been able to focus entirely on the quality of my applications.
+      - text: April 24, 2026 Unprompted review
+      - button "Useful"
+      - button "Share"
+      - button "Flag this review"
+      - img
+      - img "Teal logo"
+      - paragraph: Reply from Teal
+      - time: Apr 30, 2026
+      - paragraph: Hi, Mita! Woohoo!! We're so glad to hear that. Our ultimate goal is that you can speed up your application process and focus on the quality instead of the "where is this job in my pipeline?" :) We appreciate you! - Emily
+    - navigation "Pagination":
+      - text: Previous
+      - link "Page number 1":
+        - /url: /review/tealhq.com
+        - text: "1"
+      - link "Page number 2":
+        - /url: /review/tealhq.com?page=2
+        - text: "2"
+      - link "Page number 3":
+        - /url: /review/tealhq.com?page=3
+        - text: "3"
+      - link "Page number 4":
+        - /url: /review/tealhq.com?page=4
+        - text: "4"
+      - link "Next page":
+        - /url: /review/tealhq.com?page=2
+    - heading "The Trustpilot Experience" [level=3]:
+      - text: The Trustpilot Experience
+      - img
+    - heading "We're open to all" [level=4]:
+      - button "We're open to all"
+    - heading "We fight fake reviews" [level=4]:
+      - button "We fight fake reviews"
+    - heading "We show the latest reviews" [level=4]:
+      - button "We show the latest reviews"
+    - heading "We encourage constructive feedback" [level=4]:
+      - button "We encourage constructive feedback"
+    - heading "We verify reviewers" [level=4]:
+      - button "We verify reviewers"
+    - heading "We advocate against bias" [level=4]:
+      - button "We advocate against bias"
+    - link "Take a closer look":
+      - /url: /trust
+  - contentinfo:
+    - img "Trustpilot reviews"
+    - paragraph:
+      - text: This site is protected by reCAPTCHA. We collect device and interaction signals for security purposes as described in our
+      - link "Privacy Policy":
+        - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - text: .
+    - heading "Choose country" [level=3]
+    - term:
+      - button "United States":
+        - text: United States
+        - img
+    - definition
+    - heading "About" [level=3]
+    - list:
+      - listitem:
+        - link "About us":
+          - /url: https://corporate.trustpilot.com
+      - listitem:
+        - link "Jobs":
+          - /url: https://business.trustpilot.com/jobs
+      - listitem:
+        - link "Contact":
+          - /url: https://www.trustpilot.com/contact
+      - listitem:
+        - link "Blog":
+          - /url: https://www.trustpilot.com/blog
+      - listitem:
+        - link "How Trustpilot works":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Press":
+          - /url: https://corporate.trustpilot.com/press
+      - listitem:
+        - link "Investor relations":
+          - /url: https://corporate.trustpilot.com/investors
+      - listitem:
+        - link "Download the Trustpilot iOS app":
+          - /url: https://apps.apple.com/app/trustpilot-reviews-ratings/id1608392803
+          - img "Download the Trustpilot iOS app"
+    - heading "Community" [level=3]
+    - list:
+      - listitem:
+        - link "Trust in reviews":
+          - /url: https://corporate.trustpilot.com/trust
+      - listitem:
+        - link "Help Center":
+          - /url: https://help.trustpilot.com/s?language=en_US
+      - listitem:
+        - link "Log in":
+          - /url: https://www.trustpilot.com/users/connect
+      - listitem:
+        - link "Sign up":
+          - /url: https://www.trustpilot.com/users/connect?signup=True
+    - heading "Businesses" [level=3]
+    - list:
+      - listitem:
+        - link "Trustpilot Business":
+          - /url: https://business.trustpilot.com
+      - listitem:
+        - link "Products":
+          - /url: https://business.trustpilot.com/features
+      - listitem:
+        - link "Plans & pricing":
+          - /url: https://business.trustpilot.com/pricing
+      - listitem:
+        - link "Business login":
+          - /url: https://businessapp.b2b.trustpilot.com/?locale=en-us
+      - listitem:
+        - link "Blog for business":
+          - /url: https://business.trustpilot.com/blog
+      - listitem:
+        - link "Data Solutions":
+          - /url: https://business.trustpilot.com/datasolutions
+    - heading "Follow us on" [level=3]
+    - list:
+      - listitem:
+        - link "Facebook":
+          - /url: https://www.facebook.com/Trustpilot/
+      - listitem:
+        - link "X":
+          - /url: https://x.com/Trustpilot
+      - listitem:
+        - link "Instagram":
+          - /url: https://www.instagram.com/trustpilot/
+      - listitem:
+        - link "LinkedIn":
+          - /url: https://www.linkedin.com/company/trustpilot/
+      - listitem:
+        - link "Youtube":
+          - /url: https://www.youtube.com/c/trustpilotreviews
+    - list:
+      - listitem:
+        - link "Legal":
+          - /url: https://corporate.trustpilot.com/legal
+      - listitem:
+        - link "Privacy Policy":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/privacy-policy-end-user
+      - listitem:
+        - link "Terms & Conditions":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/terms-of-use-for-consumers
+      - listitem:
+        - link "Guidelines for Reviewers":
+          - /url: https://corporate.trustpilot.com/legal/for-reviewers/guidelines-for-reviewers
+      - listitem:
+        - link "System status":
+          - /url: https://status.trustpilot.com/
+      - listitem:
+        - button "Manage cookies"
+      - listitem:
+        - link "Modern Slavery Statement":
+          - /url: https://corporate.trustpilot.com/legal/for-everyone/modern-slavery-and-human-trafficking-statement
+    - text: © 2026 Trustpilot, Inc. All rights reserved.
+  - alert
+  - dialog "Here’s how we use cookies":
+    - heading "Here’s how we use cookies" [level=2]
+    - text: "Trustpilot and our partners use certain necessary cookies stored on your device to deliver our services. We’d also like to use additional cookies to:"
+    - list:
+      - listitem: Enhance your experience
+      - listitem: Provide social media features
+      - listitem: Analyze, monitor, and improve our services
+      - listitem: Show personalized content and ads, depending on your settings
+    - text: If you choose Accept all, you consent to our use of additional cookies for these purposes. If you choose Reject all, we won’t use additional cookies for these purposes. You can change or withdraw consent at any time in Manage cookies. Learn more in our
+    - link "Cookie Policy":
+      - /url: "https://legal.trustpilot.com/for-everyone/cookie-policy "
+    - text: .
+    - button "Manage cookies, Opens the preference center dialog": Manage cookies
+    - button "Reject all"
+    - button "Accept all"

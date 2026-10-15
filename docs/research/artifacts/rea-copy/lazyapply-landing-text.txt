@@ -1,0 +1,256 @@
+- document:
+  - banner:
+    - link "LazyApply Logo LazyApply":
+      - /url: /
+      - img "LazyApply Logo"
+      - paragraph: LazyApply
+    - link "How It Works":
+      - /url: "#how-it-works"
+    - link "Pricing":
+      - /url: "#pricing"
+    - link "Reviews":
+      - /url: "#success"
+    - link "AI Cover Letter":
+      - /url: /cover-letter-generator
+    - button "AI Tools menu": AI Tools ▾
+    - button "Login"
+    - button "Get Started"
+  - heading "Automate Your Job Application Process" [level=1]
+  - paragraph: Our AI Job search tool automatically apply to all the jobs on platforms like Greenhouse, Dice, Indeed and Ziprecruiter using Job GPT.
+  - img "Emma Wilson"
+  - img "Michael Davis"
+  - img "Sarah Chen"
+  - paragraph: "4.9"
+  - img "4.9 Stars"
+  - paragraph: Over 50000+ users
+  - button "Get Started"
+  - button "Watch Demo"
+  - text: Your browser does not support the video tag.
+  - heading "Lazyapply does all the work for you" [level=2]
+  - heading "Automated Job Applications" [level=3]
+  - paragraph: Apply to jobs across multiple platforms with a single click. Our agent handles the entire application process.
+  - paragraph: Loading demo…
+  - heading "Smart Referral Emails" [level=3]
+  - paragraph: Automatically send customized referral emails to relevant employees at companies you're applying to.
+  - paragraph: Loading demo…
+  - heading "Track Everything in One Place" [level=3]
+  - paragraph: Track all your applications and referral emails in real-time through our analytics dashboard.
+  - paragraph: Loading demo…
+  - heading "What We Do" [level=2]
+  - heading "Streamlined Applications" [level=3]
+  - paragraph: Save 100's of hours by automating the job application process.
+  - heading "Advanced Algorithms" [level=3]
+  - paragraph: Our scripts use ADVANCED AI JOB SEARCH ALGORITHMS, so your profiles will never get blocked by platforms.
+  - heading "Personalized Autofill" [level=3]
+  - paragraph: Our Job GPT automatically fills the job applications based on your information.
+  - heading "Ready to Get Started?" [level=2]
+  - paragraph: Choose a plan that suits your needs and increase your interview chances.
+  - heading "30 DAYS MONEY BACK GUARANTEE" [level=5]
+  - paragraph:
+    - text: We offer a 30-day refund policy. To qualify, you must submit your request within 30 days of purchase.
+    - link "View our refund policy":
+      - /url: /refundpolicy
+    - text: for details.
+  - img "discount"
+  - heading "Basic Plan" [level=3]
+  - paragraph: Get started with job search
+  - text: $119 $99
+  - paragraph: per year
+  - separator
+  - paragraph: 15 Applications/Day
+  - paragraph: 1 Resume Profile
+  - paragraph: Basic Analytics
+  - paragraph: Email Support
+  - paragraph:
+    - text: Enter the email to which the LazyApply plan has to be added
+    - strong: (Must be a gmail account)
+  - textbox "Enter your email"
+  - button "Select Basic Plan" [disabled]
+  - text: Most Popular
+  - heading "Premium Plan" [level=3]
+  - paragraph: Perfect for active job seekers
+  - text: $179 $149
+  - paragraph: per year
+  - separator
+  - paragraph: 150 Applications/Day
+  - paragraph: 5 Resume Profiles
+  - paragraph: Basic Analytics
+  - paragraph: Email Support
+  - paragraph:
+    - text: Enter the email to which the LazyApply plan has to be added
+    - strong: (Must be a gmail account)
+  - textbox "Enter your email"
+  - button "Select Premium Plan" [disabled]
+  - text: 10X Value
+  - heading "Ultimate Plan" [level=3]
+  - paragraph: For serious career advancement
+  - text: $1099 $999
+  - paragraph: per year
+  - separator
+  - paragraph: 1500 Applications/Day
+  - paragraph: 20 Resume Profiles
+  - paragraph: Advanced Analytics
+  - paragraph: Priority Support
+  - paragraph:
+    - text: Enter the email to which the LazyApply plan has to be added
+    - strong: (Must be a gmail account)
+  - textbox "Enter your email"
+  - button "Select Ultimate Plan" [disabled]
+  - heading "What people say about us? ( LazyApply Reviews )" [level=2]
+  - paragraph: Join thousands of successful job seekers who automated their job search with LazyApply
+  - text: SW
+  - paragraph: Sarah Wilson
+  - text: Reviewer • 42 reviews
+  - img "5 Stars"
+  - text: 2 months ago
+  - paragraph: Really happy with this tool. Cut down my application time significantly and the dashboard is pretty straightforward to use. Support got back to me quickly when I had questions.
+  - img
+  - text: Posted on Google MB
+  - paragraph: Mike Barnes
+  - paragraph: 1 review
+  - paragraph: US
+  - img "5 Stars"
+  - paragraph: Verified
+  - paragraph: 6 hours ago
+  - paragraph: LazyApply streamlined my entire job search
+  - paragraph: After weeks of manual applications, I discovered LazyApply and it completely transformed my job search. Applied to 100+ positions in just a few days and got multiple callbacks.
+  - paragraph: "Date of experience: January 02, 2025"
+  - paragraph: Useful
+  - paragraph: Share
+  - text: SC
+  - paragraph: Sarah Chen
+  - paragraph: "@sarahchen"
+  - paragraph: Used LazyApply during my recent job search and it definitely sped things up. Applied to way more positions than I could have manually. Ended up getting a great offer. 🚀
+  - paragraph: 1.2K
+  - paragraph: "234"
+  - text: EK
+  - paragraph: Emily Kim
+  - paragraph: "@emilykim"
+  - paragraph: Solid tool for job applications. The automation really does save time - I was able to apply to about 50-100 positions per day instead of maybe 5-10 manually.
+  - paragraph: "845"
+  - paragraph: "156"
+  - button "Back"
+  - text: AT
+  - paragraph: Alex Thompson
+  - paragraph: online
+  - button "Search chat"
+  - button "More options"
+  - paragraph: TODAY
+  - paragraph: Got multiple interviews within a week! The automated applications really streamlined my job search. 🚀
+  - paragraph: 12:30 PM
+  - paragraph: Applied to 100+ positions in just a few days! 💪
+  - paragraph: 12:31 PM
+  - button "Emoji"
+  - button "Attach file"
+  - text: Type a message
+  - button "Voice message"
+  - text: MC
+  - paragraph: Michael Chen
+  - text: Software Engineer at Tech Corp 1d • Edited • 1st
+  - paragraph: Tried LazyApply 🚀 after getting burned out from manual applications. It's pretty helpful - applied to around 80 positions over a few days and started getting some responses. Made the whole process less tedious.
+  - text: 1,234 56 23
+  - paragraph: LazyApply made my job search more efficient. The automation helped me apply to more positions, and I liked being able to track everything in one place. Decent analytics too.
+  - text: AM
+  - paragraph: Alex Martinez
+  - text: Product Manager Recently hired at Meta Verified User RT
+  - paragraph: Rachel Thompson
+  - text: Product Manager at StartupCo 2d • Edited • 1st
+  - paragraph: "Just hit 100 job applications in 3 days using LazyApply! 🎯 The automation is incredible, and the ability to track everything in one place is exactly what I needed. Already scheduled 4 interviews! Highly recommend for anyone in job search mode. #jobhunting #careeradvice #productivity"
+  - text: 892 43 17 JM
+  - paragraph: James Miller
+  - text: Reviewer • 28 reviews
+  - img "5 Stars"
+  - text: 1 month ago
+  - paragraph: This tool completely transformed my job search process. The automated application feature is a game-changer, and the analytics help you track everything efficiently.
+  - img
+  - text: Posted on Google
+  - heading "Try our AI powered Job application automation tool to automate job search" [level=2]
+  - paragraph: Join thousands of smart job seekers saving time with LazyApply
+  - button "Get Started"
+  - contentinfo:
+    - link "LazyApply home":
+      - /url: /
+      - img "LazyApply Logo"
+      - text: LazyApply
+    - paragraph: Automated job applications and referrals to help you land your dream job faster.
+    - link "LazyApply on Instagram":
+      - /url: https://www.instagram.com/lazyapply_official/
+    - link "LazyApply on LinkedIn":
+      - /url: https://www.linkedin.com/company/lazyapply1/
+    - paragraph: Quick Links
+    - link "Search 150,000+ remote jobs for free":
+      - /url: /jobs
+    - link "How It Works":
+      - /url: "#how-it-works"
+    - link "Pricing":
+      - /url: "#pricing"
+    - link "Reviews":
+      - /url: "#success"
+    - link "Job Application Automation":
+      - /url: /job-application-automation
+    - paragraph: Features
+    - link "Indeed Bot":
+      - /url: /indeed-auto-apply-bot
+    - link "Auto Fill Job Applications Chrome Extension":
+      - /url: /download-extension
+    - link "Interview Answer":
+      - /url: /interview-answer
+    - link "Resignation Letter":
+      - /url: /resignation-letter
+    - paragraph: AI Tools
+    - link "Hashtags Generator For Linkedin":
+      - /url: /hashtags-generator-for-linkedin
+    - link "Summary Generator For Linkedin":
+      - /url: /summary-generator-for-linkedin
+    - link "Post Generator For Linkedin":
+      - /url: /post-generator-for-linkedin
+    - link "Headline Generator For Linkedin":
+      - /url: /headline-generator-for-linkedin
+    - link "Recommendation Generator For Linkedin":
+      - /url: /recommendation-generator-for-linkedin
+    - link "Resume Builder":
+      - /url: /resume-builder
+    - link "Resume GPT":
+      - /url: /resume-gpt
+    - link "Resume Score":
+      - /url: /resume-score
+    - link "Resume Tracker":
+      - /url: /resume-tracker
+    - link "Resume Summary Generator":
+      - /url: /resume-summary-generator
+    - link "Job Description Generator":
+      - /url: /job-description-generator
+    - link "Resignation Letter Generator":
+      - /url: /resignation-letter-generator
+    - paragraph: Cover Letters
+    - link "Cover Letter Examples":
+      - /url: /cover-letter-examples
+    - link "Cover Letter Generator":
+      - /url: /cover-letter-generator
+    - link "Google Cover Letter":
+      - /url: /cover-letter-examples/google-cover-letter
+    - link "Amazon Cover Letter":
+      - /url: /cover-letter-examples/amazon-cover-letter
+    - link "Tesla Cover Letter":
+      - /url: /cover-letter-examples/tesla-cover-letter
+    - link "Frontend Developer Cover Letter":
+      - /url: /cover-letter-examples/frontend-cover-letters/front-end%20developer-cover-letter
+    - link "Product Manager Cover Letter":
+      - /url: /cover-letter-examples/business-cover-letters/product%20manager-cover-letter
+    - paragraph: Support
+    - link "Help Center":
+      - /url: /help
+    - link "Terms of Service":
+      - /url: /terms
+    - link "Privacy Policy":
+      - /url: /privacy
+    - link "FAQ":
+      - /url: /faq
+    - link "Refund Policy":
+      - /url: /refundpolicy
+    - paragraph: Contact
+    - link "team@lazyapply.com":
+      - /url: mailto:team@lazyapply.com
+    - separator
+    - paragraph: © 2026 LazyApply. All rights reserved.
+  - alert
