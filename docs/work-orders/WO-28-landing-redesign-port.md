@@ -1,9 +1,8 @@
 # WO-28 — Landing redesign port: bilingual FAQ, demo, comparison, outcome copy
 
-> Priority: P1 · Depends on: i18n ✅ (#120/#121 merged; **deploy still
-> pending — this WO's deploy carries it**) · Status: **code merged
-> 2026-10-15 (PR #123, CI green) — DEPLOY BLOCKED on Cloudflare
-> re-auth; see Deploy record** · Rationale owner:
+> Priority: P1 · Depends on: i18n ✅ (#120/#121; **deployed with this
+> WO**) · Status: **executed + deployed 2026-10-15 (PR #123; deploy
+> record below)** · Rationale owner:
 > `docs/research/competitor-rea-teardown-2026-10-11.md` §6 (funnel is
 > the gap) + the 2026-10-13 landing audit (social proof, outcome hero,
 > FAQ, sticky CTA) + the 2026-10-14 assessment of the owner's redesign
@@ -66,19 +65,23 @@ Forbes stat appears **zero** times in `out/index.html` and `out/sv.html`.
   (`git worktree add --detach`) so the WO-20 session's uncommitted
   frontend edits could not leak into the production bundle.
 
-**Deploy record:** PENDING — blocked on Cloudflare auth (the wrangler
-OAuth token expired 2026-09-14; the re-login browser flow timed out
-without a click). Everything else is staged: a clean worktree of
-`c12f316` with dependencies installed waits at `/tmp/jfos-deploy-main`
-(removed on reboot — recreate with `git worktree add --detach
-/tmp/jfos-deploy-main c12f316 && cd frontend && npm install --no-audit
---no-fund` if gone). To finish: run `npx wrangler login` in a terminal
-and approve, then `bash ops/deploy_frontend.sh` from the worktree (or
-from main once the concurrent WO-20 tree is committed) with
-`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` exported —
-the publishable key can be extracted from the live bundle per the
-WO-07 runbook. Then verify `/` + `/sv` serve the new hero and the
-Forbes stat is gone, and record the checks here.
+**Deploy record:** executed 2026-10-15 via `ops/deploy_frontend.sh`
+from a clean worktree of main (`567a164`, frontend identical to the
+merged `c12f316`), after the owner re-authorised wrangler (OAuth had
+expired 2026-09-14; two automated re-login attempts timed out without
+a browser click — the owner's click completed it). This deploy carries
+the pending **#120/#121 i18n release**: production served the pre-i18n
+build until now. Deployment: `bc126e0c.jobfinderos.pages.dev` →
+production aliases. Verified on jobfinderos.com minutes after upload:
+
+| Check | Result |
+|---|---|
+| `/` serves "Fewer applications." + "up to 5 MB" | ✅ |
+| `/` FAQ ("Questions, answered.") + demo ("This morning's hunt") | ✅ |
+| `/sv` serves "Färre ansökningar." + "Dagens morgonjakt" + "Frågor, besvarade." | ✅ |
+| `/sv` shows the "English" toggle above the fold (#121 live) | ✅ |
+| Proof placeholder renders both locales ("Ask us for one result" / "Be oss om ett resultat") | ✅ |
+| Forbes stat + "two thirds"/"två tredjedelar" absent from both locales | ✅ |
 
 ## Why
 
