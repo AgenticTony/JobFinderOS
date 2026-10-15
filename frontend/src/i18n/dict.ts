@@ -181,7 +181,11 @@ const en = {
       // Claims audit (WO-28): city dropped — storage is Render Frankfurt
       // + Supabase eu-west-1 (Dublin); our own comments conflate them,
       // so the defensible claim is "in the EU", no city.
-      'Official public data only. No logins, no grey scraping. Your account data and CV file are stored in the EU; the CV text sent to our AI for matching and tailoring is processed outside the EU.',
+      // WO-30 follow-up (owner 2026-10-15): the outside-EU processing
+      // is BETA-ONLY — EU-resident AI is the stated end state — so the
+      // claim is scoped to the beta and the commitment stated, instead
+      // of reading like a permanent arrangement.
+      'Official public data only. No logins, no grey scraping. Your account data and CV file are stored in the EU. During the beta, CV text sent to our AI is processed outside the EU — when the beta ends, all AI processing moves inside the EU.',
     privacyLink: 'Read the privacy notice',
   },
   guardSec: {
@@ -236,7 +240,7 @@ const en = {
       },
       {
         q: 'What happens to my CV and data?',
-        a: 'Your account data and CV file are stored in the EU. The CV text sent to our AI for matching and tailoring is processed outside the EU. The privacy notice lists every processor.',
+        a: 'Your account data and CV file are stored in the EU. During the beta, the CV text sent to our AI is processed outside the EU — when the beta ends, all AI processing moves inside the EU. The privacy notice lists every processor.',
       },
       {
         q: 'What does it cost?',
@@ -487,7 +491,7 @@ const sv: Dict = {
       },
     ],
     privacyA:
-      'Endast officiell, offentlig data. Inga inloggningar, ingen grå zon-skrapning. Din kontodata och din CV-fil lagras i EU; CV-texten som skickas till vår AI för matchning och anpassning behandlas utanför EU.',
+      'Endast officiell, offentlig data. Inga inloggningar, ingen grå zon-skrapning. Din kontodata och din CV-fil lagras i EU. Under betan behandlas CV-texten som skickas till vår AI utanför EU — när betan är över sker all AI-behandling inom EU.',
     privacyLink: 'Läs integritetsmeddelandet',
   },
   guardSec: {
@@ -543,7 +547,7 @@ const sv: Dict = {
       },
       {
         q: 'Vad händer med mitt CV och min data?',
-        a: 'Din kontodata och din CV-fil lagras i EU. CV-texten som skickas till vår AI för matchning och anpassning behandlas utanför EU. Integritetsmeddelandet listar alla behandlare.',
+        a: 'Din kontodata och din CV-fil lagras i EU. Under betan behandlas CV-texten som skickas till vår AI utanför EU — när betan är över sker all AI-behandling inom EU. Integritetsmeddelandet listar alla behandlare.',
       },
       {
         q: 'Vad kostar det?',
