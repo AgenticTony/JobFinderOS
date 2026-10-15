@@ -19,7 +19,7 @@ Run: cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/test_wo20_outco
 
 import asyncio
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 
@@ -308,7 +308,7 @@ class TestApprovalGate:
         job = _job(db)
         app = _application(db, user, job, sent_days_ago=3, status="sent")
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return [{
                 "id": "m-1", "from": "HR <hr@acme.example>",
                 "subject": "Your application",
@@ -360,7 +360,7 @@ class TestIncrementalState:
         job = _job(db)
         _application(db, user, job, sent_days_ago=3, status="sent")
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             # The SAME message, replayed by every scan (as an overlapping
             # Gmail after: window would return it)
             return [{
@@ -381,12 +381,13 @@ class TestIncrementalState:
         job = _job(db)
         _application(db, user, job, sent_days_ago=3, status="sent")
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return []
 
         asyncio.run(scan_replies(db, user.id, fetch))
         state = db.query(GmailScanState).filter(GmailScanState.user_id == user.id).one()
-        assert state.scan_cursor == date.today().isoformat()
+        assert state.scan_cursor is not None
+        assert state.scan_cursor.startswith("e:")
         assert state.last_error is None
 
     def test_scan_error_recorded_not_swallowed(self, db):
@@ -394,7 +395,7 @@ class TestIncrementalState:
         job = _job(db)
         _application(db, user, job, sent_days_ago=3, status="sent")
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             raise RuntimeError("gmail said no")
 
         with pytest.raises(RuntimeError):
@@ -724,7 +725,7 @@ class TestSenderAmbiguity:
         _application(db, user, self._ats_job(db, "Acme", "Developer"), sent_days_ago=3, status="sent", target_email=None)
         _application(db, user, self._ats_job(db, "Beta", "Analyst"), sent_days_ago=2, status="sent", target_email=None)
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {"messages": [self._message("Update on your application")], "truncated": False}
 
         summary = asyncio.run(scan_replies(db, user.id, fetch))
@@ -737,7 +738,7 @@ class TestSenderAmbiguity:
         _application(db, user, self._ats_job(db, "Acme", "Developer"), sent_days_ago=3, status="sent", target_email=None)
         _application(db, user, self._ats_job(db, "Beta", "Analyst"), sent_days_ago=2, status="sent", target_email=None)
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {"messages": [self._message("Your Beta application — next steps")], "truncated": False}
 
         summary = asyncio.run(scan_replies(db, user.id, fetch))
@@ -782,7 +783,7 @@ class TestSavepointKeepsEarlierProposals:
         # Simulate the real race: a concurrent uncommitted insert is
         # invisible to the pre-check (SELECT sees nothing), so the second
         # scan's insert hits the unique index at flush.
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {
                 "messages": [
                     {"id": "m-1", "from": "hr@acme.example", "subject": "a",
@@ -877,7 +878,7 @@ class TestFollowUpsExcluded:
         follow-up row must never compete as a match candidate."""
         user, job, parent = self._parent_with_two_follow_ups(db, parent_days_ago=12)
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {
                 "messages": [{
                     "id": "m-1", "from": "hr@acme.example",
@@ -950,57 +951,55 @@ class TestSwedishFollowUpTemplate:
 
 
 class TestScanCursorSafety:
-    """Review finding 8: the adapter capped at 50 messages but the scan
-    advanced the cursor to today — everything past the cap was never
-    scanned again. A truncated scan advances only to the last message it
-    actually processed."""
+    """Review rounds 1+3: a truncated scan must never claim ground it
+    did not cover (round 1 pinned the cursor to today; round 3 showed
+    the date-granular replacement stalled on dense windows — both are
+    silent mail loss). The watermark is epoch-anchored."""
 
-    def test_truncated_scan_advances_to_last_processed_not_today(self, db):
-        from datetime import date as date_cls
-
+    def test_truncated_scan_writes_backfill_watermark_not_today(self, db):
         user = _user(db)
         job = _job(db)
         _application(db, user, job, sent_days_ago=30, status="sent")
-        last_received = (utc_now() - timedelta(days=20)).replace(
+        received = (utc_now() - timedelta(days=20)).replace(
             hour=12, minute=0, second=0, microsecond=0
         )
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {
                 "messages": [{
                     "id": "m-1", "from": "hr@acme.example",
                     "subject": "Your application",
                     "body": "We'd like to schedule a call.",
-                    "received_at": last_received,
+                    "received_at": received,
                 }],
-                "truncated": True,  # Gmail returned more than the cap
+                "truncated": True,  # the window overflowed the cap
             }
 
         asyncio.run(scan_replies(db, user.id, fetch))
         state = db.query(GmailScanState).one()
-        assert state.scan_cursor == last_received.date().isoformat()
-        assert state.scan_cursor != date_cls.today().isoformat()
+        assert state.scan_cursor.startswith("b:")
+        # before = oldest processed arrival + 1s — NOT today
+        _, after, before = state.scan_cursor.split(":")
+        assert int(before) == _r3_epoch(received) + 1
 
-    def test_untruncated_scan_advances_to_today(self, db):
-        from datetime import date as date_cls
-
+    def test_untruncated_scan_advances_to_incremental_watermark(self, db):
         user = _user(db)
         job = _job(db)
         _application(db, user, job, sent_days_ago=30, status="sent")
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {"messages": [], "truncated": False}
 
         asyncio.run(scan_replies(db, user.id, fetch))
         state = db.query(GmailScanState).one()
-        assert state.scan_cursor == date_cls.today().isoformat()
+        assert state.scan_cursor.startswith("e:")
 
     def test_truncation_flag_recorded(self, db):
         user = _user(db)
         job = _job(db)
         _application(db, user, job, sent_days_ago=30, status="sent")
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {"messages": [], "truncated": True}
 
         summary = asyncio.run(scan_replies(db, user.id, fetch))
@@ -1021,7 +1020,7 @@ class TestTimestampNormalization:
 
         aware = (utc_now() - timedelta(days=2)).replace(tzinfo=tz_mod.utc)
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {
                 "messages": [{
                     "id": "m-1", "from": "hr@acme.example",
@@ -1047,56 +1046,51 @@ class TestTimestampNormalization:
 # follow-up deadlines, live aggregator hosts, cross-app message dedupe
 # ======================================================================
 
-class TestOldestPageSelection:
-    """Review round 2, finding 1: Gmail search returns NEWEST-first and
-    the adapter kept the first 50 — the NEWEST 50 — so the truncation
-    cursor landed at ~today and everything older was skipped forever.
-    The page taken must be the OLDEST slice of a newest-first result."""
+class TestTruncatedScanResumesBelowBatch:
+    """Review rounds 2+3: Gmail returns NEWEST-first and a truncated
+    scan processes the newest batch — so the watermark must sit at the
+    batch's OLDEST arrival, and the next scan's window must EXCLUDE
+    the processed batch while keeping every older hit inside."""
 
-    def test_oldest_page_of_newest_first_results(self):
-        from app.services.gmail_scan import _oldest_page
-
-        # 120 metas, newest first (Gmail's documented order)
-        metas = [{"id": str(120 - i)} for i in range(120)]  # id 120 … 1
-        page, truncated = _oldest_page(metas, cap=50)
-        assert truncated is True
-        assert len(page) == 50
-        # the OLDEST 50: ids 50…1, not 120…71
-        assert [m["id"] for m in page] == [str(i) for i in range(50, 0, -1)]
-
-    def test_short_result_not_truncated(self):
-        from app.services.gmail_scan import _oldest_page
-
-        metas = [{"id": str(30 - i)} for i in range(30)]
-        page, truncated = _oldest_page(metas, cap=50)
-        assert truncated is False
-        assert len(page) == 30
-
-    def test_scan_cursor_semantics_with_oldest_page(self, db):
-        """End-to-end: a truncated scan of the OLDEST page leaves the
-        cursor at the newest message OF THAT PAGE, so the next window
-        resumes after it — older mail is never stranded."""
-        first_batch_received = (utc_now() - timedelta(days=80)).replace(
-            hour=9, minute=0, second=0, microsecond=0
-        )
+    def test_second_window_excludes_processed_batch(self, db):
+        now = utc_now()
+        msgs = [{
+            "id": f"m-{i:02d}", "from": "hr@acme.example",
+            "subject": "Your application",
+            "body": "We'd like to schedule a call.",
+            "received_at": now - timedelta(days=4) + timedelta(hours=i),
+        } for i in range(70)]  # m-00 oldest … m-69 newest, all in the past
         user = _user(db)
         job = _job(db)
-        _application(db, user, job, sent_days_ago=85, status="sent")
+        _application(db, user, job, sent_days_ago=30, status="sent")
 
-        async def fetch(uid, after, terms):
-            return {
-                "messages": [{
-                    "id": "m-old", "from": "hr@acme.example",
-                    "subject": "Your application",
-                    "body": "We'd like to schedule a call.",
-                    "received_at": first_batch_received,
-                }],
-                "truncated": True,
-            }
+        def _serve(uid, w, terms):
+            in_win = [
+                m for m in msgs
+                if w["after"] < _r3_epoch(m["received_at"]) < w["before"]
+            ]
+            newest_first = sorted(in_win, key=lambda m: m["received_at"], reverse=True)
+            batch = newest_first[:50]
 
-        asyncio.run(scan_replies(db, user.id, fetch))
+            async def run():
+                return {
+                    "messages": sorted(batch, key=lambda m: m["received_at"]),
+                    "truncated": len(in_win) > 50,
+                }
+            return run()
+
+        first = asyncio.run(scan_replies(db, user.id, _serve))
+        assert first["proposed"] == 50
         state = db.query(GmailScanState).one()
-        assert state.scan_cursor == first_batch_received.date().isoformat()
+        assert state.scan_cursor.startswith("b:")
+        _, after, before = state.scan_cursor.split(":")
+        # the watermark sits at the batch's OLDEST arrival (m-20) +1s
+        assert int(before) == _r3_epoch(msgs[20]["received_at"]) + 1
+
+        second = asyncio.run(scan_replies(db, user.id, _serve))
+        assert second["proposed"] == 20  # the remaining older hits
+        db.refresh(state)
+        assert state.scan_cursor.startswith("e:")
 
 
 class TestLoneAtsRequiresDiscriminator:
@@ -1113,7 +1107,7 @@ class TestLoneAtsRequiresDiscriminator:
                    url="https://boards.greenhouse.io/acme/jobs/1")
         _application(db, user, job, sent_days_ago=3, status="sent", target_email=None)
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {
                 "messages": [{
                     "id": "m-1", "from": "Notifications <noreply@greenhouse.io>",
@@ -1134,7 +1128,7 @@ class TestLoneAtsRequiresDiscriminator:
                    url="https://boards.greenhouse.io/acme/jobs/1")
         _application(db, user, job, sent_days_ago=3, status="sent", target_email=None)
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {
                 "messages": [{
                     "id": "m-1", "from": "Notifications <noreply@greenhouse.io>",
@@ -1156,7 +1150,7 @@ class TestLoneAtsRequiresDiscriminator:
         _application(db, user, job, sent_days_ago=3, status="sent",
                      target_email="jobs@acme.example")
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {
                 "messages": [{
                     "id": "m-1", "from": "HR <jobs@acme.example>",
@@ -1290,7 +1284,7 @@ class TestOneMessageOneProposal:
             "received_at": utc_now() - timedelta(days=1),
         }
 
-        async def fetch(uid, after, terms):
+        async def fetch(uid, window, terms):
             return {"messages": [msg], "truncated": False}
 
         # Scan 1: subject names Acme → filed on A
@@ -1312,3 +1306,482 @@ class TestOneMessageOneProposal:
         assert summary2["proposed"] == 0
         assert db.query(OutcomeProposal).count() == 1
         assert db.query(OutcomeProposal).one().application_id == app_a_row.id
+
+# =====================================================================
+# Review round 3 (PR #128) — pagination, watermark cursor, evidence
+# time, free-mail domains, predicate drift
+# =====================================================================
+
+
+def _r3_epoch(dt) -> int:
+    """naive-UTC datetime → epoch seconds (the cursor's storage unit)."""
+    from datetime import timezone as tz_mod
+    return int(dt.replace(tzinfo=tz_mod.utc).timestamp())
+
+
+def _r3_detail(mid: str, epoch_s: int, body="We'd like to schedule a call."):
+    """One Gmail full-message detail dict as the GET tool returns it."""
+    import base64
+    return {
+        "id": mid, "threadId": "t-1",
+        "internalDate": str(epoch_s * 1000),
+        "payload": {
+            "mimeType": "text/plain",
+            "headers": [
+                {"name": "From", "value": "HR <hr@acme.example>"},
+                {"name": "Subject", "value": "Your application"},
+            ],
+            "body": {"data": base64.urlsafe_b64encode(body.encode()).decode()},
+        },
+    }
+
+
+def _r3_patch_gmail(monkeypatch, *, metas_by_call, details, on_search=None):
+    """Patch gmail_scan's vendor layer for adapter-level tests.
+
+    metas_by_call: list of (metas, next_token) served per SEARCH call,
+    in order (a tool that pages at its own default size). details maps
+    message id → GET response. Returns a state dict counting search
+    calls and recording their arguments."""
+    from app.services import gmail_scan
+
+    state = {"search_args": []}
+
+    async def fake_slugs(uid):
+        return ["GMAIL_SEARCH_QUERY", "GMAIL_GET_MESSAGE"]
+
+    async def fake_execute(uid, slug, arguments):
+        if "SEARCH" in slug or "QUERY" in slug or "LIST" in slug:
+            state["search_args"].append(dict(arguments))
+            if on_search:
+                on_search(arguments)
+            i = len(state["search_args"]) - 1
+            metas, token = metas_by_call[min(i, len(metas_by_call) - 1)]
+            return {"messages": metas, "nextPageToken": token}
+        return details[arguments["message_id"]]
+
+    monkeypatch.setattr(gmail_scan, "_slugs_for", fake_slugs)
+    monkeypatch.setattr(gmail_scan.composio_service, "execute_tool", fake_execute)
+    # the configured-gate must never depend on the machine's .env
+    monkeypatch.setattr(gmail_scan.composio_service, "is_configured", lambda: True)
+    return state
+
+
+def _r3_window(after=0, before=2_000_000_000):
+    return {"after": after, "before": before}
+
+
+class TestSearchPaginates:
+    """Round 3, finding 1: the search call sent only {query} — no page
+    size and no nextPageToken loop. The slice then operated on the
+    FIRST (newest) page only: matches beyond page 1 were stranded
+    forever, and a window whose first page held ≤50 reported
+    truncated=False (cursor jumped to today, older pages never read)."""
+
+    def test_token_followed_and_truncation_uses_real_count(self, monkeypatch):
+        """55 hits served 10-per-page: the adapter must follow the token
+        until the collected count proves the window overflows the cap —
+        not stop at page 1 (10 ≤ 50 would have said 'complete')."""
+        from datetime import datetime
+        from datetime import timezone as tz_mod
+
+        base = int(datetime(2026, 1, 1, tzinfo=tz_mod.utc).timestamp())
+        pages = []
+        for start in range(0, 55, 10):
+            chunk = [{"id": f"m-{i}", "threadId": "t-1"} for i in range(start, start + 10)]
+            chunk.reverse()  # newest-first inside the page (Gmail order)
+            pages.append((chunk, "tok" if start + 10 < 55 else ""))
+        details = {f"m-{i}": _r3_detail(f"m-{i}", base + i) for i in range(55)}
+
+        state = _r3_patch_gmail(monkeypatch, metas_by_call=pages, details=details)
+        from app.services import gmail_scan
+
+        result = asyncio.run(
+            gmail_scan.gmail_fetch_messages("u1", _r3_window(), ["@acme.example"])
+        )
+        assert len(state["search_args"]) >= 2, "adapter stopped after the first page"
+        assert result["truncated"] is True
+        assert len(result["messages"]) == 50
+
+    def test_single_big_page_with_token_is_truncated(self, monkeypatch):
+        """120 hits, tool serves 100 per page: ONE call already exceeds
+        the cap — truncated=True, no further paging needed."""
+        from datetime import datetime
+        from datetime import timezone as tz_mod
+
+        base = int(datetime(2026, 1, 1, tzinfo=tz_mod.utc).timestamp())
+        chunk = [{"id": f"m-{i}", "threadId": "t-1"} for i in range(100)]
+        chunk.reverse()
+        details = {f"m-{i}": _r3_detail(f"m-{i}", base + i) for i in range(120)}
+        state = _r3_patch_gmail(
+            monkeypatch, metas_by_call=[(chunk, "tok")], details=details
+        )
+        from app.services import gmail_scan
+
+        result = asyncio.run(
+            gmail_scan.gmail_fetch_messages("u1", _r3_window(), None)
+        )
+        assert len(state["search_args"]) == 1
+        assert result["truncated"] is True
+        assert len(result["messages"]) == 50
+
+    def test_complete_window_short_of_cap_not_truncated(self, monkeypatch):
+        from datetime import datetime
+        from datetime import timezone as tz_mod
+
+        base = int(datetime(2026, 1, 1, tzinfo=tz_mod.utc).timestamp())
+        pages = []
+        for start in range(0, 30, 10):
+            chunk = [{"id": f"m-{i}", "threadId": "t-1"} for i in range(start, min(start + 10, 30))]
+            chunk.reverse()
+            pages.append((chunk, "tok" if start + 10 < 30 else ""))
+        details = {f"m-{i}": _r3_detail(f"m-{i}", base + i) for i in range(30)}
+        _r3_patch_gmail(monkeypatch, metas_by_call=pages, details=details)
+        from app.services import gmail_scan
+
+        result = asyncio.run(
+            gmail_scan.gmail_fetch_messages("u1", _r3_window(), None)
+        )
+        assert result["truncated"] is False
+        assert len(result["messages"]) == 30
+
+
+class TestBatchIsNewestByDate:
+    """Round 3, finding 2: a threads-shaped response flattens to an
+    order that interleaves chronology — slicing by list position (the
+    round-2 tail OR a head) is wrong. The batch must be the NEWEST
+    messages by internalDate: sort before slicing."""
+
+    def test_scrambled_meta_order_batch_is_newest_by_date(self, monkeypatch):
+        from datetime import datetime
+        from datetime import timezone as tz_mod
+
+        from app.services import gmail_scan
+
+        base = int(datetime(2026, 1, 1, tzinfo=tz_mod.utc).timestamp())
+        order = list(range(30, 60)) + list(range(30))  # rotated — neither asc nor desc
+        metas, details = [], {}
+        for i in order:
+            metas.append({"id": f"m-{i}", "threadId": "t-1",
+                          "internalDate": str((base + i) * 1000)})
+            details[f"m-{i}"] = _r3_detail(f"m-{i}", base + i)
+        _r3_patch_gmail(monkeypatch, metas_by_call=[(metas, "")], details=details)
+        result = asyncio.run(gmail_scan.gmail_fetch_messages("u1", _r3_window(), None))
+        ids = {m["id"] for m in result["messages"]}
+        assert len(ids) == 50
+        # NEWEST 50 by internalDate = ranks 10..59 — not a positional slice
+        assert ids == {f"m-{i}" for i in range(10, 60)}
+
+
+class TestCursorWatermark:
+    """Round 3, findings 1/2/4 (cursor half): a DATE-granular after:
+    cursor cannot both avoid stranding and make progress — the oldest-
+    page tail sliced the first page only, and ≥50 matches inside the
+    one-day overlap re-served the same batch forever. The cursor is a
+    two-bound EPOCH watermark: "b:{after}:{before}" while a window
+    still overflows the cap (before anchored at the OLDEST message of
+    the processed batch + 1s), "e:{epoch}" once a window completes
+    (bounded by the window's own before, not a fresh 'now')."""
+
+    @staticmethod
+    def _msg(mid, received, body="We'd like to schedule a call."):
+        return {
+            "id": mid, "from": "hr@acme.example",
+            "subject": "Your application", "body": body,
+            "received_at": received,
+        }
+
+    def test_truncated_scan_writes_backfill_watermark(self, db):
+        received = (utc_now() - timedelta(days=20)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=30, status="sent")
+
+        async def fetch(uid, a, terms):
+            return {"messages": [self._msg("m-1", received)], "truncated": True}
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        state = db.query(GmailScanState).one()
+        assert state.scan_cursor is not None
+        assert state.scan_cursor.startswith("b:"), state.scan_cursor
+        _, after, before = state.scan_cursor.split(":")
+        # before = oldest processed arrival + 1s — anything older stays
+        # inside the next window; anything newer was in the batch
+        assert int(before) == _r3_epoch(received) + 1
+        assert int(after) < _r3_epoch(received)
+
+    def test_complete_scan_bounds_cursor_at_window_not_wallclock(self, db):
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=30, status="sent")
+        windows = []
+
+        async def fetch(uid, a, terms):
+            windows.append(a)
+            return {"messages": [], "truncated": False}
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        state = db.query(GmailScanState).one()
+        assert state.scan_cursor.startswith("e:"), state.scan_cursor
+        # fresh scan → the window was [now-90d, now]; the completed
+        # cursor claims exactly the window's upper bound — never a
+        # later 'now' (mail arriving mid-scan must stay unclaimed)
+        assert int(state.scan_cursor[2:]) == windows[0]["before"]
+
+    def test_dense_window_makes_progress_every_scan(self, db):
+        """Round 3, finding 4: 60 matching mails inside two days. The
+        date-granular cursor re-served the same 50 forever (all deduped,
+        zero new, cursor unmoved). With the epoch watermark, scan 2's
+        window excludes the processed batch and reaches the 10 older
+        messages; scan 3 completes."""
+        now = utc_now()
+        msgs = [
+            self._msg(f"m-{i:02d}", now - timedelta(days=3) + timedelta(hours=i))
+            for i in range(60)
+        ]  # m-00 oldest … m-59 newest, all in the past
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=30, status="sent")
+
+        def _serve(uid, a, terms):
+            if isinstance(a, dict):
+                in_win = [
+                    m for m in msgs
+                    if a["after"] < _r3_epoch(m["received_at"]) < a["before"]
+                ]
+            else:  # legacy date-style call (current code)
+                in_win = [
+                    m for m in msgs
+                    if a is None or m["received_at"].date() > a
+                ]
+
+            def _mk(m):
+                async def _f():
+                    return m
+                return _f()
+
+            newest_first = sorted(in_win, key=lambda m: m["received_at"], reverse=True)
+            batch = newest_first[:50]
+            truncated = len(in_win) > 50
+            # adapter contract: batch oldest→newest + truncated flag
+            payload = {
+                "messages": sorted(batch, key=lambda m: m["received_at"]),
+                "truncated": truncated,
+            }
+
+            async def fetch_inner():
+                return payload
+            return fetch_inner()
+
+        first = asyncio.run(scan_replies(db, user.id, lambda u, a, t: _serve(u, a, t)))
+        state = db.query(GmailScanState).one()
+        assert first["proposed"] == 50
+        assert state.scan_cursor.startswith("b:")
+
+        second = asyncio.run(scan_replies(db, user.id, lambda u, a, t: _serve(u, a, t)))
+        db.refresh(state)
+        # THE stall: scan 2 must reach the 10 OLDER messages, not re-serve
+        # the same newest 50 (all deduped → 0 new under the broken cursor)
+        assert second["proposed"] == 10, f"scan 2 proposed {second['proposed']} (stalled?)"
+        assert state.scan_cursor.startswith("e:")
+
+        third = asyncio.run(scan_replies(db, user.id, lambda u, a, t: _serve(u, a, t)))
+        assert third["proposed"] == 0  # steady state — everything deduped
+        assert db.query(OutcomeProposal).count() == 60
+
+    def test_incremental_window_reincludes_boundary_second(self, db):
+        """Gmail's epoch after:/before: inclusivity is undocumented — the
+        incremental window must re-include the claimed boundary second
+        (a one-second gap there would strand a message forever; dedupe
+        makes the overlap free)."""
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=30, status="sent")
+        bound = _r3_epoch(utc_now()) - 3600
+        db.add(GmailScanState(user_id=user.id, scan_cursor=f"e:{bound}"))
+        db.commit()
+        seen = []
+
+        async def fetch(uid, w, terms):
+            seen.append(w)
+            return {"messages": [], "truncated": False}
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        assert seen[0]["after"] == bound - 1
+
+    def test_legacy_date_cursor_still_parses(self, db):
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=30, status="sent")
+        db.add(GmailScanState(user_id=user.id, scan_cursor="2026-09-01"))
+        db.commit()
+        seen = []
+
+        async def fetch(uid, a, terms):
+            seen.append(a)
+            return {"messages": [], "truncated": False}
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        # legacy ISO date → incremental window (epoch), never a crash
+        assert isinstance(seen[0], dict) and "after" in seen[0] and "before" in seen[0]
+
+
+class TestFinalGuardUsesOutcomeEvidenceTime:
+    """Round 3, finding 3: the stale-proposal guard compared evidence
+    against resolved_at — but the round-1 min rule pins resolved_at to
+    the FIRST employer response. interview(d4) → rejected(d35) leaves
+    resolved_at=d4, so a day-20 second-round invite scanned late passed
+    the guard and reopened the rejection. The guard must compare against
+    the CURRENT outcome's own evidence time (outcome_evidence_at)."""
+
+    def test_midlife_invite_does_not_reopen_rejected(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=40, status="sent")
+        day4 = utc_now() - timedelta(days=36)    # first response
+        day35 = utc_now() - timedelta(days=5)    # the rejection
+        day20 = utc_now() - timedelta(days=20)   # mid-life invite
+        set_outcome(db, app, "interview", "reply_detection", resolved_at=day4)
+        set_outcome(db, app, "rejected", "reply_detection", resolved_at=day35)
+        db.refresh(app)
+        assert app.resolved_at == day4  # min rule holds
+        db.add(OutcomeProposal(
+            user_id=user.id, application_id=app.id, proposed_status="interview",
+            source="reply_detection", evidence_message_id="m-mid",
+            evidence_received_at=day20,
+        ))
+        db.commit()
+        approve_all_pending(db, user_id=user.id)
+        db.refresh(app)
+        assert app.outcome_status == "rejected"  # the rejection stands
+        p = db.query(OutcomeProposal).one()
+        assert "superseded" in (p.reason or "")
+
+    def test_newer_offer_still_progresses_after_rejection(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=40, status="sent")
+        set_outcome(db, app, "rejected", "reply_detection",
+                    resolved_at=utc_now() - timedelta(days=35))
+        db.add(OutcomeProposal(
+            user_id=user.id, application_id=app.id, proposed_status="offer",
+            source="reply_detection", evidence_message_id="m-new",
+            evidence_received_at=utc_now() - timedelta(days=1),
+        ))
+        db.commit()
+        approve_all_pending(db, user_id=user.id)
+        db.refresh(app)
+        assert app.outcome_status == "offer"
+
+
+class TestSignalBeatsApprovedSweep:
+    """Round 3, finding 4 (guard half): approving a sweep stamped
+    resolved_at with the APPROVAL date. A real employer reply that
+    arrived EARLIER but was scanned later (e.g. beyond the truncation
+    boundary) then failed the evidence-age guard — silence beat
+    signal, the exact inversion of the round-1 rule. A real signal
+    must always beat an approved no_response, and resolved_at becomes
+    the reply's arrival (the first REAL response)."""
+
+    def test_late_scanned_reply_overrides_approved_no_response(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=65, status="sent")
+        arrival = utc_now() - timedelta(days=15)  # day 50: before the sweep ran
+        # the sweep raced the scan: 60 quiet days elapsed before the
+        # truncated scan ever reached this rejection
+        db.add(OutcomeProposal(
+            user_id=user.id, application_id=app.id, proposed_status="no_response",
+            source="sweep", reason="no employer reply recorded 60+ days after send",
+        ))
+        db.commit()
+        approve_all_pending(db, user_id=user.id)
+        db.refresh(app)
+        assert app.outcome_status == "no_response"
+
+        db.add(OutcomeProposal(
+            user_id=user.id, application_id=app.id, proposed_status="rejected",
+            source="reply_detection", evidence_message_id="m-real",
+            evidence_from="hr@acme.example", evidence_subject="Your application",
+            evidence_received_at=arrival,
+        ))
+        db.commit()
+        approve_all_pending(db, user_id=user.id)
+        db.refresh(app)
+        assert app.outcome_status == "rejected"  # the real reply wins
+        assert app.resolved_at == arrival        # first REAL response, not the sweep stamp
+        s = outcome_stats(db, user_id=user.id)
+        assert s["no_response_total"] == 0
+        assert s["responded_total"] == 1
+
+
+class TestFreeMailDomainNotSpecific:
+    """Round 3, finding 5: an employer contact on a free-mail provider
+    (jobs.acme@gmail.com) made EVERY sender on that provider a
+    'specific' match — a friend's gmail mentioning a phone screen
+    attached and classify as an interview. Domain-level matching must
+    exclude free-mail providers; the exact address stays specific."""
+
+    def test_same_free_mail_domain_is_not_specific(self):
+        from app.services.outcome_service import sender_match_is_specific
+
+        class _A:
+            target_email = "jobs.acme@gmail.com"
+            apply_url = None
+        assert not sender_match_is_specific("friend@gmail.com", _A(), None)
+
+    def test_exact_free_mail_address_still_specific(self):
+        from app.services.outcome_service import sender_match_is_specific
+
+        class _A:
+            target_email = "jobs.acme@gmail.com"
+            apply_url = None
+        assert sender_match_is_specific("jobs.acme@gmail.com", _A(), None)
+
+    def test_scan_does_not_attach_stranger_on_free_mail_domain(self, db):
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=3, status="sent",
+                     target_email="jobs.acme@gmail.com")
+
+        async def fetch(uid, a, terms):
+            return {
+                "messages": [{
+                    "id": "m-1", "from": "Old Friend <friend@gmail.com>",
+                    "subject": "Long time",
+                    "body": "Congrats on the search — heard you got a phone screen next week!",
+                    "received_at": utc_now() - timedelta(days=1),
+                }],
+                "truncated": False,
+            }
+
+        summary = asyncio.run(scan_replies(db, user.id, fetch))
+        assert summary["proposed"] == 0
+        assert db.query(OutcomeProposal).count() == 0
+
+
+class TestPredicateDriftJoblessApplication:
+    """Round 3, finding 6: sender_matches_application re-implemented
+    sender_match_is_specific and the copies drifted — the plausible
+    path skipped apply_url when the JobPosting row was missing and
+    never excluded ATS-hosted posting URLs. An application whose job
+    row is gone must still match its employer host (the rules live
+    once: plausible = specific OR ATS)."""
+
+    def test_jobless_application_matches_employer_host(self):
+        from app.services.outcome_service import sender_matches_application
+
+        class _A:
+            target_email = None
+            apply_url = "https://careers.acme.example/apply/123"
+        assert sender_matches_application("hr@acme.example", _A(), None)
+
+    def test_jobless_application_rejects_unrelated_sender(self):
+        from app.services.outcome_service import sender_matches_application
+
+        class _A:
+            target_email = None
+            apply_url = "https://careers.acme.example/apply/123"
+        assert not sender_matches_application("news@newsletter.io", _A(), None)

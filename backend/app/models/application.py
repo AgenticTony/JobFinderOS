@@ -66,6 +66,13 @@ class Application(Base):
     outcome_note = Column(Text, nullable=True)
     # Evidence POINTER (message id / citation) — never a message body
     outcome_evidence = Column(String(500), nullable=True)
+    # WHEN the CURRENT outcome's own evidence arrived (reply proposals)
+    # or was recorded (manual markers, sweeps). The final-regression
+    # guard compares new proposal evidence against THIS — never
+    # resolved_at, which the first-response min rule pins to the FIRST
+    # reply and which therefore cannot order outcomes (review round 3,
+    # finding 3).
+    outcome_evidence_at = Column(DateTime, nullable=True)
     # WHEN this outcome became established: the reply's arrival time when
     # evidence provides one (approved proposals), the recording time for
     # manual markers. Set on every outcome write — an open `interview`

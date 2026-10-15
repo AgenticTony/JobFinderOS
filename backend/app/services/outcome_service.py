@@ -109,6 +109,23 @@ AGGREGATOR_HOSTS = {
     "jobtech.dev",
 }
 
+# Free-mail providers: an employer contact on one of these domains says
+# NOTHING about the employer — every sender on the provider would
+# domain-match (review round 3, finding 5: a friend's gmail classified
+# as an interview for the application). Domain-level matching skips
+# these providers; the exact contact address still matches specifically.
+FREE_MAIL_DOMAINS = {
+    "gmail.com", "googlemail.com", "outlook.com", "hotmail.com",
+    "live.com", "msn.com", "yahoo.com", "ymail.com", "icloud.com",
+    "me.com", "aol.com", "proton.me", "protonmail.com",
+    "gmx.com", "gmx.net", "web.de", "mail.com",
+}
+
+# Default lookback for a user's FIRST scan — bounded, not "all mail".
+# Lives here (not in the adapter) because the scan owns the watermark
+# policy; gmail_scan only translates a window into a Gmail query.
+DEFAULT_LOOKBACK_DAYS = 90
+
 # Nudge thresholds (WO-20 §3; tests assert these exact numbers)
 DEADLINE_URGENT_DAYS = 7        # 🔥 deadline within 7 days
 FOLLOW_UP_QUIET_DAYS = 10       # sent 10+ days quiet …
@@ -132,6 +149,7 @@ def set_outcome(
     note: Optional[str] = None,
     evidence: Optional[str] = None,
     resolved_at: Optional[datetime] = None,
+    evidence_at: Optional[datetime] = None,
 ) -> Application:
     """The ONLY writer of outcome columns. Send-side `status` is never
     touched here — two lifecycles, two columns, tested separately."""
@@ -141,10 +159,22 @@ def set_outcome(
         )
     if source not in OUTCOME_SOURCES:
         raise OutcomeError(f"unknown outcome source '{source}'")
+    # BEFORE the write — the round-3 fix: the old code read
+    # outcome_status AFTER assigning it, so the first-response rule
+    # below tested the NEW status, not the previous one.
+    prev_status = application.outcome_status
     application.outcome_status = status
     application.outcome_source = source
     application.outcome_note = note
     application.outcome_evidence = evidence
+    new_time = resolved_at or utc_now()
+    # WHEN the CURRENT outcome's own evidence arrived (reply proposals)
+    # or was recorded (manual markers, sweeps). The final-regression
+    # guard in decide_proposal compares new proposals against THIS —
+    # never resolved_at, which the min rule below pins to the FIRST
+    # response and which therefore cannot order outcomes (review round
+    # 3, finding 3: a mid-life invite reopened a later rejection).
+    application.outcome_evidence_at = evidence_at or new_time
     # Event-time semantics: WHEN this outcome became established — the
     # reply's arrival time when evidence provides one (approved
     # proposals), the recording time otherwise. FIRST-RESPONSE RULE
@@ -152,14 +182,16 @@ def set_outcome(
     # a time, a later employer signal (interview → rejected) does not
     # move it — the stat measures the first reply, and a late-arriving
     # proposal for an EARLIER reply moves it back (min), never forward.
-    new_time = resolved_at or utc_now()
     prev_was_signal = (
-        application.outcome_status in EMPLOYER_SIGNAL_OUTCOMES
+        prev_status in EMPLOYER_SIGNAL_OUTCOMES
         and application.resolved_at is not None
     )
     if status in EMPLOYER_SIGNAL_OUTCOMES and prev_was_signal:
         application.resolved_at = min(application.resolved_at, new_time)
     else:
+        # Includes no_response → signal: the reply IS the first real
+        # response — an approved sweep's stamp must not survive it
+        # (review round 3, finding 4).
         application.resolved_at = new_time
     db.add(application)
     db.commit()
@@ -305,6 +337,17 @@ def _is_aggregator_host(host: Optional[str]) -> bool:
     )
 
 
+def _sender_is_ats(from_email: Optional[str]) -> bool:
+    """The sender is a generic ATS/notification domain — the same
+    domain serves every employer on that ATS, so it can never identify
+    WHICH application a reply concerns (only the subject can)."""
+    sender_domain = _domain(from_email)
+    return bool(sender_domain) and any(
+        sender_domain == d or sender_domain.endswith("." + d)
+        for d in ATS_SENDER_DOMAINS
+    )
+
+
 def sender_match_is_specific(
     from_email: Optional[str], application: Application, job: Optional[JobPosting]
 ) -> bool:
@@ -320,7 +363,16 @@ def sender_match_is_specific(
     if application.target_email and from_email == application.target_email.lower():
         return True
     target_domain = _domain(application.target_email)
-    if sender_domain and target_domain and _domains_match(sender_domain, target_domain):
+    if (
+        sender_domain
+        and target_domain
+        # A free-mail contact domain (gmail.com, outlook.com, …) is the
+        # PROVIDER's, not the employer's — every sender on it would
+        # match. Only the exact-address match above applies (review
+        # round 3, finding 5).
+        and target_domain not in FREE_MAIL_DOMAINS
+        and _domains_match(sender_domain, target_domain)
+    ):
         return True
     if sender_domain:
         for host_source in (job.url if job else None, application.apply_url):
@@ -345,41 +397,21 @@ def sender_match_is_specific(
 def sender_matches_application(
     from_email: Optional[str], application: Application, job: Optional[JobPosting]
 ) -> bool:
-    """Does this sender plausibly relate to this application? Matches:
-    the application's own target email, its domain, the posting URL's
-    host (parent-aware, but NEVER a board/aggregator host), and the
-    common ATS notification domains. A shared ATS domain matching
-    several applications is resolved by the scan's ambiguity logic —
-    this predicate is only 'plausibly related', never 'certainly this
-    one'."""
-    if not from_email:
-        return False
-    sender_domain = _domain(from_email)
-    if application.target_email and from_email == application.target_email.lower():
+    """Does this sender plausibly relate to this application?
+
+    The SPECIFIC rules live ONCE, in sender_match_is_specific (review
+    round 3, finding 6: this re-implementation had drifted from it — it
+    skipped apply_url when the JobPosting row was missing and never
+    excluded ATS-hosted posting URLs, so an employer's reply to a
+    jobless application matched 'specific' but not 'plausible' and was
+    silently ignored). Plausible = specific, or a shared ATS
+    notification domain. A shared ATS domain matching several
+    applications is resolved by the scan's ambiguity logic — this
+    predicate is only 'plausibly related', never 'certainly this one'.
+    """
+    if sender_match_is_specific(from_email, application, job):
         return True
-    target_domain = _domain(application.target_email)
-    if sender_domain and target_domain and _domains_match(sender_domain, target_domain):
-        return True
-    if sender_domain and any(
-        sender_domain == d or sender_domain.endswith("." + d) for d in ATS_SENDER_DOMAINS
-    ):
-        return True
-    if job is not None and sender_domain:
-        job_host = _domain(job.url, is_url=True)
-        if (
-            job_host
-            and not _is_aggregator_host(job_host)
-            and _domains_match(sender_domain, job_host)
-        ):
-            return True
-        app_url_host = _domain(application.apply_url, is_url=True)
-        if (
-            app_url_host
-            and not _is_aggregator_host(app_url_host)
-            and _domains_match(sender_domain, app_url_host)
-        ):
-            return True
-    return False
+    return _sender_is_ats(from_email)
 
 
 # ---------------------------------------------------------------------------
@@ -506,32 +538,38 @@ def decide_proposal(
             db.add(proposal)
             db.commit()
             return application
-        if (
-            application.outcome_status in FINAL_OUTCOMES
-            and not (
-                proposal.evidence_received_at is not None
-                and application.resolved_at is not None
-                and proposal.evidence_received_at > application.resolved_at
+        if application.outcome_status in FINAL_OUTCOMES:
+            # A closed application moves only for BETTER evidence:
+            # - a real employer signal ALWAYS beats an approved silence
+            #   (round 3, finding 4): the sweep raced a truncated scan,
+            #   so the reply can have arrived earlier yet been scanned
+            #   later — comparing clocks would let silence win, the
+            #   exact inversion of the round-1 rule
+            # - otherwise the proposal's evidence must be NEWER than the
+            #   evidence behind the CURRENT outcome (round 3, finding 3):
+            #   resolved_at is pinned to the FIRST response by the min
+            #   rule and cannot order outcomes — a mid-life invite must
+            #   not reopen a later rejection, while a later offer still
+            #   rescues it. The age test uses evidence times, NOT the
+            #   open/final partition — 'offer' is an open status.
+            beats_silence = (
+                application.outcome_status == "no_response"
+                and proposal.proposed_status in EMPLOYER_SIGNAL_OUTCOMES
             )
-        ):
-            # A stale or untimestamped proposal cannot regress a CLOSED
-            # application (review round 2, finding 3): newest-first
-            # scanning proposes the newer rejection before the older
-            # interview invite, and approve-all in created_at order
-            # would otherwise land the application back at 'interview' —
-            # re-entering nudges and the sweep pool with the real
-            # rejection lost. A proposal with NEWER evidence than the
-            # recorded outcome is a genuine progression (a later offer
-            # rescuing a rejection) and stays allowed. The age test uses
-            # evidence_received_at, NOT the open/final partition —
-            # 'offer' is an open status, and blocking on the partition
-            # would reject exactly that rescue.
-            proposal.decision = "approved"
-            proposal.decided_at = utc_now()
-            proposal.reason = (proposal.reason or "") + " [superseded: final outcome on record]"
-            db.add(proposal)
-            db.commit()
-            return application
+            newer_evidence = (
+                proposal.evidence_received_at is not None
+                and (
+                    application.outcome_evidence_at is None
+                    or proposal.evidence_received_at > application.outcome_evidence_at
+                )
+            )
+            if not (beats_silence or newer_evidence):
+                proposal.decision = "approved"
+                proposal.decided_at = utc_now()
+                proposal.reason = (proposal.reason or "") + " [superseded: final outcome on record]"
+                db.add(proposal)
+                db.commit()
+                return application
         evidence = (
             f"msg:{proposal.evidence_message_id}"
             if proposal.evidence_message_id
@@ -547,6 +585,7 @@ def decide_proposal(
             # Honest resolution time: when the reply ARRIVED, not when we
             # scanned or approved it (stats measure the employer, not us).
             resolved_at=proposal.evidence_received_at,
+            evidence_at=proposal.evidence_received_at,
         )
 
     proposal.decision = decision
@@ -571,19 +610,64 @@ def approve_all_pending(db: Session, *, user_id) -> int:
 # Scan orchestration — fetcher injected, watermark per user
 # ---------------------------------------------------------------------------
 
-# fetch_messages(user_id, after_date, sender_terms) -> {"messages":
+# fetch_messages(user_id, window, sender_terms) -> {"messages":
 # [...], "truncated": bool} — messages ordered oldest→newest, each
-# {id, from, subject, body, received_at}. truncated=True means the
-# remote query returned MORE than the adapter's page cap: the scan must
-# NOT advance its cursor past what it processed, or everything beyond
-# the cap is never scanned again (review round 1, finding 8). The
+# {id, from, subject, body, received_at}. window = {"after": int,
+# "before": int} epoch seconds (half-open): the exact Gmail
+# after:/before: bounds of this scan. Bounded on BOTH ends (round 3):
+# a completed scan claims precisely window.before — never a fresh
+# wall-clock 'now' — so mail arriving mid-scan stays unclaimed.
+# truncated=True means the window overflowed the adapter's cap: the
+# returned batch is the NEWEST messages of the window and the scan
+# re-anchors its watermark at the oldest PROCESSED arrival, so the
+# next window resumes BELOW the batch (review rounds 1-3). The
 # Composio/Gmail adapter in gmail_scan.py satisfies it; tests inject
 # fakes. sender_terms ("a@b.com" / "@b.com") constrain the remote
 # query; the service still re-verifies every sender itself (adapter
 # results are hints, sender_matches_application is the authority).
-# after_date lets the adapter widen the Gmail `after:` window; the
-# dedupe backstop is the unique proposal index, so overlap is safe.
-FetchMessages = Callable[[str, Optional[date], List[str]], Awaitable[dict]]
+FetchMessages = Callable[[str, dict, List[str]], Awaitable[dict]]
+
+
+def _epoch(dt: datetime) -> int:
+    """naive-UTC datetime → epoch seconds (the cursor's unit)."""
+    return int(dt.replace(tzinfo=timezone.utc).timestamp())
+
+
+def _window_from_cursor(cursor: Optional[str]) -> dict:
+    """This scan's epoch window {after, before} (half-open), from the
+    watermark. Cursor formats (round 3 replaced the ISO-date cursor —
+    date granularity stalled on any window with ≥cap matches inside
+    its one-day overlap):
+
+    - "e:{epoch}"  incremental: mail ≤ epoch is fully covered; the
+      window is (epoch, now]
+    - "b:{lo}:{hi}" backfill: (lo, hi) still overflowed the cap; the
+      next window is exactly (lo, hi) — hi sat at the oldest processed
+      arrival + 1s, so nothing older is ever skipped and the processed
+      batch (the window's newest) needs no re-reading beyond dedupe
+    - "YYYY-MM-DD"  legacy cursor → incremental window keeping the old
+      one-day overlap
+    - None          first scan: bounded lookback, upper bound = now
+    """
+    now_e = _epoch(utc_now())
+    if not cursor:
+        return {
+            "after": now_e - DEFAULT_LOOKBACK_DAYS * 86400,
+            "before": now_e,
+        }
+    if cursor.startswith("b:"):
+        _, lo, hi = cursor.split(":")
+        return {"after": int(lo), "before": int(hi)}
+    if cursor.startswith("e:"):
+        # −1s: Gmail's epoch after:/before: inclusivity is undocumented;
+        # re-include the boundary second rather than risk a one-second
+        # gap (dedupe makes the overlap free).
+        return {"after": int(cursor[2:]) - 1, "before": now_e}
+    legacy = date.fromisoformat(cursor)
+    return {
+        "after": _epoch(datetime(legacy.year, legacy.month, legacy.day)) - 86400,
+        "before": now_e,
+    }
 
 
 def _naive_utc(value):
@@ -656,11 +740,7 @@ async def scan_replies(
         ).all()
     } if open_candidates else {}
 
-    after_date = (
-        date.fromisoformat(state.scan_cursor) - timedelta(days=1)
-        if state.scan_cursor
-        else None  # adapter default: a bounded recent window
-    )
+    window = _window_from_cursor(state.scan_cursor)
     # Sender terms for the remote query: target emails, their domains,
     # non-aggregator posting-URL hosts, and the ATS notification domains.
     sender_terms: List[str] = []
@@ -668,7 +748,9 @@ async def scan_replies(
         if app.target_email:
             sender_terms.append(app.target_email.lower())
             d = _domain(app.target_email)
-            if d:
+            # free-mail domains are the provider's, not the employer's —
+            # a from:@gmail.com term matches the whole internet
+            if d and d not in FREE_MAIL_DOMAINS:
                 sender_terms.append("@" + d)
         job = jobs.get(app.job_id)
         if job is not None:
@@ -687,7 +769,7 @@ async def scan_replies(
     summary = {"scanned": 0, "matched": 0, "proposed": 0, "uncertain": 0,
                "truncated": False}
     try:
-        result = await fetch_messages(user_id, after_date, sender_terms)
+        result = await fetch_messages(user_id, window, sender_terms)
         # Tolerate a bare list from older fakes — the contract is the dict
         if isinstance(result, dict):
             messages = result.get("messages") or []
@@ -695,44 +777,37 @@ async def scan_replies(
         else:
             messages = result or []
             truncated = False
-        last_received = None
+        received_times: List[datetime] = []
         for msg in messages:
             summary["scanned"] += 1
             received = _naive_utc(msg.get("received_at"))
-            if received is not None and (last_received is None or received > last_received):
-                last_received = received
+            received_times.append(received)
             from_email = extract_email(msg.get("from"))
             body = msg.get("body")
 
-            # Matching (review rounds 1-2): SPECIFIC matches (this
+            # Matching (review rounds 1-3): SPECIFIC matches (this
             # application's own email/domain/employer host) attach alone
             # when unique, discriminate by company/title when several.
             # ATS-domain senders are never specific — the same
             # notification domain serves every employer on that ATS, so
             # an ATS match ALWAYS requires the subject discriminator,
             # even when only one application matches (round 2, finding 2).
-            direct = [
+            # The specific predicate runs ONCE per candidate (round 3,
+            # finding 8 — it ran twice, re-parsing URLs each time).
+            specifics = [
                 app for app in open_candidates
-                if sender_matches_application(from_email, app, jobs.get(app.job_id))
+                if sender_match_is_specific(from_email, app, jobs.get(app.job_id))
             ]
-            if not direct:
-                continue
-            target = None
-            if any(
-                sender_match_is_specific(from_email, app, jobs.get(app.job_id))
-                for app in direct
-            ):
-                specifics = [
-                    app for app in direct
-                    if sender_match_is_specific(from_email, app, jobs.get(app.job_id))
-                ]
+            if specifics:
                 if len(specifics) == 1:
                     target = specifics[0]
-                elif len(specifics) > 1:
+                else:
                     target = _discriminate_by_subject(msg.get("subject"), specifics, jobs)
-            else:
+            elif _sender_is_ats(from_email):
                 # ATS-only senders: subject must name exactly one candidate
-                target = _discriminate_by_subject(msg.get("subject"), direct, jobs)
+                target = _discriminate_by_subject(msg.get("subject"), open_candidates, jobs)
+            else:
+                continue
             if target is None:
                 summary["uncertain"] += 1
                 continue
@@ -761,17 +836,24 @@ async def scan_replies(
             )
             if proposal is not None:
                 summary["proposed"] += 1
-        # Cursor safety (review round 1, finding 8): advance only over
-        # covered ground. Truncated → the day of the last message we
-        # actually saw (the one-day overlap + unique index handle the
-        # seam); complete → today.
+        # Cursor safety (review rounds 1-3): the watermark only claims
+        # covered ground. Truncated → backfill mode anchored at the
+        # OLDEST processed arrival +1s (everything older stays inside
+        # the next window; the batch was the window's newest, so the
+        # window above it is already claimed). Complete → incremental
+        # mode bounded by THIS window's before, never a fresh wall
+        # clock — mail arriving mid-scan stays unclaimed for the next
+        # pass.
         summary["truncated"] = truncated
         if truncated:
-            if last_received is not None:
-                state.scan_cursor = last_received.date().isoformat()
-            # no messages + truncated → window unknown; keep the old cursor
+            dated = [r for r in received_times if r is not None]
+            if dated:
+                state.scan_cursor = (
+                    f"b:{window['after']}:{_epoch(min(dated)) + 1}"
+                )
+            # no dated arrival → cannot anchor safely; keep the old cursor
         else:
-            state.scan_cursor = date.today().isoformat()
+            state.scan_cursor = f"e:{window['before']}"
         state.last_scan_at = utc_now()
         state.last_error = None
         db.add(state)

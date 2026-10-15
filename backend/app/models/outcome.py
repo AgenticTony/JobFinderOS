@@ -83,8 +83,12 @@ class GmailScanState(Base):
     __tablename__ = "gmail_scan_state"
 
     user_id = Column(Uuid, ForeignKey("users.id"), primary_key=True)
-    # Gmail `after:` query cursor (yyyy-mm-dd). Overlapped one day per
-    # scan for safety; the unique proposal index is the dedupe backstop.
+    # Scan watermark (review round 3): "e:{epoch}" = incremental —
+    # mail at or before the epoch is fully scanned; "b:{lo}:{hi}" =
+    # backfill — (lo, hi) still overflowed the per-scan cap, hi sits at
+    # the oldest processed arrival +1s, and the next scan works the
+    # remainder top-down. Legacy "YYYY-MM-DD" cursors parse as
+    # incremental windows with the old one-day overlap.
     scan_cursor = Column(String(64), nullable=True)
     last_scan_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
