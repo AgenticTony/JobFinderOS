@@ -161,7 +161,8 @@ class TestVocabulary:
         """Event-time semantics: every outcome write stamps WHEN the
         outcome became established. An explicit evidence time (an
         approved proposal's reply arrival) overrides the recording time —
-        that's what makes time-to-first-response honest."""
+        that's what makes time-to-first-response honest. A later
+        employer signal KEEPS the first response time (review round 1)."""
         user = _user(db)
         job = _job(db)
         app = _application(db, user, job)
@@ -171,7 +172,9 @@ class TestVocabulary:
         assert app.resolved_at == explicit  # evidence time, not "now"
         set_outcome(db, app, "rejected", "manual")
         db.refresh(app)
-        assert app.resolved_at is not None and app.resolved_at != explicit
+        # rejected is an employer signal AFTER interview: the FIRST
+        # response time survives the progression
+        assert app.resolved_at == explicit
 
     def test_migration_round_trip_columns_persist(self, db):
         """create_all (== migration head shape) round-trips every new
@@ -646,3 +649,394 @@ class TestStats:
         s = outcome_stats(db, user_id=user.id)
         assert s["sent_total"] == 0
         assert s["response_rate"] is None  # 0/0 is not 0.0 — it's unknown
+
+
+# =====================================================================
+# Review round 1 (PR #124) — false-outcome and lost-reply guards
+# ======================================================================
+
+class TestSweepNeverClobbersSignals:
+    """Review finding 1: the quiet sweep proposed no_response over
+    interview/offer (employer DID reply), and a dismissed sweep
+    proposal was re-filed on every worker run."""
+
+    def test_sweep_skips_employer_signals(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=70, status="sent")
+        set_outcome(db, app, "interview", "reply_detection")
+        assert propose_no_response_sweep(db, user_id=user.id) == 0
+
+    def test_approving_sweep_never_overwrites_interview(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=70, status="sent")
+        set_outcome(db, app, "interview", "manual")
+        # a stale sweep proposal slips through (filed before the outcome)
+        p = OutcomeProposal(
+            user_id=user.id, application_id=app.id, proposed_status="no_response",
+            source="sweep", reason="no employer reply recorded 60+ days after send",
+        )
+        db.add(p)
+        db.commit()
+        approve_all_pending(db, user_id=user.id)
+        db.refresh(app)
+        assert app.outcome_status == "interview"  # silence never beats a signal
+
+    def test_dismissed_sweep_proposal_not_refiled(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=70, status="sent")
+        p = OutcomeProposal(
+            user_id=user.id, application_id=app.id, proposed_status="no_response",
+            source="sweep", reason="dismissed once by the user",
+        )
+        p.decision = "dismissed"
+        p.decided_at = utc_now()
+        db.add(p)
+        db.commit()
+        assert propose_no_response_sweep(db, user_id=user.id) == 0
+        assert db.query(OutcomeProposal).count() == 1  # not re-filed
+
+
+class TestSenderAmbiguity:
+    """Review finding 2: ATS/aggregator senders matched EVERY
+    application and the scan attached to the first match. An ambiguous
+    sender is not evidence for any specific application — surface it,
+    never guess; discriminate by company/title only when unique."""
+
+    def _ats_job(self, db, company, title):
+        return _job(
+            db, title=title, company=company,
+            url=f"https://boards.greenhouse.io/{company.lower()}/jobs/1",
+        )
+
+    def _message(self, subject, body=None):
+        return {
+            "id": "m-amb", "from": "Notifications <noreply@greenhouse.io>",
+            "subject": subject,
+            "body": body or "We'd like to schedule a call to discuss next steps.",
+            "received_at": utc_now() - timedelta(days=1),
+        }
+
+    def test_two_ats_applications_is_uncertain_not_first_match(self, db):
+        user = _user(db)
+        _application(db, user, self._ats_job(db, "Acme", "Developer"), sent_days_ago=3, status="sent", target_email=None)
+        _application(db, user, self._ats_job(db, "Beta", "Analyst"), sent_days_ago=2, status="sent", target_email=None)
+
+        async def fetch(uid, after, terms):
+            return {"messages": [self._message("Update on your application")], "truncated": False}
+
+        summary = asyncio.run(scan_replies(db, user.id, fetch))
+        assert summary["proposed"] == 0
+        assert summary["uncertain"] == 1
+        assert db.query(OutcomeProposal).count() == 0  # nothing attached to Acme by luck of order
+
+    def test_company_name_discriminates_ats_sender(self, db):
+        user = _user(db)
+        _application(db, user, self._ats_job(db, "Acme", "Developer"), sent_days_ago=3, status="sent", target_email=None)
+        _application(db, user, self._ats_job(db, "Beta", "Analyst"), sent_days_ago=2, status="sent", target_email=None)
+
+        async def fetch(uid, after, terms):
+            return {"messages": [self._message("Your Beta application — next steps")], "truncated": False}
+
+        summary = asyncio.run(scan_replies(db, user.id, fetch))
+        assert summary["proposed"] == 1
+        proposal = db.query(OutcomeProposal).one()
+        beta_job = db.query(JobPosting).filter(JobPosting.company == "Beta").one()
+        beta_app = db.query(Application).filter(Application.job_id == beta_job.id).one()
+        assert proposal.application_id == beta_app.id
+
+    def test_aggregator_job_url_host_does_not_match(self, db):
+        """A scraped posting's URL points at the BOARD (reed/platsbanken),
+        not the employer — mail from the board must not match every one of
+        that board's applications."""
+        from app.services.outcome_service import sender_matches_application
+
+        user = _user(db)
+        job = _job(db, url="https://www.reed.co.uk/jobs/developer/123")
+        app = _application(db, user, job, target_email=None)
+        assert not sender_matches_application("alerts@reed.co.uk", app, job)
+
+    def test_single_ats_application_still_matches(self, db):
+        from app.services.outcome_service import sender_matches_application
+
+        user = _user(db)
+        job = self._ats_job(db, "Acme", "Developer")
+        app = _application(db, user, job, target_email=None)
+        assert sender_matches_application("noreply@greenhouse.io", app, job)
+
+
+class TestSavepointKeepsEarlierProposals:
+    """Review finding 3: the IntegrityError rollback dropped every
+    flushed-but-uncommitted proposal from the same scan. The insert must
+    run under a SAVEPOINT so a collision rolls back only itself."""
+
+    def test_collision_does_not_lose_earlier_proposals(self, db, monkeypatch):
+        from app.services import outcome_service as svc
+
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=3, status="sent")
+
+        # Simulate the real race: a concurrent uncommitted insert is
+        # invisible to the pre-check (SELECT sees nothing), so the second
+        # scan's insert hits the unique index at flush.
+        async def fetch(uid, after, terms):
+            return {
+                "messages": [
+                    {"id": "m-1", "from": "hr@acme.example", "subject": "a",
+                     "body": "We'd like to schedule a call.", "received_at": utc_now()},
+                    {"id": "m-2", "from": "hr@acme.example", "subject": "b",
+                     "body": "We have decided to move forward with other candidates.",
+                     "received_at": utc_now()},
+                ],
+                "truncated": False,
+            }
+
+        original_query = svc._proposal_exists_for_message
+
+        def blind_lookup(db, application_id, message_id):
+            return None  # the concurrent row is uncommitted — invisible
+
+        monkeypatch.setattr(svc, "_proposal_exists_for_message", blind_lookup)
+
+        # First scan files m-1, then collides on... make BOTH scan calls
+        # race on the same messages by replaying the fetch twice blind:
+        asyncio.run(scan_replies(db, user.id, fetch))
+        # second scan, same messages, pre-check still blind (simulating
+        # overlap): every insert collides on the unique index at flush
+        asyncio.run(scan_replies(db, user.id, fetch))
+        monkeypatch.setattr(svc, "_proposal_exists_for_message", original_query)
+
+        db.expire_all()
+        # The first scan's proposals must have SURVIVED the second scan's
+        # collisions (with a session-wide rollback they are lost).
+        assert db.query(OutcomeProposal).count() == 2
+
+
+class TestFollowUpsExcluded:
+    """Review finding 4: follow-up sends are their own Application rows
+    with sent_at — inflating stats, getting swept, and earning their own
+    follow-up nudges. Every enumeration treats them as what they are:
+    pings of the parent, not applications."""
+
+    def _parent_with_two_follow_ups(self, db, *, parent_days_ago=5):
+        user = _user(db)
+        job = _job(db)
+        parent = _application(db, user, job, sent_days_ago=parent_days_ago, status="sent")
+        for _ in range(2):
+            db.add(Application(
+                user_id=user.id, job_id=job.id, method="manual", status="sent",
+                sent_at=utc_now() - timedelta(days=1), follow_up_of_id=parent.id,
+            ))
+        db.commit()
+        return user, job, parent
+
+    def test_stats_do_not_inflate(self, db):
+        user, job, parent = self._parent_with_two_follow_ups(db)
+        set_outcome(db, parent, "interview", "manual")
+        s = outcome_stats(db, user_id=user.id)
+        assert s["sent_total"] == 1  # one employer, one application
+        assert s["response_rate"] == 1.0
+
+    def test_sweep_ignores_follow_up_rows(self, db):
+        user, job, parent = self._parent_with_two_follow_ups(db, parent_days_ago=70)
+        # parent is 70d quiet; the follow-ups are fresh — neither may be swept
+        # in this fixture's fresh-follow-up shape. Make a follow-up old too:
+        old_fu = Application(
+            user_id=user.id, job_id=job.id, method="manual", status="sent",
+            sent_at=utc_now() - timedelta(days=70), follow_up_of_id=parent.id,
+        )
+        db.add(old_fu)
+        db.commit()
+        proposed = propose_no_response_sweep(db, user_id=user.id)
+        assert proposed == 1  # the PARENT only
+        apps_proposed = [p.application_id for p in db.query(OutcomeProposal).all()]
+        assert parent.id in apps_proposed
+        assert old_fu.id not in apps_proposed
+
+    def test_follow_up_row_never_offers_its_own_follow_up(self, db):
+        # ONE follow-up sent (count 1 < max 2): the parent earns the
+        # offer, the 20-days-quiet follow-up row itself never does
+        user, job, parent = self._parent_with_two_follow_ups(db, parent_days_ago=30)
+        # drop one follow-up so the parent is below the cap
+        fu = (
+            db.query(Application)
+            .filter(Application.follow_up_of_id == parent.id)
+            .first()
+        )
+        db.delete(fu)
+        db.commit()
+        n = compute_nudges(db, user_id=user.id)
+        assert len(n["follow_ups"]) == 1
+        assert n["follow_ups"][0]["application_id"] == parent.id
+
+    def test_scan_candidates_exclude_follow_ups(self, db):
+        """A reply to the thread answers the PARENT application — the
+        follow-up row must never compete as a match candidate."""
+        user, job, parent = self._parent_with_two_follow_ups(db, parent_days_ago=12)
+
+        async def fetch(uid, after, terms):
+            return {
+                "messages": [{
+                    "id": "m-1", "from": "hr@acme.example",
+                    "subject": "Your application",
+                    "body": "We'd like to schedule a call.",
+                    "received_at": utc_now() - timedelta(days=1),
+                }],
+                "truncated": False,
+            }
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        proposal = db.query(OutcomeProposal).one()
+        assert proposal.application_id == parent.id
+
+
+class TestFirstResponseTime:
+    """Review finding 5: resolved_at was overwritten on every outcome
+    write, so the stat measured time to the LATEST outcome. The FIRST
+    employer response is the stat; progressions must not move it."""
+
+    def test_progression_keeps_first_response_time(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=40, status="sent")
+        first_reply = app.sent_at + timedelta(days=4)
+        set_outcome(db, app, "interview", "reply_detection", resolved_at=first_reply)
+        later_reply = app.sent_at + timedelta(days=35)
+        set_outcome(db, app, "rejected", "reply_detection", resolved_at=later_reply)
+        db.refresh(app)
+        assert app.resolved_at == first_reply  # the FIRST response
+        s = outcome_stats(db, user_id=user.id)
+        assert s["avg_days_to_first_response"] == 4.0
+
+    def test_late_arriving_earlier_evidence_moves_it_back(self, db):
+        user = _user(db)
+        job = _job(db)
+        app = _application(db, user, job, sent_days_ago=40, status="sent")
+        set_outcome(db, app, "rejected", "reply_detection",
+                    resolved_at=app.sent_at + timedelta(days=35))
+        set_outcome(db, app, "interview", "reply_detection",
+                    resolved_at=app.sent_at + timedelta(days=3))
+        db.refresh(app)
+        assert app.resolved_at == app.sent_at + timedelta(days=3)
+
+
+class TestSwedishFollowUpTemplate:
+    """Review finding 6: the code read profile.country_code, but the
+    column is country — every Swedish user got the English template."""
+
+    def test_swedish_profile_gets_swedish_template(self, db):
+        user = _user(db)
+        profile = _profile(db, user, country="SE")
+        job = _job(db, title="Utvecklare", company="Acme")
+        draft = ApplicationDraft(
+            user_id=user.id, job_id=job.id, status="submitted",
+            cover_letter="Original", tailored_cv="CV",
+        )
+        db.add(draft)
+        db.flush()
+        app = Application(
+            user_id=user.id, job_id=job.id, draft_id=draft.id,
+            method="manual", status="manual_pending",
+            target_email="jobs@acme.example", sent_at=utc_now() - timedelta(days=12),
+        )
+        db.add(app)
+        db.commit()
+        fu = create_follow_up_draft(db, app, profile)
+        assert fu.cover_letter.startswith("Hej")
+        assert "uppföljning" in fu.cover_letter.lower() or "hör av mig" in fu.cover_letter
+
+
+class TestScanCursorSafety:
+    """Review finding 8: the adapter capped at 50 messages but the scan
+    advanced the cursor to today — everything past the cap was never
+    scanned again. A truncated scan advances only to the last message it
+    actually processed."""
+
+    def test_truncated_scan_advances_to_last_processed_not_today(self, db):
+        from datetime import date as date_cls
+
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=30, status="sent")
+        last_received = (utc_now() - timedelta(days=20)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+
+        async def fetch(uid, after, terms):
+            return {
+                "messages": [{
+                    "id": "m-1", "from": "hr@acme.example",
+                    "subject": "Your application",
+                    "body": "We'd like to schedule a call.",
+                    "received_at": last_received,
+                }],
+                "truncated": True,  # Gmail returned more than the cap
+            }
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        state = db.query(GmailScanState).one()
+        assert state.scan_cursor == last_received.date().isoformat()
+        assert state.scan_cursor != date_cls.today().isoformat()
+
+    def test_untruncated_scan_advances_to_today(self, db):
+        from datetime import date as date_cls
+
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=30, status="sent")
+
+        async def fetch(uid, after, terms):
+            return {"messages": [], "truncated": False}
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        state = db.query(GmailScanState).one()
+        assert state.scan_cursor == date_cls.today().isoformat()
+
+    def test_truncation_flag_recorded(self, db):
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=30, status="sent")
+
+        async def fetch(uid, after, terms):
+            return {"messages": [], "truncated": True}
+
+        summary = asyncio.run(scan_replies(db, user.id, fetch))
+        assert summary.get("truncated") is True
+
+
+class TestTimestampNormalization:
+    """Review finding 9: the adapter produced tz-AWARE received_at
+    datetimes while every other timestamp in the app is naive UTC —
+    mixing them raises TypeError in the stats subtraction."""
+
+    def test_aware_received_at_normalized_to_naive_utc(self, db):
+        from datetime import timezone as tz_mod
+
+        user = _user(db)
+        job = _job(db)
+        _application(db, user, job, sent_days_ago=10, status="sent")
+
+        aware = (utc_now() - timedelta(days=2)).replace(tzinfo=tz_mod.utc)
+
+        async def fetch(uid, after, terms):
+            return {
+                "messages": [{
+                    "id": "m-1", "from": "hr@acme.example",
+                    "subject": "Your application",
+                    "body": "We'd like to schedule a call.",
+                    "received_at": aware,
+                }],
+                "truncated": False,
+            }
+
+        asyncio.run(scan_replies(db, user.id, fetch))
+        proposal = db.query(OutcomeProposal).one()
+        assert proposal.evidence_received_at is not None
+        assert proposal.evidence_received_at.tzinfo is None  # naive UTC
+        # and the stats subtraction does not raise
+        approve_all_pending(db, user_id=user.id)
+        s = outcome_stats(db, user_id=user.id)
+        assert s["avg_days_to_first_response"] is not None

@@ -23,7 +23,7 @@ Composio connection. Stored: the classification + an evidence POINTER
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Awaitable, Callable, List, Optional
 from urllib.parse import urlparse
 
@@ -84,6 +84,26 @@ ATS_SENDER_DOMAINS = [
     "teamtailor.com",
 ]
 
+# Hosts that mean "job board / aggregator", never "this employer". A
+# scraped posting's URL usually points at the BOARD — matching mail from
+# that host would attach board notifications to every application scraped
+# from that board (review round 1, finding 2). Derived from the live
+# source set (services/scrapers/*).
+AGGREGATOR_HOSTS = {
+    "reed.co.uk",
+    "adzuna.com",
+    "adzuna.co.uk",
+    "arbeitnow.com",
+    "remotive.com",
+    "jobicy.com",
+    "workingnomads.com",
+    "careerjet.com",
+    "careerjet.co.uk",
+    "platsbanken.se",
+    "arbetsformedlingen.se",
+    "jobtech.dev",
+}
+
 # Nudge thresholds (WO-20 §3; tests assert these exact numbers)
 DEADLINE_URGENT_DAYS = 7        # 🔥 deadline within 7 days
 FOLLOW_UP_QUIET_DAYS = 10       # sent 10+ days quiet …
@@ -122,11 +142,20 @@ def set_outcome(
     application.outcome_evidence = evidence
     # Event-time semantics: WHEN this outcome became established — the
     # reply's arrival time when evidence provides one (approved
-    # proposals), the recording time otherwise. Set on EVERY write (an
-    # open `interview` has a first-response time too — that's the stat),
-    # not only finals; final-only semantics would silently null out
-    # time-to-first-response for the cohort that matters most.
-    application.resolved_at = resolved_at or utc_now()
+    # proposals), the recording time otherwise. FIRST-RESPONSE RULE
+    # (review round 1, finding 5): once an employer signal has stamped
+    # a time, a later employer signal (interview → rejected) does not
+    # move it — the stat measures the first reply, and a late-arriving
+    # proposal for an EARLIER reply moves it back (min), never forward.
+    new_time = resolved_at or utc_now()
+    prev_was_signal = (
+        application.outcome_status in EMPLOYER_SIGNAL_OUTCOMES
+        and application.resolved_at is not None
+    )
+    if status in EMPLOYER_SIGNAL_OUTCOMES and prev_was_signal:
+        application.resolved_at = min(application.resolved_at, new_time)
+    else:
+        application.resolved_at = new_time
     db.add(application)
     db.commit()
     return application
@@ -260,12 +289,27 @@ def _domains_match(a: Optional[str], b: Optional[str]) -> bool:
     return a.endswith("." + b) or b.endswith("." + a)
 
 
+def _is_aggregator_host(host: Optional[str]) -> bool:
+    """The host belongs to a job board, not the employer. Aggregator
+    links are where scraped postings LIVE — mail from the board says
+    nothing about which application it concerns."""
+    if not host:
+        return False
+    return any(
+        host == agg or host.endswith("." + agg) for agg in AGGREGATOR_HOSTS
+    )
+
+
 def sender_matches_application(
     from_email: Optional[str], application: Application, job: Optional[JobPosting]
 ) -> bool:
     """Does this sender plausibly relate to this application? Matches:
     the application's own target email, its domain, the posting URL's
-    host (parent-aware), and the common ATS notification domains."""
+    host (parent-aware, but NEVER a board/aggregator host), and the
+    common ATS notification domains. A shared ATS domain matching
+    several applications is resolved by the scan's ambiguity logic —
+    this predicate is only 'plausibly related', never 'certainly this
+    one'."""
     if not from_email:
         return False
     sender_domain = _domain(from_email)
@@ -280,10 +324,18 @@ def sender_matches_application(
         return True
     if job is not None and sender_domain:
         job_host = _domain(job.url, is_url=True)
-        if job_host and _domains_match(sender_domain, job_host):
+        if (
+            job_host
+            and not _is_aggregator_host(job_host)
+            and _domains_match(sender_domain, job_host)
+        ):
             return True
         app_url_host = _domain(application.apply_url, is_url=True)
-        if app_url_host and _domains_match(sender_domain, app_url_host):
+        if (
+            app_url_host
+            and not _is_aggregator_host(app_url_host)
+            and _domains_match(sender_domain, app_url_host)
+        ):
             return True
     return False
 
@@ -291,6 +343,24 @@ def sender_matches_application(
 # ---------------------------------------------------------------------------
 # Propose-then-confirm — scan + sweep file proposals; approval applies
 # ---------------------------------------------------------------------------
+
+def _proposal_exists_for_message(
+    db: Session, application_id: int, evidence_message_id: Optional[str]
+) -> Optional[OutcomeProposal]:
+    """Pre-check for an identical filed proposal. A concurrent
+    uncommitted insert is INVISIBLE here — the unique index at flush is
+    the real backstop (review round 1, finding 3)."""
+    if not evidence_message_id:
+        return None
+    return (
+        db.query(OutcomeProposal)
+        .filter(
+            OutcomeProposal.application_id == application_id,
+            OutcomeProposal.evidence_message_id == evidence_message_id,
+        )
+        .first()
+    )
+
 
 def _file_proposal(
     db: Session,
@@ -306,13 +376,13 @@ def _file_proposal(
 ) -> Optional[OutcomeProposal]:
     """Insert one pending proposal, deduped on (application, message).
     Returns None when an identical proposal already exists — a replayed
-    scan must be a no-op (acceptance #4)."""
+    scan must be a no-op (acceptance #4). The insert runs under a
+    SAVEPOINT: a unique-index collision rolls back ONLY the duplicate —
+    a session-wide rollback here dropped every earlier uncommitted
+    proposal of the same scan (review round 1, finding 3)."""
     if proposed_status not in OUTCOME_STATUSES or proposed_status in MANUAL_ONLY_OUTCOMES:
         raise OutcomeError(f"'{proposed_status}' cannot be proposed by {source}")
-    existing = db.query(OutcomeProposal).filter(
-        OutcomeProposal.application_id == application.id,
-        OutcomeProposal.evidence_message_id == evidence_message_id,
-    ).first() if evidence_message_id else None
+    existing = _proposal_exists_for_message(db, application.id, evidence_message_id)
     if existing is not None:
         return None
     proposal = OutcomeProposal(
@@ -326,12 +396,15 @@ def _file_proposal(
         evidence_received_at=evidence_received_at,
         reason=reason,
     )
-    db.add(proposal)
     try:
-        db.flush()
+        with db.begin_nested():  # SAVEPOINT — collision rolls back only this
+            db.add(proposal)
+            db.flush()
     except IntegrityError:
-        # The unique-index backstop fired on a concurrent identical insert
-        db.rollback()
+        # begin_nested's context manager already rolled the SAVEPOINT
+        # back; a db.rollback() HERE would be the session-wide rollback
+        # this fix exists to remove. The proposal object dies with the
+        # savepoint; everything flushed earlier in this scan survives.
         return None
     return proposal
 
@@ -374,6 +447,19 @@ def decide_proposal(
             db.add(proposal)
             db.commit()
             return application
+        if (
+            proposal.proposed_status == "no_response"
+            and application.outcome_status in EMPLOYER_SIGNAL_OUTCOMES
+        ):
+            # Silence never beats a recorded employer signal (review
+            # round 1, finding 1): a stale 60-day sweep must not turn an
+            # interview into a false no_response in the stats.
+            proposal.decision = "approved"
+            proposal.decided_at = utc_now()
+            proposal.reason = (proposal.reason or "") + " [superseded: employer signal on record]"
+            db.add(proposal)
+            db.commit()
+            return application
         evidence = (
             f"msg:{proposal.evidence_message_id}"
             if proposal.evidence_message_id
@@ -413,33 +499,76 @@ def approve_all_pending(db: Session, *, user_id) -> int:
 # Scan orchestration — fetcher injected, watermark per user
 # ---------------------------------------------------------------------------
 
-# fetch_messages(user_id, after_date, sender_terms) -> ordered
-# oldest→newest list of {id, from, subject, body, received_at} — the
+# fetch_messages(user_id, after_date, sender_terms) -> {"messages":
+# [...], "truncated": bool} — messages ordered oldest→newest, each
+# {id, from, subject, body, received_at}. truncated=True means the
+# remote query returned MORE than the adapter's page cap: the scan must
+# NOT advance its cursor past what it processed, or everything beyond
+# the cap is never scanned again (review round 1, finding 8). The
 # Composio/Gmail adapter in gmail_scan.py satisfies it; tests inject
-# fakes. sender_terms ("a@b.com" / "@b.com") constrain the remote query;
-# the service still re-verifies every sender itself (adapter results are
-# hints, sender_matches_application is the authority). after_date lets
-# the adapter widen the Gmail `after:` window; the dedupe backstop is
-# the unique proposal index, so overlap is safe.
-FetchMessages = Callable[[str, Optional[date], List[str]], Awaitable[List[dict]]]
+# fakes. sender_terms ("a@b.com" / "@b.com") constrain the remote
+# query; the service still re-verifies every sender itself (adapter
+# results are hints, sender_matches_application is the authority).
+# after_date lets the adapter widen the Gmail `after:` window; the
+# dedupe backstop is the unique proposal index, so overlap is safe.
+FetchMessages = Callable[[str, Optional[date], List[str]], Awaitable[dict]]
+
+
+def _naive_utc(value):
+    """Normalize a possibly tz-AWARE datetime to naive UTC — the app's
+    timestamp convention (utc_now). Gmail arrival times arrive aware;
+    every column and every subtraction here is naive (review round 1,
+    finding 9)."""
+    if value is None or not isinstance(value, datetime):
+        return value
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _discriminate_by_subject(
+    subject: Optional[str], direct: List[Application], jobs: dict
+) -> Optional[Application]:
+    """Among several plausibly-matching applications (a shared ATS
+    domain), pick the one whose company or full job title appears in
+    the subject. Exactly one wins → it; zero or several → None
+    (uncertain, surfaced — never the first by query order)."""
+    if not subject:
+        return None
+    subject_l = subject.lower()
+    hits = []
+    for app in direct:
+        job = jobs.get(app.job_id)
+        if job is None:
+            continue
+        if job.company and job.company.lower() in subject_l:
+            hits.append(app)
+            continue
+        if job.title and job.title.lower() in subject_l:
+            hits.append(app)
+    return hits[0] if len(hits) == 1 else None
 
 
 async def scan_replies(
     db: Session, user_id, fetch_messages: FetchMessages
 ) -> dict:
     """One incremental inbox pass for one user. Files proposals; NEVER
-    writes applications (acceptance #3). Advances the scan cursor."""
+    writes applications (acceptance #3). Advances the scan cursor ONLY
+    over ground actually covered."""
     state = db.query(GmailScanState).filter(GmailScanState.user_id == user_id).first()
     if state is None:
         state = GmailScanState(user_id=user_id)
         db.add(state)
 
     # Denominator-style candidates: actually out the door (sent by us or
-    # user-confirmed applied) and not yet closed.
+    # user-confirmed applied), not yet closed, and NOT follow-up rows —
+    # a reply to the thread answers the parent application (review
+    # round 1, finding 4).
     candidates = (
         db.query(Application)
         .filter(
             Application.user_id == user_id,
+            Application.follow_up_of_id.is_(None),
             (Application.sent_at.isnot(None))
             | (Application.outcome_status == "applied"),
         )
@@ -461,7 +590,7 @@ async def scan_replies(
         else None  # adapter default: a bounded recent window
     )
     # Sender terms for the remote query: target emails, their domains,
-    # posting-URL hosts, and the ATS notification domains.
+    # non-aggregator posting-URL hosts, and the ATS notification domains.
     sender_terms: List[str] = []
     for app in open_candidates:
         if app.target_email:
@@ -472,10 +601,10 @@ async def scan_replies(
         job = jobs.get(app.job_id)
         if job is not None:
             h = _domain(job.url, is_url=True)
-            if h:
+            if h and not _is_aggregator_host(h):
                 sender_terms.append("@" + h)
         h2 = _domain(app.apply_url, is_url=True)
-        if h2:
+        if h2 and not _is_aggregator_host(h2):
             sender_terms.append("@" + h2)
     for d in ATS_SENDER_DOMAINS:
         sender_terms.append("@" + d)
@@ -483,42 +612,80 @@ async def scan_replies(
     seen = set()
     sender_terms = [t for t in sender_terms if not (t in seen or seen.add(t))][:20]
 
-    summary = {"scanned": 0, "matched": 0, "proposed": 0, "uncertain": 0}
+    summary = {"scanned": 0, "matched": 0, "proposed": 0, "uncertain": 0,
+               "truncated": False}
     try:
-        messages = await fetch_messages(user_id, after_date, sender_terms)
+        result = await fetch_messages(user_id, after_date, sender_terms)
+        # Tolerate a bare list from older fakes — the contract is the dict
+        if isinstance(result, dict):
+            messages = result.get("messages") or []
+            truncated = bool(result.get("truncated"))
+        else:
+            messages = result or []
+            truncated = False
+        last_received = None
         for msg in messages:
             summary["scanned"] += 1
+            received = _naive_utc(msg.get("received_at"))
+            if received is not None and (last_received is None or received > last_received):
+                last_received = received
             from_email = extract_email(msg.get("from"))
             body = msg.get("body")
-            for app in open_candidates:
-                if not sender_matches_application(from_email, app, jobs.get(app.job_id)):
+
+            # Ambiguity resolution (review round 1, finding 2): a sender
+            # that plausibly matches SEVERAL open applications (shared
+            # ATS domain) is evidence for none of them by order of
+            # query. Exactly one match → it; several → discriminate by
+            # company/title in the subject; still ambiguous → surfaced.
+            direct = [
+                app for app in open_candidates
+                if sender_matches_application(from_email, app, jobs.get(app.job_id))
+            ]
+            if len(direct) == 1:
+                target = direct[0]
+            elif len(direct) > 1:
+                target = _discriminate_by_subject(msg.get("subject"), direct, jobs)
+                if target is None:
+                    summary["uncertain"] += 1
                     continue
-                summary["matched"] += 1
-                if not body or not str(body).strip():
-                    # No full body → cannot classify (never a snippet).
-                    # Surfaced, not guessed; the scan never wedges on one
-                    # malformed message.
-                    summary["uncertain"] += 1
-                    break
-                classification = classify_message(msg.get("subject"), body)
-                if classification is None:
-                    summary["uncertain"] += 1
-                    break  # matched, unclassifiable — this message is done
-                proposal = _file_proposal(
-                    db,
-                    app,
-                    classification.status,
-                    "reply_detection",
-                    evidence_message_id=str(msg.get("id")),
-                    evidence_from=from_email,
-                    evidence_subject=(msg.get("subject") or "")[:500],
-                    evidence_received_at=msg.get("received_at"),
-                    reason=f"matched: '{classification.matched_phrase}'",
-                )
-                if proposal is not None:
-                    summary["proposed"] += 1
-                break  # one message → one application (first match wins)
-        state.scan_cursor = date.today().isoformat()
+            else:
+                continue
+
+            summary["matched"] += 1
+            if not body or not str(body).strip():
+                # No full body → cannot classify (never a snippet).
+                # Surfaced, not guessed; the scan never wedges on one
+                # malformed message.
+                summary["uncertain"] += 1
+                continue
+            classification = classify_message(msg.get("subject"), body)
+            if classification is None:
+                summary["uncertain"] += 1
+                continue  # matched, unclassifiable — this message is done
+            proposal = _file_proposal(
+                db,
+                target,
+                classification.status,
+                "reply_detection",
+                evidence_message_id=str(msg.get("id")),
+                evidence_from=from_email,
+                evidence_subject=(msg.get("subject") or "")[:500],
+                evidence_received_at=received,
+                reason=f"matched: '{classification.matched_phrase}'",
+            )
+            if proposal is not None:
+                summary["proposed"] += 1
+        # Cursor safety (review round 1, finding 8): advance only over
+        # covered ground. Truncated → the day of the last message we
+        # actually saw (the one-day overlap + unique index handle the
+        # seam); complete → today.
+        summary["truncated"] = truncated
+        if truncated:
+            if last_received is not None:
+                state.scan_cursor = last_received.date().isoformat()
+            # no messages + truncated → window unknown; keep the old cursor
+        else:
+            state.scan_cursor = date.today().isoformat()
         state.last_scan_at = utc_now()
         state.last_error = None
         db.add(state)
@@ -541,7 +708,12 @@ def propose_no_response_sweep(db: Session, *, user_id, days: int = QUIET_SWEEP_D
     """60+ days quiet → propose batch no_response (one confirmation each,
     cited, undoable via a later manual marker). The quiet clock needs a
     KNOWN send time: user-confirmed portal applies without sent_at have
-    no honest "quiet since" date, so they are not swept."""
+    no honest "quiet since" date, so they are not swept. Follow-up rows
+    are pings of their parent, not applications — never swept. An
+    application with a recorded employer signal (interview/offer/…) is
+    not silent whatever the clock says (review round 1, finding 1). A
+    dismissed sweep proposal is never re-filed — dismissal is a
+    decision, not a pending state."""
     cutoff = utc_now() - timedelta(days=days)
     rows = (
         db.query(Application)
@@ -549,19 +721,22 @@ def propose_no_response_sweep(db: Session, *, user_id, days: int = QUIET_SWEEP_D
             Application.user_id == user_id,
             Application.sent_at.isnot(None),
             Application.sent_at < cutoff,
+            Application.follow_up_of_id.is_(None),
         )
         .all()
     )
     count = 0
     for app in rows:
-        if app.outcome_status in FINAL_OUTCOMES:
+        if (
+            app.outcome_status in FINAL_OUTCOMES
+            or app.outcome_status in EMPLOYER_SIGNAL_OUTCOMES
+        ):
             continue
         already = (
             db.query(OutcomeProposal)
             .filter(
                 OutcomeProposal.application_id == app.id,
                 OutcomeProposal.source == "sweep",
-                OutcomeProposal.decision.is_(None),
             )
             .first()
         )
@@ -586,7 +761,11 @@ def propose_no_response_sweep(db: Session, *, user_id, days: int = QUIET_SWEEP_D
 def _in_the_door(a: Application) -> bool:
     """The stats/nudge denominator: sent by us, or the user confirmed
     they applied (beta reality: email apply is off, browser/manual
-    applies need the user's own confirmation to count)."""
+    applies need the user's own confirmation to count). Follow-up rows
+    are pings of a parent, never their own applications (review round
+    1, finding 4)."""
+    if a.follow_up_of_id is not None:
+        return False
     return a.sent_at is not None or a.outcome_status == "applied"
 
 
@@ -606,20 +785,27 @@ def compute_nudges(db: Session, *, user_id) -> dict:
         .filter(ApplicationDraft.user_id == user_id, ApplicationDraft.status == "ready")
         .all()
     )
+    # Scoped to THIS user (review round 1, finding 7 — the unscoped
+    # variant read every tenant's applications on the service session
+    # where RLS is not enforced; the same shape drove the 2026-09-11
+    # egress incident).
     sent_draft_ids = {
         d_id for (d_id,) in db.query(Application.draft_id).filter(
+            Application.user_id == user_id,
             Application.draft_id.isnot(None),
             Application.status.in_(["sent", "manual_pending"]),
         ).all()
     } if drafts else set()
-    jobs_by_id = {}
-    for draft in drafts:
-        if draft.id in sent_draft_ids:
-            continue
+    unsent = [d for d in drafts if d.id not in sent_draft_ids]
+    # one batched job fetch — the per-draft lazy query was N+1
+    jobs_by_id = {
+        j.id: j
+        for j in db.query(JobPosting).filter(
+            JobPosting.id.in_({d.job_id for d in unsent})
+        ).all()
+    } if unsent else {}
+    for draft in unsent:
         job = jobs_by_id.get(draft.job_id)
-        if job is None:
-            job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()
-            jobs_by_id[draft.job_id] = job
         if job is None:
             continue
         anchor = job.published_at or job.scraped_at
@@ -648,6 +834,10 @@ def compute_nudges(db: Session, *, user_id) -> dict:
     confirm_applied = []
     for a in apps:
         if a.outcome_status in FINAL_OUTCOMES:
+            continue
+        if a.follow_up_of_id is not None:
+            # a follow-up ping is never offered its own follow-up, never
+            # asked to confirm the parent's portal hand-off (finding 4)
             continue
         if a.sent_at is not None and a.status == "sent":
             quiet_days = (now - a.sent_at).days
@@ -798,7 +988,7 @@ def create_follow_up_draft(db: Session, application: Application, profile) -> Ap
     )
     template = (
         _FOLLOW_UP_SV
-        if (getattr(profile, "country_code", None) or "").upper() == "SE"
+        if (getattr(profile, "country", None) or "").upper() == "SE"
         else _FOLLOW_UP_EN
     )
     team = (job.company if job and job.company else "hiring team")
