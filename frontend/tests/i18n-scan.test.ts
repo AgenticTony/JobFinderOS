@@ -29,6 +29,22 @@ export const FILES = [
   'components/OnboardingWizard.tsx',
   'components/ScoreRing.tsx',
   'components/AdzunaAttribution.tsx',
+  // WO-28: the landing's extracted sections and new pieces — persona
+  // pages (WO-29) will compose these same files.
+  'components/landing/LandingView.tsx',
+  'components/landing/HuntDemo.tsx',
+  'components/landing/ComparisonTable.tsx',
+  'components/landing/Faq.tsx',
+  'components/landing/ProofSlot.tsx',
+  'components/landing/StickyCta.tsx',
+  'components/landing/StatsBand.tsx',
+  'components/landing/Steps.tsx',
+  'components/landing/VerdictWide.tsx',
+  'components/landing/VolumeArgument.tsx',
+  'components/landing/SourcesGallery.tsx',
+  'components/landing/GuardSection.tsx',
+  'components/landing/TermsSection.tsx',
+  'components/landing/FinalCta.tsx',
 ];
 
 // Tokens that read the same in both languages.
