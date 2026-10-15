@@ -1362,6 +1362,8 @@ def _r3_patch_gmail(monkeypatch, *, metas_by_call, details, on_search=None):
 
     monkeypatch.setattr(gmail_scan, "_slugs_for", fake_slugs)
     monkeypatch.setattr(gmail_scan.composio_service, "execute_tool", fake_execute)
+    # the configured-gate must never depend on the machine's .env
+    monkeypatch.setattr(gmail_scan.composio_service, "is_configured", lambda: True)
     return state
 
 
