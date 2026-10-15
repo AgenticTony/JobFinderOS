@@ -218,3 +218,24 @@ compute_nudges scoped + batched, truncated scans hold the cursor at
 the last processed message (no mail skipped past the 50-cap), arrival
 times normalized to naive UTC, /scan runs off the event loop.
 Suites after: 646 (SQLite) / 658 (Postgres) green.
+
+**Review round 2 (2026-10-15, PR #128 — merged 571bd17):** six more
+defects; all fixed red-first (13 new tests, 80 WO-20 total). The
+headline: the round-1 truncation fix did not work — Gmail returns
+NEWEST-first and the adapter's first-50 slice was the newest 50, so
+the cursor still landed at ~today and older replies stayed stranded
+(the round-1 red test never modeled ordering). `_oldest_page` now
+takes the oldest slice; each truncated scan consumes the oldest batch
+and the cursor marches forward until a scan completes. Also: a lone
+ATS-domain match (or an ATS-hosted posting URL, boards.greenhouse.io)
+is never a "specific" match — ATS senders always require the subject
+discriminator, so off-platform applications through the same ATS can
+no longer produce false outcomes on ours; a stale proposal can no
+longer regress a FINAL outcome (evidence-age guard — deliberately NOT
+open/final based, because 'offer' is open and a later offer genuinely
+rescues a rejection); ready follow-up drafts are excluded from
+deadline nudges; AGGREGATOR_HOSTS gains jobviewtrack.com and
+arbeitnow.co.uk (both verified in the live pool); and one email files
+at most ONE proposal per user, ever — dedupe and the unique index
+moved from (application, message) to (user, message) via migration
+b7c9d1f3a5e7. Suites after: 658 (SQLite) / 670 (Postgres) green.
