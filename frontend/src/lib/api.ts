@@ -61,8 +61,11 @@ export async function logout(): Promise<void> {
   }
 }
 
-// OPS-1: the API lives on a Render free-tier web service that spins down
-// after idle; the first request after spin-down eats a ~1min cold start
+// OPS-1: the API lived on a Render Free instance that spins down after
+// idle (paid 0.5c-512mb since 2026-10-15 — no more spin-down, but a
+// deploy/restart still makes the API briefly unreachable, so the long
+// timeout + one retry stay). On Free, the first request after spin-down ate
+// a ~1min cold start
 // (the repo's own ops verify script budgets 90s per attempt, 6 attempts).
 // A 60s timeout failed BEFORE the service finished waking, so every cold
 // visit looked like "API down". 120s lets the first GET outlast the cold

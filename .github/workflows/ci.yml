@@ -257,7 +257,9 @@ jobs:
           api, hunt = services["jobfinderos-api"], services["jobfinderos-hunt"]
           assert api["type"] == "web" and api["runtime"] == "docker"
           assert api["healthCheckPath"] == "/health"
-          assert api["plan"] == "free"
+          # Paid since 2026-10-15 (Free's idle spin-down = ~1 min first
+          # request). A drift back to "free" re-introduces the cold start.
+          assert api["plan"] == "0.5c-512mb"
           # Hunt cadence: the runbook documents twice daily (06:00/18:00
           # UTC) and render.yaml declared hourly until ab69906 aligned it
           # — this assertion was left at "0 * * * *" and went red on every
