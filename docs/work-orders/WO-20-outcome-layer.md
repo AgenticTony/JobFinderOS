@@ -239,3 +239,52 @@ arbeitnow.co.uk (both verified in the live pool); and one email files
 at most ONE proposal per user, ever — dedupe and the unique index
 moved from (application, message) to (user, message) via migration
 b7c9d1f3a5e7. Suites after: 658 (SQLite) / 670 (Postgres) green.
+
+### Review round 3 — PR #131 (merged cfce0d5, 2026-10-15)
+
+Eight findings on #128: three could write a wrong outcome, three could
+lose replies, two were drift/waste. All fixed red-first (15 new tests,
+95 WO-20 total; 674 SQLite / 686 Postgres green; ruff clean).
+
+**Wrong outcomes.** (1) The final-regression guard compared proposal
+evidence against `resolved_at` — pinned to the FIRST response by the
+round-1 min rule, so a day-20 invite reopened a day-35 rejection. New
+`outcome_evidence_at` column (migration `c3d8e2f4a6b8`, backfilled
+from `resolved_at`) records the current outcome's own evidence time;
+the guard compares against it. Latent `set_outcome` bug fixed too
+(prev-status was read AFTER assignment, so the min rule tested the new
+status). (2) An approved sweep stamped `resolved_at` with the approval
+date, so an earlier-arriving reply scanned later lost the age check —
+silence beat signal. A real signal now ALWAYS beats an approved
+`no_response`, and `resolved_at` becomes the reply's arrival. (3)
+Free-mail contact domains (gmail.com etc.) matched every sender on the
+provider — `FREE_MAIL_DOMAINS` excluded from domain matching, exact
+address kept.
+
+**Lost replies — cursor redesigned.** The round-2 oldest-tail slice
+could not work: the adapter read only the FIRST search page (no
+`max_results`, no token loop), and Gmail's `after:`-only DATE cursor
+either stranded older pages or stalled forever on any window with
+≥cap matches inside its one-day overlap. Now: the search follows page
+tokens until the collected count settles truncation; the batch is the
+window's NEWEST messages **by internalDate** (sorted — threads-shaped
+responses interleave chronology, so positional slicing was unsafe);
+the cursor is a two-bound epoch watermark — `b:{lo}:{hi}` backfill
+(`before` anchored at the oldest processed arrival +1s; each truncated
+scan consumes the newest batch and shrinks the window from the top)
+and `e:{epoch}` incremental (bounded by the window's own `before`,
+never a fresh wall clock; reads re-include the boundary second).
+Legacy ISO-date cursors parse as incremental windows.
+
+**Drift/waste.** `sender_matches_application` = `sender_match_is_specific
+OR ATS-domain` (the re-implementation had drifted: apply_url skipped
+when the JobPosting row was missing, ATS-hosted posting URLs never
+excluded — an employer's reply to a jobless application was silently
+ignored). The scan evaluates the specific predicate once per
+candidate. Adapter tests stub `is_configured` — they must not read
+the machine's Composio key (CI caught this; the dev .env masked it).
+
+**Open (unchanged):** live first-call verification of the Composio
+Gmail read path — now including the epoch `after:`/`before:` query
+forms, which are documented Gmail API syntax but unverified through
+the Composio tool wrapper. Failures degrade to `gmail_scan_state.last_error`.
