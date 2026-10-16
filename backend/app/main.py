@@ -19,6 +19,7 @@ from sqlalchemy import text as sa_text
 from app.api.deps import set_user_context_middleware
 from app.api.v1 import (
     account,
+    ai_jobs,
     applications,
     feedback,
     jobs,
@@ -55,6 +56,11 @@ async def lifespan(app: FastAPI):
     # racing hunt cycles (D3). ENABLE_SCHEDULER stays as the dev-mode
     # single-process convenience (default false = production shape).
     start_scheduler()
+    # WO-31: the ai_jobs drainer — in this process only when
+    # AI_DRAINER=api (beta). Every AI call a user waits on runs there.
+    from app.services.ai_queue import start_drainer, stop_drainer
+
+    start_drainer("api")
     # Warm the occupation taxonomy table in the BACKGROUND — awaited
     # on the boot path it added up to SCRAPE_TIMEOUT_SECONDS (20s) to
     # every cold start during a taxonomy outage (review note). Failure
@@ -74,6 +80,7 @@ async def lifespan(app: FastAPI):
     _warm_task = asyncio.create_task(_warm_taxonomy())
     yield
     _warm_task.cancel()
+    stop_drainer()
     stop_scheduler()
 
 init_sentry()  # no-op without SENTRY_DSN (WO-05 / F7)
@@ -111,6 +118,7 @@ app.include_router(outcomes.router, prefix="/api/v1/outcomes", tags=["Outcomes"]
 app.include_router(settings_api.router, prefix="/api/v1/settings", tags=["Settings"])
 app.include_router(account.router, prefix="/api/v1", tags=["Account"])
 app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["Feedback"])
+app.include_router(ai_jobs.router, prefix="/api/v1/ai-jobs", tags=["AI jobs"])
 
 # Auth (MIG-WO2): no auth routers. Sign-up, sign-in, password reset and
 # email verification are Supabase Auth's hosted flows (the browser talks

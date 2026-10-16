@@ -81,6 +81,9 @@ class ProfileResponse(BaseModel):
     # AND the guard's source by build_profile_context.
     vouched_facts: List[str] = []
     work_rights: Optional[str] = None
+    # WO-31: the CV-reading (extract) ai_job while it is queued/running,
+    # or its recent failure with the action to take; None when done.
+    extraction: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
@@ -92,8 +95,9 @@ class ProfileResponse(BaseModel):
     keywords: List[str] = []
 
     @classmethod
-    def from_orm_profile(cls, profile) -> "ProfileResponse":
+    def from_orm_profile(cls, profile, extraction: Optional[dict] = None) -> "ProfileResponse":
         return cls(
+            extraction=extraction,
             id=profile.id,
             full_name=profile.full_name,
             email=profile.email,

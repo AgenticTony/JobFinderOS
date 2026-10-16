@@ -338,6 +338,12 @@ def main(argv=None) -> int:
         logger.info("One-shot hunt complete: %s", summary)
         return 0
 
+    # WO-31 launch shape: AI_DRAINER=worker drains ai_jobs HERE (the
+    # 24/7 loop only — the --once cron above never makes AI-queue calls).
+    from app.services.ai_queue import start_drainer
+
+    start_drainer("worker")
+
     from apscheduler.schedulers.blocking import BlockingScheduler
 
     scheduler = BlockingScheduler()

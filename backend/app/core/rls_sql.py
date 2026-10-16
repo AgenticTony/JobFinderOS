@@ -40,6 +40,9 @@ USER_TABLES = [
     # own inbox; scan state is per-user). Same own_rows policy shape.
     "outcome_proposals",
     "gmail_scan_state",
+    # WO-31: the durable AI job queue — request sessions enqueue and read
+    # their own rows; the drainer runs on the service factory.
+    "ai_jobs",
 ]
 ALL_RLS_TABLES = USER_TABLES + ["users"]
 

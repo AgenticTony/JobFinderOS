@@ -15,6 +15,7 @@ erasure sweeps snapshot paths when the account dies). The previous claim that
 row was overwritten and the old file orphaned on disk, surviving erasure.
 """
 
+import hashlib
 import logging
 import os
 import uuid
@@ -200,6 +201,7 @@ def create_or_replace_profile_from_cv(
     filename: str,
     *,
     user_id,
+    extract: bool = True,
 ) -> Profile:
     """
     Upload flow: validate + extract text (PDF or Word .docx), store the
@@ -207,6 +209,11 @@ def create_or_replace_profile_from_cv(
     (one each — re-upload replaces that user's own profile, never
     anyone else's). Legacy binary .doc is deliberately NOT accepted:
     no pure-Python parser exists; the error tells the user to re-save.
+
+    extract=False (WO-31, the upload route): store the CV and text only —
+    the AI extraction runs as a queued ai_job (run_extract_job), so
+    provider load delays the profile fields instead of silently losing
+    them. Existing derived fields survive until it lands.
     """
     if (filename or "").lower().endswith(".docx"):
         FileService.validate_size(file_content)
@@ -219,7 +226,9 @@ def create_or_replace_profile_from_cv(
     path, safe_name = _store_cv_file(file_content, filename)
 
     extracted: Optional[dict] = None
-    if ai_service_available():
+    if not extract:
+        pass
+    elif ai_service_available():
         try:
             extracted = get_ai_service().extract_profile(cv_text)
         except Exception as e:  # noqa: BLE001 — never fail the upload over AI hiccups
@@ -239,6 +248,8 @@ def create_or_replace_profile_from_cv(
     profile.cv_file_size = len(file_content)
     if extracted:
         _apply_extraction(profile, extracted)
+    elif not extract:
+        pass  # queued: run_extract_job applies the fields when it lands
     else:
         # AI-11 (live-confirmed): a malformed extraction parses to {} (and
         # a raised one lands here too — the except above leaves it None).
@@ -267,18 +278,30 @@ def create_or_replace_profile_from_cv(
     # emails 2-6 greet personally (the contact starts as "there").
     # Post-commit and best-effort by contract: a Resend hiccup must
     # never fail the upload.
-    if profile.full_name:
-        from app.models import User
-        from app.services.onboarding_service import update_contact_first_name
-
-        account = db.query(User).filter(User.id == user_id).first()
-        if account and account.email:
-            update_contact_first_name(
-                str(account.email), profile.full_name.split()[0]
-            )
+    if extract:
+        # Deferred uploads sync when run_extract_job lands the name.
+        _sync_contact_first_name(db, profile, user_id=user_id)
 
     logger.info("Saved profile id=%s (user=%s) from %s", profile.id, user_id, safe_name)
     return profile
+
+
+def _sync_contact_first_name(db: Session, profile: Profile, *, user_id) -> None:
+    """Best-effort Resend contact name sync (never fails the caller)."""
+    if not profile.full_name:
+        return
+    from app.models import User
+    from app.services.onboarding_service import update_contact_first_name
+
+    account = db.query(User).filter(User.id == user_id).first()
+    if account and account.email:
+        update_contact_first_name(
+            str(account.email), profile.full_name.split()[0]
+        )
+
+
+def cv_sha256(cv_text: Optional[str]) -> str:
+    return hashlib.sha256((cv_text or "").encode("utf-8")).hexdigest()
 
 
 def _retire_replaced_cv(db: Session, user_id, replaced_path: str) -> None:

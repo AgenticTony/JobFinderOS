@@ -1142,7 +1142,7 @@ def create_follow_up_draft(db: Session, application: Application, profile) -> Ap
         db.query(ApplicationDraft)
         .filter(
             ApplicationDraft.follow_up_application_id == application.id,
-            ApplicationDraft.status.in_(["drafting", "ready", "sending"]),
+            ApplicationDraft.status.in_(["queued", "drafting", "ready", "sending"]),
         )
         .count()
     )

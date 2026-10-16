@@ -1,5 +1,6 @@
 """SQLAlchemy models for JobFinderOS."""
 
+from app.models.ai_job import AIJob  # noqa: F401 — registered on Base
 from app.models.ai_usage import AIUsage  # noqa: F401 — registered on Base
 from app.models.application import Application
 from app.models.draft import ApplicationDraft
@@ -14,6 +15,7 @@ from app.models.system_lock import SystemLock  # noqa: F401
 from app.models.user import User
 
 __all__ = [
+    "AIJob",
     "Feedback",
     "Profile",
     "JobPosting",
