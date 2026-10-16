@@ -219,6 +219,21 @@ def ensure_rls(connection) -> None:
     if rls_layer_complete(connection):
         return
 
+    # Per-table, not all-or-nothing (2026-10-16 deploy failure): one new
+    # table made the layer "incomplete", and re-running ALTER/POLICY on
+    # EVERY table took ACCESS EXCLUSIVE on users/profiles/… — the live
+    # API's idle-in-transaction sessions held ACCESS SHARE on them, the
+    # migration hit lock_timeout and the build refused to boot. Touch a
+    # table only when IT lacks RLS or the policy it needs; a complete
+    # table is never re-locked.
+    state = _rls_state(connection)
+
+    def lacks_rls(table: str) -> bool:
+        return not state.get(table, (False, set()))[0]
+
+    def lacks_policy(table: str, policy: str) -> bool:
+        return policy not in state.get(table, (False, set()))[1]
+
     # Identity tables: own_rows, with the two documented conventions
     # (audit round 3): TO authenticated stops policy evaluation for
     # other roles instead of running the predicate; (select auth.uid())
@@ -226,27 +241,28 @@ def ensure_rls(connection) -> None:
     # the point on match_results/ai_usage row counts.
     for table in [t for t in ALL_RLS_TABLES if t in existing]:
         key = "id" if table == "users" else "user_id"
-        run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-        run(f"DROP POLICY IF EXISTS own_rows ON {table}")
-        run(
-            f"CREATE POLICY own_rows ON {table}"
-            f" FOR ALL TO authenticated"
-            f" USING ((select auth.uid()) IS NOT NULL AND {key} = (select auth.uid()))"
-            f" WITH CHECK ((select auth.uid()) IS NOT NULL AND {key} = (select auth.uid()))"
-        )
+        if lacks_rls(table):
+            run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        if lacks_policy(table, "own_rows"):
+            run(
+                f"CREATE POLICY own_rows ON {table}"
+                f" FOR ALL TO authenticated"
+                f" USING ((select auth.uid()) IS NOT NULL AND {key} = (select auth.uid()))"
+                f" WITH CHECK ((select auth.uid()) IS NOT NULL AND {key} = (select auth.uid()))"
+            )
 
     # Shared-read tables: readable by authenticated (the request surface
     # reads the pool and scrape bookkeeping), insertable only where a
     # route does it (manual job create). No UPDATE/DELETE, ever.
     for table in [t for t in SHARED_READ_TABLES if t in existing]:
-        run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-        run(f"DROP POLICY IF EXISTS shared_read ON {table}")
-        run(
-            f"CREATE POLICY shared_read ON {table}"
-            f" FOR SELECT TO authenticated USING (true)"
-        )
-    run("DROP POLICY IF EXISTS manual_create ON job_postings")
-    if "job_postings" in existing:
+        if lacks_rls(table):
+            run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        if lacks_policy(table, "shared_read"):
+            run(
+                f"CREATE POLICY shared_read ON {table}"
+                f" FOR SELECT TO authenticated USING (true)"
+            )
+    if "job_postings" in existing and lacks_policy("job_postings", "manual_create"):
         run(
             "CREATE POLICY manual_create ON job_postings"
             " FOR INSERT TO authenticated WITH CHECK (true)"
@@ -256,7 +272,22 @@ def ensure_rls(connection) -> None:
     # anon/authenticated through the Data API; the owner (worker,
     # pipeline, alembic) bypasses RLS and is unaffected.
     for table in [t for t in LOCKED_SERVICE_TABLES if t in existing]:
-        run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        if lacks_rls(table):
+            run(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+
+
+def _rls_state(connection) -> dict:
+    """{table: (relrowsecurity, {policy names})} for every public table —
+    read from the catalog in one round trip, no locks beyond catalog
+    reads."""
+    rows = connection.exec_driver_sql(
+        "SELECT c.relname, c.relrowsecurity, "
+        "COALESCE((SELECT array_agg(p.policyname) FROM pg_policies p "
+        "  WHERE p.schemaname = 'public' AND p.tablename = c.relname), '{}') "
+        "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind = 'r'"
+    ).fetchall()
+    return {name: (bool(rls), set(pols or [])) for name, rls, pols in rows}
 
 
 def remove_rls(connection) -> None:
