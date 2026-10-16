@@ -533,11 +533,15 @@ def _validate_recheck(draft: ApplicationDraft) -> None:
         raise DraftError("No documents to check — regenerate the draft first")
 
 
-def _recheck_into(db: Session, draft: ApplicationDraft, profile: Profile) -> None:
+def _recheck_into(db: Session, draft: ApplicationDraft, profile: Profile,
+                  job: Optional[JobPosting] = None) -> None:
     """Run the shared guard over the draft's CURRENT text and stage the
     verdict (ready + resolved, or failed with what remains). NEVER
-    commits; guard transport failures propagate (fail-closed)."""
-    job: Optional[JobPosting] = draft.job
+    commits; guard transport failures propagate (fail-closed). The
+    drainer passes `job` preloaded so no lazy load re-opens a transaction
+    during the judge call."""
+    if job is None:
+        job = draft.job
     if job is None:
         job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()
     high, advisory = check_package(
