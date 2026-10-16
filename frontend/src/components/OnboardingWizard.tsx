@@ -30,7 +30,8 @@ import {
 } from 'lucide-react';
 import CvUpload from '@/components/CvUpload';
 import { apiErrorMessage, getGeo, suggestQueries } from '@/lib/api';
-import type { GeoData, OnboardingPayload, OccupationSuggestion, SearchMode } from '@/types';
+import { queueDetail } from '@/lib/aiQueue';
+import type { AiJob, GeoData, OnboardingPayload, OccupationSuggestion, SearchMode } from '@/types';
 import { cn } from '@/lib/utils';
 import { useT } from '@/i18n/LocaleContext';
 import { initialWizardWorkRights, wizardWorkRightsOptions } from '@/lib/workRights';
@@ -40,7 +41,7 @@ interface Props {
   onClose?: () => void; // optional — wizard is modal but re-openable from Profile
   // Step 1's upload target — the parent owns the API call (and the
   // profile refresh after it), exactly like the Profile tab's upload.
-  onUploadCv: (file: File) => Promise<void>;
+  onUploadCv: (file: File) => Promise<unknown>;
   initialHasCv?: boolean; // edit-mode re-runs: CV already on file, step 1 passes
   initialLanguages?: string[]; // prefill when re-running setup
   initialIncludeRemote?: boolean; // prefill when re-running setup
@@ -203,8 +204,9 @@ export default function OnboardingWizard({
   const [cvReady, setCvReady] = useState(Boolean(initialHasCv));
   const handleCvUpload = useCallback(
     async (file: File) => {
-      await onUploadCv(file); // throws on failure — CvUpload renders the error
+      const result = await onUploadCv(file); // throws on failure — CvUpload renders the error
       setCvReady(true);
+      return result; // WO-31: CvUpload follows the queued CV reading
     },
     [onUploadCv]
   );
@@ -254,6 +256,7 @@ export default function OnboardingWizard({
   const [customQueries, setCustomQueries] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
   const [loadingQueries, setLoadingQueries] = useState(false);
+  const [suggestJob, setSuggestJob] = useState<AiJob | null>(null);
   const [saving, setSaving] = useState(false);
   // FE-21: a failed save-on-finish used to reject through the button into
   // an unhandled rejection — the spinner stopped and nothing else happened.
@@ -282,8 +285,10 @@ export default function OnboardingWizard({
     if (loadingQueries) return;
     setLoadingQueries(true);
     setSuggestError(false);
+    setSuggestJob(null);
     try {
-      const result = await suggestQueries(country, mode);
+      // WO-31: the request may wait in the AI queue — show where it is
+      const result = await suggestQueries(country, mode, setSuggestJob);
       setDirectQueries(result.from_your_experience);
       setPivotSuggestions(result.worth_a_look);
       setSelected(
@@ -310,6 +315,7 @@ export default function OnboardingWizard({
       setSuggestError(true);
     } finally {
       setLoadingQueries(false);
+      setSuggestJob(null);
     }
   }, [country, mode, loadingQueries]);
 
@@ -782,10 +788,24 @@ export default function OnboardingWizard({
                   {loadingQueries ? (
                     <div className="flex flex-col items-center py-10 text-low" role="status">
                       <Loader2 className="mb-3 h-6 w-6 animate-spin text-signal" />
-                      <p className="text-sm">
-                        {mode === 'widen' ? t.titles.readingWiden : t.titles.reading}
-                      </p>
-                      <p className="text-xs">{t.titles.usually}</p>
+                      {suggestJob?.status === 'queued' ? (
+                        (() => {
+                          const detail = queueDetail(tc.queue, suggestJob);
+                          return (
+                            <>
+                              <p className="text-sm">{t.titles.queued(detail.about)}</p>
+                              {detail.extra && <p className="text-xs">{detail.extra}</p>}
+                            </>
+                          );
+                        })()
+                      ) : (
+                        <>
+                          <p className="text-sm">
+                            {mode === 'widen' ? t.titles.readingWiden : t.titles.reading}
+                          </p>
+                          <p className="text-xs">{t.titles.usually}</p>
+                        </>
+                      )}
                     </div>
                   ) : (
                     <>

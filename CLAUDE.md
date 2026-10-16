@@ -165,6 +165,19 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   decision; match/judge/extract/suggest stay at 2000). A
   `finish_reason=length` reply fails on the first attempt instead of
   three identical re-asks.
+- **WO-31 A1 (2026-10-16): interactive AI work is a durable queue.**
+  Tailor (Prepare / Try again), recheck (Check again + attest's final
+  check), CV extract (upload) and suggest-queries enqueue an `ai_jobs`
+  row and return 202 with `queue`/`extraction`/`job` state (position,
+  ETA, paused_until); ONE drainer (`app/services/ai_queue.py`,
+  `AI_DRAINER=api` — a thread in the API) makes the calls. Provider load
+  (429 / timeout / 5xx / quota) re-queues with `next_attempt_at`
+  (Retry-After honoured, no attempt ceiling) — it never fails a user's
+  request; `failed` is for non-load causes only, each with an action.
+  Leases + lease-token CAS = exactly-once result (at-least-once call).
+  Partial unique (kind, user, subject) = idempotency. The suite runs
+  `AI_DRAINER=inline` (conftest); queue tests drive `drain_once()`.
+  Hunt matching is NOT on the queue yet (WO-31 step 3).
 - Tailoring: default temperature 0.3 (variety in cover letters is desirable).
   Craft rules adopted 2026-09-15 from the cv-writing.skill tier-1 review
   (posting-aligned emphasis, voice preservation / anti-AI-tell register,

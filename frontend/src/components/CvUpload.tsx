@@ -5,17 +5,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileUp, Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { apiErrorMessage } from '@/lib/api';
+import { apiErrorMessage, waitForAiJob } from '@/lib/api';
+import { isPending, queueDetail } from '@/lib/aiQueue';
 import { useT } from '@/i18n/LocaleContext';
+import type { AiJob, Profile } from '@/types';
 
 interface Props {
-  onUploaded: (file: File) => Promise<void>;
+  // Resolves once the CV is SAVED. WO-31: when it resolves with a
+  // profile whose extraction is queued, this component follows the job
+  // and calls onExtracted when the fields have landed.
+  onUploaded: (file: File) => Promise<unknown>;
+  onExtracted?: () => Promise<void> | void;
   label?: string;
   hasExistingCv?: boolean;
 }
 
-export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
-  const t = useT().console.cvUpload;
+export default function CvUpload({ onUploaded, onExtracted, label, hasExistingCv }: Props) {
+  const tc = useT().console;
+  const t = tc.cvUpload;
+  const [reading, setReading] = useState<AiJob | null>(null);
+  const unmounted = useRef(false);
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+    };
+  }, []);
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -42,13 +57,35 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
     setError(null);
     setUploading(true);
     try {
-      await onUploaded(file);
+      const result = await onUploaded(file);
+      const extraction = (result as Profile | undefined)?.extraction;
+      if (isPending(extraction)) {
+        // Not awaited: the upload is done — the wizard may move on while
+        // the queued reading of the CV finishes.
+        void followExtraction(extraction);
+      }
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
       setUploading(false);
     }
   };
+
+  const followExtraction = async (job: AiJob) => {
+    setReading(job);
+    const finished = await waitForAiJob(job, setReading, 2000, () => unmounted.current);
+    if (unmounted.current) return;
+    setReading(null);
+    if (finished.status === 'failed' && finished.error) setError(finished.error);
+    await onExtracted?.();
+  };
+
+  const readingLine = (() => {
+    if (!reading) return null;
+    const detail = queueDetail(tc.queue, reading);
+    const main = reading.status === 'running' ? tc.queue.cvRunning : tc.queue.cvQueued(detail.about);
+    return { main, extra: detail.extra };
+  })();
 
   const statusLine = (() => {
     if (!uploading) return undefined;
@@ -105,6 +142,15 @@ export default function CvUpload({ onUploaded, label, hasExistingCv }: Props) {
           onChange={(e) => handleFiles(e.target.files)}
         />
       </div>
+      {readingLine && (
+        <div className="mt-2 flex items-start gap-2 text-sm text-mid" role="status">
+          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-signal" />
+          <div>
+            <p>{readingLine.main}</p>
+            {readingLine.extra && <p className="mt-0.5 text-xs text-low">{readingLine.extra}</p>}
+          </div>
+        </div>
+      )}
       {error && <p className="mt-2 text-sm text-bad">{error}</p>}
       {/* OPS-6 disclosure REMOVED for beta (owner decision 2026-09-01):
           both point-of-collection panels (account box + this one) came out

@@ -5,6 +5,7 @@ import axios from 'axios';
 import { consoleLocale } from '@/i18n/locale';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
+  AiJob,
   Application,
   ApplicationDraft,
   GeoData,
@@ -192,6 +193,8 @@ for (const instance of [api, slowApi]) {
 export const uploadCv = async (file: File): Promise<Profile> => {
   const formData = new FormData();
   formData.append('file', file);
+  // WO-31: returns once the CV is saved — the AI reading of it is a
+  // queued job (profile.extraction) that fills the fields in later.
   const response = await slowApi.post<Profile>('/api/v1/profile/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
@@ -237,14 +240,56 @@ export const getGeo = async (): Promise<GeoData> => {
   return response.data;
 };
 
+// WO-31: status of one queued AI job (the poll behind every "you're in
+// a queue" message).
+export const getAiJob = async (jobId: number): Promise<AiJob> => {
+  const response = await api.get<AiJob>(`/api/v1/ai-jobs/${jobId}`);
+  return response.data;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Poll a queued job until it finishes. onProgress sees every queued /
+// running state so the UI can show honest copy. Provider load never
+// ends this — only done or a non-load failure does.
+export const waitForAiJob = async (
+  job: AiJob,
+  onProgress?: (job: AiJob) => void,
+  intervalMs = 2000,
+  // A component that unmounts stops its poll; the job itself keeps
+  // running server-side and its result still lands.
+  isCancelled?: () => boolean
+): Promise<AiJob> => {
+  let current = job;
+  while (current.status === 'queued' || current.status === 'running') {
+    if (isCancelled?.()) return current;
+    onProgress?.(current);
+    await sleep(intervalMs);
+    if (isCancelled?.()) return current;
+    try {
+      current = await getAiJob(current.id);
+    } catch {
+      // transient (cold start, network): keep waiting on the same job
+    }
+  }
+  return current;
+};
+
 export const suggestQueries = async (
   country: string,
-  mode: 'field' | 'adjacent' | 'widen' = 'field'
+  mode: 'field' | 'adjacent' | 'widen' = 'field',
+  onProgress?: (job: AiJob) => void
 ): Promise<QuerySuggestions> => {
-  const response = await slowApi.post<QuerySuggestions>(
+  const response = await api.post<QuerySuggestions & { job?: AiJob }>(
     `/api/v1/profile/suggest-queries?country=${country}&mode=${mode}`
   );
-  return response.data;
+  const { job } = response.data;
+  if (!job || job.status === 'done') return response.data;
+  const finished = await waitForAiJob(job, onProgress);
+  if (finished.status !== 'done' || !finished.result) {
+    throw new Error(finished.error ?? 'suggestion failed');
+  }
+  return finished.result as QuerySuggestions;
 };
 
 export const saveOnboarding = async (payload: OnboardingPayload): Promise<Profile> => {
