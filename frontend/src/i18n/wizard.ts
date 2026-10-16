@@ -78,6 +78,9 @@ export const wizardEn = {
     readingWiden: "Reading your CV’s transferable skills…",
     reading: "AI is reading your CV…",
     usually: "usually 10-45 seconds",
+    // WO-31: the suggestion request waits in the AI queue
+    queued: (about: string) =>
+      `You're in a queue for AI suggestions${about} — they'll appear here by themselves.`,
     fromExperience: "From your experience",
     professions: "Your professions — official job taxonomy",
     professionsHint: "(catches jobs whose title uses other words)",
@@ -185,6 +188,8 @@ export const wizardSv: WizardDict = {
     readingWiden: "Läser de överförbara kompetenserna i ditt CV…",
     reading: "AI:n läser ditt CV…",
     usually: "brukar ta 10–45 sekunder",
+    queued: (about) =>
+      `Du står i kö för AI-förslag${about} — de dyker upp här av sig själva.`,
     fromExperience: "Från din erfarenhet",
     professions: "Dina yrken — officiell yrkestaxonomi",
     professionsHint: "(fångar jobb vars titel använder andra ord)",

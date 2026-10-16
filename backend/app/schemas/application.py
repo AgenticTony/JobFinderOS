@@ -46,8 +46,14 @@ class DraftResponse(BaseModel):
     cover_letter: Optional[str] = None
     tailored_cv: Optional[str] = None
     changes_summary: List[str] = []
-    status: str  # drafting | ready | sending (transient submit claim) | submitted | failed
+    # queued (WO-31: waiting in ai_jobs) | drafting (legacy inline) |
+    # ready | sending (transient submit claim) | submitted | failed
+    status: str
     error: Optional[str] = None
+    # WO-31: the draft's ACTIVE ai_job (tailor or recheck), or None —
+    # {id, kind, status: queued|running, position, eta_minutes,
+    # paused_until}. Drives the honest "you're in a queue" card copy.
+    queue: Optional[dict] = None
     # WO-01 fabrication guard findings. Since WO-23 the column carries
     # tier, and a BLOCKED draft persists its high findings too (the
     # recovery UI's content). Consumers showing the advisory panel must
@@ -66,7 +72,7 @@ class DraftResponse(BaseModel):
     job: Optional[dict] = None
 
     @classmethod
-    def from_orm_draft(cls, d) -> "DraftResponse":
+    def from_orm_draft(cls, d, queue: Optional[dict] = None) -> "DraftResponse":
         from app.schemas.common import parse_json_list
         from app.schemas.job import JobResponse
 
@@ -79,6 +85,7 @@ class DraftResponse(BaseModel):
             changes_summary=parse_json_list(d.changes_summary),
             status=d.status,
             error=d.error,
+            queue=queue,
             fabrication_findings=parse_json_list(getattr(d, "fabrication_findings", None), default=[]) or [],
             fabrication_retries=getattr(d, "fabrication_retries", 0) or 0,
             fabrication_blocked=bool(getattr(d, "fabrication_blocked", False)),

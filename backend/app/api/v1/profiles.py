@@ -3,7 +3,7 @@
 import logging
 from functools import partial
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,8 @@ from app.schemas.profile import (
     ProfilePreferencesUpdate,
     ProfileResponse,
 )
-from app.services.ai_service import ai_service_available, get_ai_service
+from app.services import ai_queue
+from app.services.ai_service import ai_service_available
 from app.services.cv_service import (
     create_or_replace_profile_from_cv,
     get_active_profile,
@@ -31,17 +32,23 @@ router = APIRouter()
 
 @router.post("/upload", response_model=ProfileResponse)
 async def upload_cv(
+    response: Response,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_authenticated_user),
 ):
     """
-    Upload a CV (PDF or Word .docx): extracts text, stores the file,
-    runs AI profile extraction, and replaces the active profile.
+    Upload a CV (PDF or Word .docx): extracts the text, stores the file
+    and replaces the active profile — then QUEUES the AI profile
+    extraction (WO-31).
 
-    The heavy work (parsing + GLM call, up to ~2 min when Z.ai is slow)
-    runs in a threadpool so the rest of the API stays responsive.
+    The CV is saved before any AI runs; an unreadable file is a 400 here.
+    The extraction is an ai_job: 202 with `extraction` (queued/running,
+    position, ETA) while it waits, and provider load delays it instead of
+    silently losing the fields. 200 when it has already landed.
     """
+    from app.services import cv_service
+
     enforce(user.id, "cv_upload")
     lower = (file.filename or "").lower()
     if not file.filename or not lower.endswith((".pdf", ".docx")):
@@ -55,9 +62,8 @@ async def upload_cv(
 
     content = await file.read()
     try:
-        # run_in_threadpool: create_or_replace_profile_from_cv does blocking
-        # IO (parsing, sync httpx) — running it inline would block the
-        # event loop and freeze every other request during the GLM call.
+        # run_in_threadpool: parsing + storage are blocking IO — running
+        # them inline would block the event loop.
         profile = await run_in_threadpool(
             partial(
                 create_or_replace_profile_from_cv,
@@ -65,12 +71,25 @@ async def upload_cv(
                 content,
                 file.filename,
                 user_id=user.id,
+                extract=False,
             )
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    return ProfileResponse.from_orm_profile(profile)
+    if cv_service.ai_service_available():
+        await run_in_threadpool(
+            partial(ai_queue.enqueue, db, user_id=user.id, kind="extract",
+                    subject_id=profile.id)
+        )
+        await run_in_threadpool(ai_queue.drain_if_inline)
+        db.expire_all()
+    else:
+        logger.warning("GLM_API_KEY not set — profile stored with CV text only; AI matching disabled")
+    extraction = ai_queue.extraction_view(db, profile)
+    if extraction is not None and extraction["status"] in ("queued", "running"):
+        response.status_code = 202
+    return ProfileResponse.from_orm_profile(profile, extraction=extraction)
 
 
 @router.get("/me", response_model=ProfileResponse)
@@ -81,7 +100,8 @@ async def get_my_profile(
     profile = get_active_profile(db, user_id=user.id)
     if not profile:
         raise HTTPException(status_code=404, detail="No profile yet — upload a CV first")
-    return ProfileResponse.from_orm_profile(profile)
+    return ProfileResponse.from_orm_profile(
+        profile, extraction=ai_queue.extraction_view(db, profile))
 
 
 @router.put("/me", response_model=ProfileResponse)
@@ -237,6 +257,7 @@ async def save_onboarding(
 @router.post("/suggest-queries")
 async def suggest_queries(
     country: str,
+    response: Response,
     mode: str = "field",
     db: Session = Depends(get_db),
     user: User = Depends(get_authenticated_user),
@@ -246,6 +267,11 @@ async def suggest_queries(
     country, shaped by the user's chosen search strategy:
     field (default) | adjacent | widen. The mode is the user's own choice —
     never inferred from age or any protected characteristic.
+
+    WO-31: queued — 202 with {"job": {...queued/running, position, ETA}};
+    poll GET /api/v1/ai-jobs/{id} for the result. 200 with the
+    suggestions (and the finished job) when already done. Provider load
+    keeps it queued; it never errors on load.
     """
     from app.data.geo import COUNTRIES
 
@@ -263,14 +289,17 @@ async def suggest_queries(
     if not ai_service_available():
         raise HTTPException(status_code=400, detail="GLM_API_KEY not configured")
 
-    try:
-        result = await run_in_threadpool(
-            get_ai_service().suggest_search_queries, profile.cv_text, country, mode
-        )
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"AI suggestion failed: {e}")
-
-    return {"country": country, "mode": mode, **result}
+    job = await run_in_threadpool(
+        partial(ai_queue.enqueue, db, user_id=user.id, kind="suggest",
+                subject_id=profile.id, params={"country": country, "mode": mode})
+    )
+    await run_in_threadpool(ai_queue.drain_if_inline)
+    db.expire_all()
+    view = ai_queue.job_view(db.get(type(job), job.id), include_result=True)
+    if view["status"] == "done" and view.get("result"):
+        return {**view["result"], "job": view}
+    response.status_code = 202
+    return {"country": country, "mode": mode, "job": view}
 
 
 @router.get("/geo")

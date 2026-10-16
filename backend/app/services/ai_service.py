@@ -27,7 +27,13 @@ from contextlib import contextmanager
 from typing import Any, Dict, Optional
 
 import httpx
-from openai import OpenAI, RateLimitError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 
 from app.core.config import settings
 
@@ -151,6 +157,113 @@ class AIEmptyResponseError(AIServiceError):
 class AIBusyError(AIServiceError):
     """The provider kept rate-limiting an interactive call past the
     bounded retry. The message is user-facing (draft.error)."""
+
+
+class AILoadError(AIServiceError):
+    """WO-31: provider LOAD, raised only inside the ai_jobs drainer
+    (queue_mode). Never a verdict on the request — the drainer re-queues
+    the job with next_attempt_at = now + delay_s and the user keeps
+    seeing 'queued'. code: the provider's code ('1302'), 'timeout',
+    'connection' or '5xx'; quota=True for the 1308/1310/1316-1321
+    window codes (background claims pause); account=True for 1309/1313
+    (account-level: stays queued, owner-paging log)."""
+
+    def __init__(self, message: str, *, code: Optional[str] = None,
+                 delay_s: Optional[float] = None, quota: bool = False,
+                 account: bool = False):
+        super().__init__(message)
+        self.code = code
+        self.delay_s = delay_s
+        self.quota = quota
+        self.account = account
+
+
+# Z.ai error codes (docs.z.ai/api-reference/api-code, read 2026-10-16).
+QUOTA_CODES = frozenset({"1308", "1310"} | {str(c) for c in range(1316, 1322)})
+ACCOUNT_CODES = frozenset({"1309", "1313"})
+# Quota messages carry a reset time with no zone. Read as UTC+8 (Z.ai's
+# home zone): if the provider actually means UTC we wake 8h EARLY and
+# simply get re-paused — never 8h late.
+_RESET_TZ_OFFSET_H = 8
+QUOTA_FALLBACK_DELAY_S = 15 * 60
+ACCOUNT_DELAY_S = 10 * 60
+LOAD_MAX_DELAY_S = 15 * 60
+
+# WO-31: True while the ai_jobs drainer runs a job on this thread/context.
+# In queue mode a load error raises AILoadError at once (no in-request
+# backoff loop, no SDK retry) — the queue owns the waiting.
+from contextvars import ContextVar as _ContextVar
+
+queue_mode: _ContextVar = _ContextVar("ai_queue_mode", default=False)
+
+
+def _provider_code_and_message(err) -> tuple:
+    """(code, message) from a Z.ai error body, best-effort. The body may
+    be {'code','message'} or {'error': {'code','message'}}."""
+    candidates = [getattr(err, "body", None)]
+    resp = getattr(err, "response", None)
+    if resp is not None:
+        try:
+            candidates.append(resp.json())
+        except Exception:  # noqa: BLE001 — non-JSON body
+            pass
+    for body in candidates:
+        if isinstance(body, dict):
+            inner = body.get("error") if isinstance(body.get("error"), dict) else body
+            if inner.get("code") is not None:
+                return str(inner.get("code")), str(inner.get("message") or "")
+    m = re.search(r"'code':\s*'?(\d{4})", str(err))
+    return (m.group(1) if m else None), str(err)
+
+
+def _quota_reset_delay(message: str) -> float:
+    """Seconds until the reset time a quota message names, clamped to
+    [60s, 6h]; the fallback when no time parses."""
+    from datetime import datetime, timedelta, timezone
+
+    m = re.search(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})", message or "")
+    if not m:
+        return QUOTA_FALLBACK_DELAY_S
+    try:
+        local = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}")
+    except ValueError:
+        return QUOTA_FALLBACK_DELAY_S
+    reset = local.replace(tzinfo=timezone(timedelta(hours=_RESET_TZ_OFFSET_H)))
+    delay = (reset - datetime.now(timezone.utc)).total_seconds()
+    return max(60.0, min(delay, 6 * 3600.0))
+
+
+def classify_load_error(err) -> Optional["AILoadError"]:
+    """Map a provider exception to an AILoadError, or None when it is not
+    load (a 400, an auth error, a format failure — those stay failures)."""
+    if isinstance(err, RateLimitError):
+        code, message = _provider_code_and_message(err)
+        if code in QUOTA_CODES:
+            return AILoadError(f"quota window ({code})", code=code,
+                               delay_s=_quota_reset_delay(message), quota=True)
+        if code in ACCOUNT_CODES:
+            return AILoadError(f"account-level limit ({code})", code=code,
+                               delay_s=ACCOUNT_DELAY_S, account=True)
+        delay = None
+        headers = getattr(getattr(err, "response", None), "headers", None) or {}
+        try:
+            if headers.get("retry-after-ms") is not None:
+                delay = float(headers["retry-after-ms"]) / 1000.0
+            elif headers.get("retry-after") is not None:
+                delay = float(headers["retry-after"])
+        except (TypeError, ValueError):
+            delay = None
+        if delay is not None:
+            delay = max(0.0, min(delay, LOAD_MAX_DELAY_S))
+        return AILoadError(f"rate limited ({code or '429'})",
+                           code=code or "429", delay_s=delay)
+    if isinstance(err, APITimeoutError):
+        return AILoadError("provider timeout", code="timeout")
+    if isinstance(err, APIConnectionError):
+        return AILoadError("provider unreachable", code="connection")
+    if isinstance(err, InternalServerError):
+        return AILoadError("provider 5xx", code="5xx")
+    return None
 
 
 class AICallGate:
@@ -956,14 +1069,21 @@ An empty list means the document is faithful."""
         # out malformed, to distinguish truncation from pure garbage.
         self._last_finish_reason = None
         interactive = kind in INTERACTIVE_KINDS
-        attempts = 1 + (RATE_LIMIT_RETRIES if interactive else 0)
+        queued = queue_mode.get()
+        # WO-31: inside the drainer the QUEUE owns waiting — one attempt,
+        # no SDK retry (it would sleep on a slot), load raises
+        # AILoadError and the job re-queues with next_attempt_at.
+        client = self.client
+        if queued and hasattr(client, "with_options"):
+            client = client.with_options(max_retries=0)
+        attempts = 1 if queued else 1 + (RATE_LIMIT_RETRIES if interactive else 0)
         for attempt in range(attempts):
             try:
                 # The gate is held for the HTTP call only — the backoff
                 # sleep below runs OUTSIDE it, so a waiting retry never
                 # sits on a slot someone else could use.
                 with _ai_gate().slot(interactive=interactive):
-                    response = self.client.chat.completions.create(
+                    response = client.chat.completions.create(
                         model=self.model,
                         messages=[
                             {"role": "system", "content": system_prompt},
@@ -983,6 +1103,8 @@ An empty list means the document is faithful."""
             except RateLimitError as e:
                 record_ai_usage(kind, self.model, None,
                                 detail="rate_limited (429)")
+                if queued:
+                    raise classify_load_error(e) from e
                 if not interactive:
                     raise  # background: the matcher retries next run
                 if attempt + 1 >= attempts:
@@ -997,6 +1119,10 @@ An empty list means the document is faithful."""
                                "retrying in %.1fs", kind, attempt + 1,
                                attempts, delay)
                 time.sleep(delay)
+            except (APITimeoutError, APIConnectionError, InternalServerError) as e:
+                if queued:
+                    raise classify_load_error(e) from e
+                raise
         if response.choices:
             self._last_finish_reason = getattr(
                 response.choices[0], "finish_reason", None

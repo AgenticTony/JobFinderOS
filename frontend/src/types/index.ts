@@ -139,6 +139,19 @@ export interface OutcomeStats {
   outcome_counts: Record<string, number>;
 }
 
+// WO-31: one queued AI job (tailor / recheck / extract / suggest). The
+// drainer completes it; provider load keeps it queued, never failed.
+export interface AiJob {
+  id: number;
+  kind: 'tailor' | 'recheck' | 'extract' | 'suggest' | 'match';
+  status: 'queued' | 'running' | 'done' | 'failed';
+  position: number; // queued jobs ahead; shown only when > 0
+  eta_minutes: number | null; // an estimate, never a promise
+  paused_until: string | null; // provider quota window (naive UTC)
+  error: string | null; // failed only — non-load causes, with an action
+  result?: unknown;
+}
+
 export interface ApplicationDraft {
   id: number;
   job_id: number;
@@ -146,8 +159,10 @@ export interface ApplicationDraft {
   cover_letter: string | null;
   tailored_cv: string | null;
   changes_summary: string[];
-  status: 'drafting' | 'ready' | 'submitted' | 'failed';
+  status: 'queued' | 'drafting' | 'ready' | 'submitted' | 'failed';
   error: string | null;
+  // WO-31: the draft's active tailor/recheck job, or null
+  queue?: AiJob | null;
   // WO-01 fabrication guard findings. Since WO-23 a BLOCKED draft also
   // persists its high findings (the recovery UI's content) — consumers
   // showing the advisory panel must filter tier === 'advisory'.
@@ -187,6 +202,8 @@ export interface Profile {
   vouched_facts: string[];
   // WO-19 part B: citizen_or_pr | eu_right | needs_sponsorship | prefer_not_say…
   work_rights?: string | null;
+  // WO-31: the CV-reading job while queued/running, or its recent failure
+  extraction?: AiJob | null;
   onboarded: boolean;
   country: string | null;
   region: string | null;

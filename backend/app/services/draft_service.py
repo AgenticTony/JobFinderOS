@@ -250,43 +250,23 @@ def list_drafts(db: Session, limit: int = 100, *, user_id) -> List[ApplicationDr
     )
 
 
-def create_draft_for_job(
-    db: Session,
-    job: JobPosting,
-    *,
-    profile: Profile,
-    force: bool = False,
-    user_id,
-) -> ApplicationDraft:
-    """
-    Generate (or regenerate) the tailored application package for an approved job.
+def _snapshot_cv(draft: ApplicationDraft, profile: Profile) -> None:
+    """P1-5b: snapshot the CV reference this tailoring runs against. The
+    profile's path moves on re-upload; without the snapshot the send
+    path cannot know which CV the package was built from, and a
+    CV-old-tailored package emails CV-new as its "original CV".
+    Refreshed on every (re)generation — the package now being built IS
+    against the current CV. The early-return reuse of an untouched
+    'ready' draft keeps its original snapshot (package unchanged)."""
+    draft.cv_file_path = profile.cv_file_path
+    draft.cv_hash = hashlib.sha256(
+        (profile.cv_text or "").encode("utf-8")
+    ).hexdigest()
 
-    TENANCY LAYER 1: the profile arrives as a required parameter — this
-    function never resolves identity itself. The three cross-tenant P0
-    leaks all came from services fetching "the" profile internally; the
-    route resolves the caller's profile and hands it in.
 
-    The AI tailoring call is synchronous here — the API endpoint wraps this in
-    a threadpool. Typical latency ~5-20s on glm-4.6 with thinking disabled.
-    """
-    existing = (
-        db.query(ApplicationDraft)
-        .filter(
-            ApplicationDraft.job_id == job.id,
-            ApplicationDraft.user_id == user_id,
-            ApplicationDraft.status != "submitted",
-        )
-        .first()
-    )
-    if existing and existing.status == "ready" and not force:
-        return existing  # already prepared — user should review, not regenerate
-
-    if not profile or not profile.cv_text:
-        raise DraftError("Upload your CV before preparing applications")
-
-    if not ai_service_available():
-        raise DraftError("GLM_API_KEY not configured — cannot tailor applications")
-
+def _open_draft_row(db: Session, job: JobPosting, existing, *, profile: Profile,
+                    user_id, status: str) -> ApplicationDraft:
+    """Create (or reset, for a regeneration) the draft row and commit it."""
     match: Optional[MatchResult] = (
         db.query(MatchResult)
         .filter(MatchResult.job_id == job.id, MatchResult.user_id == user_id)
@@ -297,7 +277,7 @@ def create_draft_for_job(
     draft = existing or ApplicationDraft(
         user_id=user_id, job_id=job.id, match_id=match.id if match else None
     )
-    draft.status = "drafting"
+    draft.status = status
     draft.error = None
     # Review fix R6 (2026-09-15): a regeneration REPLACES the text, so
     # the previous text's attestations die with it — they must not
@@ -307,114 +287,61 @@ def create_draft_for_job(
     # recovery, and the fabrication-rate data keeps the block.
     draft.fabrication_attested = None
     draft.fabrication_resolved_at = None
-    # P1-5b: snapshot the CV reference this tailoring runs against. The
-    # profile's path moves on re-upload; without the snapshot the send
-    # path cannot know which CV the package was built from, and a
-    # CV-old-tailored package emails CV-new as its "original CV".
-    # Refreshed on every (re)generation — the package now being built IS
-    # against the current CV. The early-return reuse of an untouched
-    # 'ready' draft above keeps its original snapshot (package unchanged).
-    draft.cv_file_path = profile.cv_file_path
-    draft.cv_hash = hashlib.sha256(
-        (profile.cv_text or "").encode("utf-8")
-    ).hexdigest()
+    _snapshot_cv(draft, profile)
     db.add(draft)
     db.commit()
+    return draft
 
+
+def _open_draft(db: Session, job: JobPosting, *, user_id) -> Optional[ApplicationDraft]:
+    return (
+        db.query(ApplicationDraft)
+        .filter(
+            ApplicationDraft.job_id == job.id,
+            ApplicationDraft.user_id == user_id,
+            ApplicationDraft.status != "submitted",
+        )
+        .first()
+    )
+
+
+def create_draft_for_job(
+    db: Session,
+    job: JobPosting,
+    *,
+    profile: Profile,
+    force: bool = False,
+    user_id,
+) -> ApplicationDraft:
+    """
+    Generate (or regenerate) the tailored application package for an
+    approved job, INLINE (tests, scripts, local dev). User requests go
+    through queue_draft_for_job — WO-31: provider load queues, never
+    fails, a user's draft.
+
+    TENANCY LAYER 1: the profile arrives as a required parameter — this
+    function never resolves identity itself. The three cross-tenant P0
+    leaks all came from services fetching "the" profile internally; the
+    route resolves the caller's profile and hands it in.
+    """
+    existing = _open_draft(db, job, user_id=user_id)
+    if existing and existing.status == "ready" and not force:
+        return existing  # already prepared — user should review, not regenerate
+
+    if not profile or not profile.cv_text:
+        raise DraftError("Upload your CV before preparing applications")
+
+    if not ai_service_available():
+        raise DraftError("GLM_API_KEY not configured — cannot tailor applications")
+
+    draft = _open_draft_row(db, job, existing, profile=profile, user_id=user_id,
+                            status="drafting")
     try:
-        # FABRICATION GUARD (WO-01 Layer C): every tailored output is
-        # checked against the source CV before anything reaches the
-        # review screen. High-confidence findings REGENERATE (never strip
-        # — a silently mutilated document is worse than a blocked one),
-        # up to MAX_FABRICATION_RETRIES; a survivor BLOCKS the draft and
-        # names the untraceable claim. Advisory findings persist for the
-        # review UI and never auto-act.
-        # WO-23: the check itself (source composition, Layer A, judge)
-        # lives in check_package — ONE implementation shared with
-        # re-check. Attestations on this draft ride along: a claim the
-        # user already confirmed must not re-block a regeneration.
-        from app.services.fabrication import findings_as_json
-
-        correction: Optional[str] = None
-        retries = 0
-        while True:
-            kwargs = {}
-            if correction:
-                kwargs["correction"] = correction
-            result = get_ai_service().tailor_application(
-                profile_context=build_profile_context(profile),
-                cv_text=profile.cv_text,
-                job_description=_job_text(job),
-                **kwargs,
-            )
-            draft.cover_letter = result["cover_letter"]
-            draft.tailored_cv = result["tailored_cv"]
-            from app.schemas.common import dump_json_list
-
-            draft.changes_summary = dump_json_list(result["changes_summary"])
-
-            high, advisory = check_package(
-                profile, job,
-                result.get("cover_letter", ""), result.get("tailored_cv", ""),
-                attested=_attested_entries(draft),
-            )
-
-            if not high:
-                from app.schemas.common import dump_json_list as _dumps
-
-                draft.fabrication_findings = _dumps(findings_as_json(advisory))
-                draft.fabrication_retries = retries
-                # Constraint 4 (review fix R6): fabrication_blocked is
-                # never cleared on ANY recovery path — a draft that
-                # blocked once keeps the block in the fabrication-rate
-                # data even after a clean regeneration. It is False only
-                # for drafts that never blocked (column default).
-                draft.status = "ready"
-                db.add(draft)
-                db.commit()
-                db.refresh(draft)
-                logger.info(
-                    "Draft %s prepared for job %s (fabrication retries=%d, "
-                    "advisory=%d)", draft.id, job.id, retries, len(advisory),
-                )
-                return draft
-
-            if retries >= MAX_FABRICATION_RETRIES:
-                # WO-23: the findings PERSIST (high + advisory) — they are
-                # the recovery UI's content ("Why this was blocked"), and
-                # the block itself stays recorded forever.
-                from app.schemas.common import dump_json_list as _dumps
-
-                draft.fabrication_findings = _dumps(findings_as_json(
-                    high + advisory))
-                draft.fabrication_retries = retries
-                draft.fabrication_blocked = True
-                draft.status = "failed"
-                named = ", ".join(
-                    sorted({c.value.split("|")[0] for c in high})
-                )
-                draft.error = fabrication_block_error(profile.cv_text, high)
-                db.add(draft)
-                db.commit()
-                logger.warning(
-                    "Draft %s BLOCKED after %d retries: %s",
-                    draft.id, retries, named,
-                )
-                return draft
-
-            retries += 1
-            correction = (
-                "Your previous output contained claims that cannot be traced "
-                "to your CV and may be fabrications: "
-                + ", ".join(sorted({c.value.split("|")[0] for c in high}))
-                + ". Regenerate the documents WITHOUT these claims — every "
-                "employer, date, credential and metric must exist in the "
-                "original CV."
-            )
-            logger.info(
-                "Draft %s: %d high-confidence fabrication findings — "
-                "regenerating (attempt %d)", draft.id, len(high), retries,
-            )
+        _tailor_into(db, draft, job, profile)
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+        return draft
     except Exception as e:  # noqa: BLE001 — surface the failure on the draft row
         db.rollback()
         draft.status = "failed"
@@ -429,6 +356,143 @@ def create_draft_for_job(
         db.refresh(draft)
         logger.error("Draft tailoring failed for job %s: %s", job.id, e)
         return draft
+
+
+def queue_draft_for_job(
+    db: Session,
+    job: JobPosting,
+    *,
+    profile: Profile,
+    force: bool = False,
+    user_id,
+) -> ApplicationDraft:
+    """WO-31: the user-facing Prepare. Opens the draft row as 'queued'
+    and enqueues ONE tailor job for it; the drainer writes the package.
+
+    Idempotent: a draft already queued (or a legacy 'drafting' row from
+    an inline call a deploy killed) gets its existing active job — never
+    a second job or a second draft. A 'ready' draft is returned untouched
+    unless force (regenerate).
+    """
+    from app.services import ai_queue
+
+    existing = _open_draft(db, job, user_id=user_id)
+    if existing is not None:
+        if existing.status == "ready" and not force:
+            return existing
+        if existing.status == "sending":
+            raise DraftConflictError("This application is being sent right now")
+        if existing.status in ("queued", "drafting"):
+            if existing.status == "drafting":
+                existing.status = "queued"
+                db.add(existing)
+                db.commit()
+            ai_queue.enqueue(db, user_id=user_id, kind="tailor", subject_id=existing.id)
+            return existing
+
+    if not profile or not profile.cv_text:
+        raise DraftError("Upload your CV before preparing applications")
+    if not ai_service_available():
+        raise DraftError("GLM_API_KEY not configured — cannot tailor applications")
+
+    draft = _open_draft_row(db, job, existing, profile=profile, user_id=user_id,
+                            status="queued")
+    ai_queue.enqueue(db, user_id=user_id, kind="tailor", subject_id=draft.id)
+    return draft
+
+
+def _tailor_into(db: Session, draft: ApplicationDraft, job: JobPosting,
+                 profile: Profile) -> None:
+    """Tailor + guard, staging the result on the draft (ready, or failed
+    with a fabrication block). NEVER commits: the inline path commits it,
+    the ai_jobs drainer commits it together with the job's completion so
+    a lost lease writes nothing. Exceptions propagate (load errors
+    re-queue in the drainer; everything else fails the draft)."""
+    # FABRICATION GUARD (WO-01 Layer C): every tailored output is
+    # checked against the source CV before anything reaches the
+    # review screen. High-confidence findings REGENERATE (never strip
+    # — a silently mutilated document is worse than a blocked one),
+    # up to MAX_FABRICATION_RETRIES; a survivor BLOCKS the draft and
+    # names the untraceable claim. Advisory findings persist for the
+    # review UI and never auto-act.
+    # WO-23: the check itself (source composition, Layer A, judge)
+    # lives in check_package — ONE implementation shared with
+    # re-check. Attestations on this draft ride along: a claim the
+    # user already confirmed must not re-block a regeneration.
+    from app.schemas.common import dump_json_list
+    from app.services.fabrication import findings_as_json
+
+    correction: Optional[str] = None
+    retries = 0
+    while True:
+        kwargs = {}
+        if correction:
+            kwargs["correction"] = correction
+        result = get_ai_service().tailor_application(
+            profile_context=build_profile_context(profile),
+            cv_text=profile.cv_text,
+            job_description=_job_text(job),
+            **kwargs,
+        )
+        draft.cover_letter = result["cover_letter"]
+        draft.tailored_cv = result["tailored_cv"]
+        draft.changes_summary = dump_json_list(result["changes_summary"])
+
+        high, advisory = check_package(
+            profile, job,
+            result.get("cover_letter", ""), result.get("tailored_cv", ""),
+            attested=_attested_entries(draft),
+        )
+
+        if not high:
+            draft.fabrication_findings = dump_json_list(findings_as_json(advisory))
+            draft.fabrication_retries = retries
+            # Constraint 4 (review fix R6): fabrication_blocked is
+            # never cleared on ANY recovery path — a draft that
+            # blocked once keeps the block in the fabrication-rate
+            # data even after a clean regeneration. It is False only
+            # for drafts that never blocked (column default).
+            draft.status = "ready"
+            db.add(draft)
+            logger.info(
+                "Draft %s prepared for job %s (fabrication retries=%d, "
+                "advisory=%d)", draft.id, job.id, retries, len(advisory),
+            )
+            return
+
+        if retries >= MAX_FABRICATION_RETRIES:
+            # WO-23: the findings PERSIST (high + advisory) — they are
+            # the recovery UI's content ("Why this was blocked"), and
+            # the block itself stays recorded forever.
+            draft.fabrication_findings = dump_json_list(findings_as_json(
+                high + advisory))
+            draft.fabrication_retries = retries
+            draft.fabrication_blocked = True
+            draft.status = "failed"
+            named = ", ".join(
+                sorted({c.value.split("|")[0] for c in high})
+            )
+            draft.error = fabrication_block_error(profile.cv_text, high)
+            db.add(draft)
+            logger.warning(
+                "Draft %s BLOCKED after %d retries: %s",
+                draft.id, retries, named,
+            )
+            return
+
+        retries += 1
+        correction = (
+            "Your previous output contained claims that cannot be traced "
+            "to your CV and may be fabrications: "
+            + ", ".join(sorted({c.value.split("|")[0] for c in high}))
+            + ". Regenerate the documents WITHOUT these claims — every "
+            "employer, date, credential and metric must exist in the "
+            "original CV."
+        )
+        logger.info(
+            "Draft %s: %d high-confidence fabrication findings — "
+            "regenerating (attempt %d)", draft.id, len(high), retries,
+        )
 
 
 def save_draft_edits(
@@ -450,19 +514,7 @@ def save_draft_edits(
     return draft
 
 
-def recheck_draft(db: Session, draft: ApplicationDraft, *, profile: Profile) -> ApplicationDraft:
-    """WO-23: run the shared guard over the draft's CURRENT text.
-
-    Clean -> 'ready' (fabrication_resolved_at set; fabrication_blocked
-    STAYS true — constraint 4). Still flagged -> stays 'failed' with the
-    remaining findings persisted for the recovery panel; each resolves by
-    fix-in-text (edit + re-check again) or by attestation.
-
-    The re-check is for drafts that failed the guard FIRST time round
-    (owner decision 2026-09-11): edits on a draft that never failed stay
-    un-checked — the guard polices AI output; what the user writes is
-    theirs.
-    """
+def _validate_recheck(draft: ApplicationDraft) -> None:
     if not draft.fabrication_blocked:
         raise DraftError(
             "Only drafts blocked by the fabrication guard can be re-checked"
@@ -480,21 +532,18 @@ def recheck_draft(db: Session, draft: ApplicationDraft, *, profile: Profile) -> 
     if not (draft.cover_letter or draft.tailored_cv):
         raise DraftError("No documents to check — regenerate the draft first")
 
+
+def _recheck_into(db: Session, draft: ApplicationDraft, profile: Profile) -> None:
+    """Run the shared guard over the draft's CURRENT text and stage the
+    verdict (ready + resolved, or failed with what remains). NEVER
+    commits; guard transport failures propagate (fail-closed)."""
     job: Optional[JobPosting] = draft.job
     if job is None:
         job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()
-    try:
-        high, advisory = check_package(
-            profile, job, draft.cover_letter, draft.tailored_cv,
-            attested=_attested_entries(draft),
-        )
-    except Exception as e:  # noqa: BLE001 — transport failure, never a verdict
-        # The user's text is already saved (save_draft_edits); only this
-        # check failed. Record it, keep the draft failed, re-raise for 400.
-        draft.error = f"Re-check failed: {type(e).__name__}: {e}"
-        db.add(draft)
-        db.commit()
-        raise DraftError(draft.error) from e
+    high, advisory = check_package(
+        profile, job, draft.cover_letter, draft.tailored_cv,
+        attested=_attested_entries(draft),
+    )
 
     from app.schemas.common import dump_json_list
     from app.services.fabrication import findings_as_json
@@ -514,8 +563,47 @@ def recheck_draft(db: Session, draft: ApplicationDraft, *, profile: Profile) -> 
             draft.id, len(high),
         )
     db.add(draft)
+
+
+def recheck_draft(db: Session, draft: ApplicationDraft, *, profile: Profile) -> ApplicationDraft:
+    """WO-23: run the shared guard over the draft's CURRENT text, INLINE
+    (user requests go through queue_recheck — WO-31).
+
+    Clean -> 'ready' (fabrication_resolved_at set; fabrication_blocked
+    STAYS true — constraint 4). Still flagged -> stays 'failed' with the
+    remaining findings persisted for the recovery panel; each resolves by
+    fix-in-text (edit + re-check again) or by attestation.
+
+    The re-check is for drafts that failed the guard FIRST time round
+    (owner decision 2026-09-11): edits on a draft that never failed stay
+    un-checked — the guard polices AI output; what the user writes is
+    theirs.
+    """
+    _validate_recheck(draft)
+    try:
+        _recheck_into(db, draft, profile)
+    except Exception as e:  # noqa: BLE001 — transport failure, never a verdict
+        # The user's text is already saved (save_draft_edits); only this
+        # check failed. Record it, keep the draft failed, re-raise for 400.
+        db.rollback()
+        draft.error = f"Re-check failed: {type(e).__name__}: {e}"
+        db.add(draft)
+        db.commit()
+        raise DraftError(draft.error) from e
     db.commit()
     db.refresh(draft)
+    return draft
+
+
+def queue_recheck(db: Session, draft: ApplicationDraft) -> ApplicationDraft:
+    """WO-31: validate NOW (an invalid re-check is a 400 the user can act
+    on), then enqueue the guard run. The draft stays 'failed' with its
+    recovery panel while the check waits; the job state rides on the
+    draft response."""
+    from app.services import ai_queue
+
+    _validate_recheck(draft)
+    ai_queue.enqueue(db, user_id=draft.user_id, kind="recheck", subject_id=draft.id)
     return draft
 
 
@@ -554,7 +642,8 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
                  save_to_profile: bool, *, profile: Profile,
                  profile_fact: Optional[str] = None,
                  context: Optional[str] = None,
-                 user_id=None) -> ApplicationDraft:
+                 user_id=None,
+                 defer_final_check: bool = False) -> ApplicationDraft:
     """WO-23: record the user's 'This is true — keep it' for ONE flagged
     claim. Per-claim resolution — never a whole-draft override.
 
@@ -576,6 +665,9 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
       preferences save). The backend derives nothing: confirming one
       atom of a sentence ("40%") must not vouch the sentence's other
       claims ("team of 12") into guard truth.
+    - WO-31: defer_final_check (the route) commits the attestation and
+      ENQUEUES the final check as a recheck job instead of calling the
+      judge inline — provider load queues it, never fails the confirm.
     - N3: no blanket claim length cap — judge claim values are free
       text; EXACT match to a stored flagged value is the override gate,
       and rejecting what the guard itself listed recreates WO-23's
@@ -683,6 +775,11 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
         from app.core.ratelimit import enforce
 
         enforce(user_id, "draft_recheck")
+    if defer_final_check:
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+        return queue_recheck(db, draft)
     job: Optional[JobPosting] = draft.job
     if job is None:
         job = db.query(JobPosting).filter(JobPosting.id == draft.job_id).first()

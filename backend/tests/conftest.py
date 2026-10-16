@@ -36,6 +36,11 @@ os.environ["DEBUG"] = "true"  # tests run with production guards relaxed
 # default — draft tests script Layer A and must not spend judge calls.
 # TestProductionJudge opts in per-test.
 os.environ.setdefault("FABRICATION_JUDGE", "off")
+# WO-31: the suite never starts the background drainer thread. Routes
+# that enqueue AI work drain it synchronously in the request ("inline"),
+# so route tests keep observing the finished draft/profile; the queue's
+# own tests switch to "off" and drive AIDrainer.drain_once() themselves.
+os.environ.setdefault("AI_DRAINER", "inline")
 # MIG-WO2: deterministic Supabase URL for auth verification — the JWKS
 # fetch is monkeypatched (never leaves the machine), but app.users bakes
 # the token ISSUER from this at import; a fixed value keeps the suite

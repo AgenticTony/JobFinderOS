@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import CvUpload from '@/components/CvUpload';
+import { isPending, queueDetail } from '@/lib/aiQueue';
 // GA4 funnel events — consent-gated (lib/analytics.ts).
 import { track } from '@/lib/analytics';
 import MatchCard from '@/components/MatchCard';
@@ -348,6 +349,23 @@ export default function Home() {
     };
   }, [pollStatus]);
 
+  // WO-31: while any draft waits in the AI queue (tailor or re-check),
+  // poll the drafts list so the card fills in by itself. Hidden tabs
+  // skip, same as every other poll; it stops once nothing is pending.
+  const draftsPending = drafts.some(
+    (d) => d.status === 'queued' || d.status === 'drafting' || isPending(d.queue)
+  );
+  useEffect(() => {
+    if (!draftsPending) return;
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      getDrafts()
+        .then(setDrafts)
+        .catch(() => {});
+    }, 4000);
+    return () => clearInterval(id);
+  }, [draftsPending]);
+
   // While background matching runs, poll status + stream fresh matches in
   // (same hidden-tab skip as pollStatus — a backgrounded tab doesn't need
   // the 8s match stream; it catches up on visibility)
@@ -429,9 +447,12 @@ export default function Home() {
     }
   };
 
-  const handleUpload = async (file: File) => {
-    await uploadCv(file);
+  // WO-31: returns once the CV is saved; CvUpload follows the queued
+  // extraction (profile.extraction) and calls refresh when it lands.
+  const handleUpload = async (file: File): Promise<Profile> => {
+    const profile = await uploadCv(file);
     await refresh();
+    return profile;
   };
 
   // Show the onboarding wizard until setup is done. The wizard collects
@@ -1769,6 +1790,25 @@ function DraftCard({
   const job = draft.job;
   const canEmail = Boolean(job?.application_email);
 
+  // WO-31: the draft's queued AI job (tailor, or a re-check of a blocked
+  // draft). Legacy 'drafting' rows read as running.
+  const tq = tc.queue;
+  const pendingJob = isPending(draft.queue) ? draft.queue : null;
+  const tailorPending =
+    draft.status === 'queued' || draft.status === 'drafting' || pendingJob?.kind === 'tailor';
+  const recheckPending = !tailorPending && pendingJob?.kind === 'recheck';
+  const detail = pendingJob ? queueDetail(tq, pendingJob) : { about: '', extra: null };
+  const queueLine = recheckPending
+    ? pendingJob?.status === 'running'
+      ? tq.recheckRunning
+      : tq.recheckQueued(detail.about)
+    : pendingJob?.status === 'queued'
+      ? tq.draftQueued(detail.about)
+      : pendingJob
+        ? tq.draftRunning
+        : t.tailoringBody;
+  const queueExtra = detail.extra;
+
   // WO-23 blocked-draft recovery. The editor gate is the GUARD BLOCK
   // (documents present), not status==='failed' — a timeout/malformed
   // failure has no documents to edit and shows only Try again.
@@ -1973,9 +2013,10 @@ function DraftCard({
             {t.unsaved}
           </span>
         )}
-        {draft.status === 'drafting' && (
+        {tailorPending && (
           <span className="inline-flex items-center rounded-full bg-surface-2 px-2.5 py-1 text-xs text-mid">
-            <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> {t.tailoring}
+            <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />{' '}
+            {draft.queue?.status === 'queued' ? tq.badge : t.tailoring}
           </span>
         )}
         {draft.status === 'ready' && (
@@ -2001,11 +2042,16 @@ function DraftCard({
             className="overflow-hidden border-t border-line"
           >
             <div className="space-y-4 p-4">
-              {draft.status === 'drafting' && (
-                <p className="flex items-center gap-2 text-sm text-mid" role="status">
-                  <Loader2 className="h-4 w-4 animate-spin text-signal" />
-                  {t.tailoringBody}
-                </p>
+              {/* WO-31: queued/running copy — provider load waits here,
+                  it never turns into a failed card. */}
+              {(tailorPending || recheckPending) && (
+                <div className="flex items-start gap-2 text-sm text-mid" role="status">
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-signal" />
+                  <div>
+                    <p>{queueLine}</p>
+                    {queueExtra && <p className="mt-0.5 text-xs text-low">{queueExtra}</p>}
+                  </div>
+                </div>
               )}
 
               {draft.status === 'failed' && draft.error && (
@@ -2277,7 +2323,7 @@ function ProfileView({
   onEditSetup,
 }: {
   profile: Profile | null;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File) => Promise<unknown>;
   onSaved: () => Promise<void>;
   onEditSetup: () => void;
 }) {
@@ -2339,7 +2385,7 @@ function ProfileView({
   return (
     <section className="space-y-6">
       <ViewHeader title={t.title} sub={t.sub} />
-      <CvUpload onUploaded={onUpload} hasExistingCv={!!profile?.cv_file_name} />
+      <CvUpload onUploaded={onUpload} onExtracted={onSaved} hasExistingCv={!!profile?.cv_file_name} />
 
       {profile && (
         <>

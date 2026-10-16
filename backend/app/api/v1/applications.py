@@ -19,21 +19,34 @@ from app.schemas.application import (
     DraftSubmitRequest,
     DraftUpdateRequest,
 )
+from app.services import ai_queue
 from app.services.apply_service import ApplyError, retry_application
 from app.services.draft_service import (
     DraftConflictError,
     DraftError,
     attest_claim,
-    create_draft_for_job,
     get_draft,
     list_drafts,
-    recheck_draft,
+    queue_draft_for_job,
+    queue_recheck,
     save_draft_edits,
     submit_draft,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _queued_draft_response(db: Session, draft, response: Response,
+                                 done_status: int) -> "DraftResponse":
+    """WO-31: drain (inline mode only), then answer with the draft and
+    its job state — 202 while the AI work is still queued/running,
+    done_status once the package (or verdict) has landed."""
+    await run_in_threadpool(ai_queue.drain_if_inline)
+    db.expire_all()  # the drainer wrote on its own session
+    view = ai_queue.draft_queue_view(db, draft)
+    response.status_code = 202 if view is not None else done_status
+    return DraftResponse.from_orm_draft(draft, queue=view)
 
 VALID_METHODS = {"email", "browser", "manual"}
 
@@ -46,13 +59,20 @@ VALID_METHODS = {"email", "browser", "manual"}
 @router.post("/draft/{job_id}", response_model=DraftResponse, status_code=201)
 async def prepare_draft(
     job_id: int,
+    response: Response,
     force: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(get_authenticated_user),
 ):
     """
-    Tailor the CV + cover letter for an approved job (AI, ~5-20s).
-    Returns the draft for user review and editing.
+    Queue the tailoring of the CV + cover letter for an approved job.
+
+    WO-31: returns at once — 202 with the draft 'queued' and its job's
+    position/ETA; the ai_jobs drainer writes the package (fabrication
+    guard included) and the card fills in via the drafts poll. Provider
+    load never fails the draft: it waits in the queue. Pressing Prepare
+    again returns the same job (idempotent). 201 when the draft was
+    already prepared (or drained inline).
     """
     job = get_job(db, job_id)
     if not job:
@@ -83,22 +103,26 @@ async def prepare_draft(
         if not profile or not profile.cv_text:
             raise HTTPException(status_code=400, detail="Upload your CV before preparing applications")
         draft = await run_in_threadpool(
-            create_draft_for_job, db, job, profile=profile, force=force, user_id=user.id
+            queue_draft_for_job, db, job, profile=profile, force=force, user_id=user.id
         )
+    except DraftConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    if draft.status == "failed":
-        # 200 with the failed draft so the UI can show the error + retry
-        return DraftResponse.from_orm_draft(draft)
-    return DraftResponse.from_orm_draft(draft)
+    return await _queued_draft_response(db, draft, response, 201)
 
 
 @router.get("/drafts", response_model=list[DraftResponse])
 async def get_drafts(
     limit: int = 100, db: Session = Depends(get_db), user: User = Depends(get_authenticated_user)
 ):
-    return [DraftResponse.from_orm_draft(d) for d in list_drafts(db, limit, user_id=user.id)]
+    # WO-31: one query for every draft's active job (the poll's payload)
+    jobs = ai_queue.active_jobs_by_subject(db, user_id=user.id, kinds=("tailor", "recheck"))
+    return [
+        DraftResponse.from_orm_draft(d, queue=ai_queue.job_view(jobs.get(d.id)))
+        for d in list_drafts(db, limit, user_id=user.id)
+    ]
 
 
 @router.get("/draft/{draft_id}", response_model=DraftResponse)
@@ -109,7 +133,7 @@ async def get_draft_detail(
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
     owns_or_404(draft.user_id, user, "Draft")
-    return DraftResponse.from_orm_draft(draft)
+    return DraftResponse.from_orm_draft(draft, queue=ai_queue.draft_queue_view(db, draft))
 
 
 def _pdf_response(blob: bytes, filename: str) -> Response:
@@ -196,6 +220,7 @@ async def update_draft(
 @router.post("/draft/{draft_id}/recheck", response_model=DraftResponse)
 async def recheck(
     draft_id: int,
+    response: Response,
     db: Session = Depends(get_db),
     user: User = Depends(get_authenticated_user),
 ):
@@ -204,6 +229,10 @@ async def recheck(
     Clean -> ready (recovered); still flagged -> stays failed with the
     remaining claims listed for fix-in-text or attestation. The judge is
     a paid call — this bucket is tighter than draft_prepare.
+
+    WO-31: validated now (400 for a draft that cannot be re-checked),
+    then queued — 202 with the job state while the check waits; the
+    verdict lands on the draft.
     """
     enforce(user.id, "draft_recheck")
     draft = get_draft(db, draft_id)
@@ -211,24 +240,25 @@ async def recheck(
         raise HTTPException(status_code=404, detail="Draft not found")
     owns_or_404(draft.user_id, user, "Draft")
 
-    # TENANCY LAYER 1: the guard verifies against the caller's own CV —
-    # resolved at the route, injected into the service.
+    # TENANCY: the drainer verifies against the draft owner's own CV;
+    # an account with no CV cannot re-check at all.
     from app.services.cv_service import get_active_profile
 
     profile = get_active_profile(db, user_id=user.id)
     if not profile or not profile.cv_text:
         raise HTTPException(status_code=400, detail="No CV on file for this account")
     try:
-        draft = await run_in_threadpool(recheck_draft, db, draft, profile=profile)
+        draft = await run_in_threadpool(queue_recheck, db, draft)
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return DraftResponse.from_orm_draft(draft)
+    return await _queued_draft_response(db, draft, response, 200)
 
 
 @router.post("/draft/{draft_id}/attest", response_model=DraftResponse)
 async def attest(
     draft_id: int,
     payload: DraftAttestRequest,
+    response: Response,
     db: Session = Depends(get_db),
     user: User = Depends(get_authenticated_user),
 ):
@@ -238,6 +268,10 @@ async def attest(
     unresolved claim remains the draft goes ready — no further AI call.
     save_to_profile (default) also appends the claim to the caller's
     vouched facts so future drafts use it without flagging.
+
+    WO-31: when the last claim is confirmed, the final guard run is a
+    queued recheck job (202 while it waits) — never an inline judge call
+    that provider load could fail.
     """
     enforce(user.id, "draft_attest")
     draft = get_draft(db, draft_id)
@@ -257,10 +291,11 @@ async def attest(
             attest_claim, db, draft, payload.claim, payload.save_to_profile,
             profile=profile, profile_fact=payload.profile_fact,
             context=payload.context, user_id=user.id,
+            defer_final_check=True,
         )
     except DraftError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return DraftResponse.from_orm_draft(draft)
+    return await _queued_draft_response(db, draft, response, 200)
 
 
 @router.post("/draft/{draft_id}/submit", response_model=ApplicationResponse, status_code=201)

@@ -138,6 +138,19 @@ class Settings(BaseSettings):
     TAILOR_MAX_TOKENS: int = 20000
     AI_MAX_CONCURRENCY: int = 8
     AI_INTERACTIVE_RESERVE: int = 2
+    # WO-31: the durable ai_jobs queue. Which process drains it:
+    #   api    — a thread inside the API (beta: $0 extra, always-on #130)
+    #   worker — a dedicated worker process (launch; the API only enqueues)
+    #   inline — the enqueuing request drains synchronously (tests/local)
+    #   off    — nobody drains (tests drive drain_once() themselves)
+    AI_DRAINER: str = "api"
+    # AIMD inside the drainer: start here, +1 per clean 60s, halve on 429.
+    AI_CONCURRENCY_START: int = 4
+    AI_CONCURRENCY_MAX: int = 8
+    # A claimed job's lease; renewed every AI_JOB_HEARTBEAT_SECONDS while
+    # the call runs. An expired lease (crash/deploy) re-queues the job.
+    AI_JOB_LEASE_SECONDS: int = 240
+    AI_JOB_HEARTBEAT_SECONDS: int = 30
     COMPOSIO_API_KEY: str = ""  # integrations layer (Settings page)
     # Beta (owner decision 2026-09-01): email applications ship from the
     # USER'S OWN connected Gmail, not a platform sender. The interim

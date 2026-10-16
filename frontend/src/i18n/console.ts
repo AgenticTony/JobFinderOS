@@ -388,6 +388,23 @@ export const consoleEn = {
     nextIn: (countdown: string) => `next hunt in ${countdown}`,
     toNext: "to next hunt",
   },
+  // WO-31: queued AI work — honest copy, never an error for provider load
+  queue: {
+    badge: "in queue",
+    about: (min: number | null) => (min ? ` (about ${min} min)` : ""),
+    ahead: (n: number) => (n === 1 ? "1 request ahead of you" : `${n} requests ahead of you`),
+    draftQueued: (about: string) =>
+      `You're in a queue — your tailored CV and cover letter will be ready shortly${about}. You can leave this page; it'll be here when it's done.`,
+    draftRunning: "Writing your application…",
+    recheckQueued: (about: string) =>
+      `Your check is in the queue${about} — your text is saved, the result appears here by itself.`,
+    recheckRunning: "Checking your text…",
+    paused: (time: string) =>
+      `The AI service is paused until about ${time} — your request is saved and will run then.`,
+    cvQueued: (about: string) =>
+      `Your CV is saved. Reading your details is in a queue${about} — you can carry on; they fill in by themselves.`,
+    cvRunning: "Your CV is saved — reading your details now…",
+  },
   cvUpload: {
     wrongType: "Please upload a PDF or Word (.docx) file",
     extracting: "Extracting & analyzing your CV…",
@@ -790,6 +807,23 @@ export const consoleSv: ConsoleDict = {
     manualOnlyLower: "bara manuella jakter",
     nextIn: (countdown) => `nästa jakt om ${countdown}`,
     toNext: "till nästa jakt",
+  },
+  // WO-31: köat AI-arbete — ärlig text, aldrig ett fel för belastning
+  queue: {
+    badge: "i kö",
+    about: (min) => (min ? ` (om cirka ${min} min)` : ""),
+    ahead: (n) => (n === 1 ? "1 förfrågan före dig" : `${n} förfrågningar före dig`),
+    draftQueued: (about) =>
+      `Du står i kö — ditt anpassade CV och personliga brev är klara inom kort${about}. Du kan lämna sidan; det finns här när det är klart.`,
+    draftRunning: "Skriver din ansökan…",
+    recheckQueued: (about) =>
+      `Din kontroll står i kö${about} — din text är sparad, resultatet dyker upp här av sig självt.`,
+    recheckRunning: "Kontrollerar din text…",
+    paused: (time) =>
+      `AI-tjänsten är pausad till cirka ${time} — din förfrågan är sparad och körs då.`,
+    cvQueued: (about) =>
+      `Ditt CV är sparat. Inläsningen av dina uppgifter står i kö${about} — du kan fortsätta; de fylls i av sig själva.`,
+    cvRunning: "Ditt CV är sparat — läser in dina uppgifter nu…",
   },
   cvUpload: {
     wrongType: "Ladda upp en PDF- eller Word-fil (.docx)",
