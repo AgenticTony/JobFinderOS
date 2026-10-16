@@ -2,8 +2,12 @@
 # render.com/docs/blueprint-spec).
 #
 # Cost floor (user constraint: cheapest credible production):
-#   - API: the ONLY always-on process, on a free instance (512MB, spins
-#     down after 15 min idle, ~1 min cold start — acceptable pre-revenue).
+#   - API: the ONLY always-on process, on the 0.5c-512mb paid instance
+#     ($7/mo, 2026-10-15). It was on Free until then: Free spins down
+#     after 15 min idle and the next request waited ~40-60s (measured
+#     42.6s) — unacceptable once testers use the console. Same 512MB as
+#     Free, 5x the CPU. Keep this in sync with the dashboard: a Blueprint
+#     sync applies whatever plan this file declares.
 #   - Hunts: a twice-daily CRON JOB (06:00 + 18:00 UTC), not a 24/7
 #     worker. Cron runs are billed per second of ACTIVE runtime
 #     ($1/mo minimum; 0.5c-512mb ≈ $0.00016/min) — two ~10-min hunts a
@@ -28,7 +32,7 @@ services:
     # root" does not hold when rootDir is set)
     dockerfilePath: ./Dockerfile
     dockerContext: ./
-    plan: free
+    plan: 0.5c-512mb   # paid, never spins down (see header); was free
     # Same side of the pond as Supabase eu-west-1 (Frankfurt) — keeps the
     # data path intra-EU (GDPR/WO-06 residency). If unavailable at
     # creation time, oregon is the fallback.

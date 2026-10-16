@@ -141,6 +141,10 @@ Fatal for an hourly hunt worker. Background workers start at **$7/month**.
 Budget the worker as paid from day one, or accept that the hunt cycle only
 runs when something else happens to wake the service.
 
+**Resolved:** hunts run as a Render cron job (WO-07, metered per second),
+and the API moved off Free to the paid 0.5c-512mb instance on 2026-10-15
+after a measured 42.6s first request — no spin-down any more.
+
 ### F6 — Cloudflare Pages is for static exports; full-stack Next.js goes via Workers
 
 Cloudflare's current framework guide routes full-stack Next.js (SSR, RSC,

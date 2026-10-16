@@ -310,7 +310,7 @@ export const consoleEn = {
     loadFailed:
       "Couldn't reach the server — your lists may be missing or stale.",
     loadFailedHint:
-      "The backend may still be waking up (up to a minute after idle on the free plan).",
+      "The server may be restarting or deploying — try again in a minute.",
     retry: "Retry",
   },
   sidebar: {
@@ -713,7 +713,7 @@ export const consoleSv: ConsoleDict = {
     loadFailed:
       "Kunde inte nå servern — dina listor kan saknas eller vara inaktuella.",
     loadFailedHint:
-      "Servern kanske fortfarande vaknar (upp till en minut efter vila på gratisplanen).",
+      "Servern kanske startar om eller uppdateras — försök igen om en minut.",
     retry: "Försök igen",
   },
   sidebar: {

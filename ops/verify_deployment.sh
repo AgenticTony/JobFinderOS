@@ -35,9 +35,10 @@ bad()  { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 
 echo "== API: $API =="
 
-# 1. /health — 200 + status ok + database up. Free instances spin down
-#    after 15 min idle and Render's edge answers the FIRST request with a
-#    plain-text 404 while the instance wakes (~1 min worst case) — retry.
+# 1. /health — 200 + status ok + database up. The API is on a paid
+#    instance since 2026-10-15 (no idle spin-down), but the retry stays:
+#    right after a deploy Render's edge can answer with a plain-text 404
+#    while the new instance comes up, and it also covers a Free downgrade.
 body=""; code="000"
 for attempt in 1 2 3 4 5 6; do
     body=$(curl -s -m 90 "$API/health" || true)

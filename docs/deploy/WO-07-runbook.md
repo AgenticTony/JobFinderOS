@@ -19,7 +19,7 @@ Verifier 6/6. One incident during rollout, worth remembering:
 
 | Piece | Where | Plan | Cost |
 |---|---|---|---|
-| API (FastAPI, Docker) | Render web service `jobfinderos-api` | free (512MB, spins down after 15 min idle, ~1 min cold start) | $0 |
+| API (FastAPI, Docker) | Render web service `jobfinderos-api` | 0.5c-512mb (512MB, 0.5 CPU, always on; Free until 2026-10-15) | $7 |
 | Hunt (scrape → match → …) | Render cron job `jobfinderos-hunt`, twice daily (06:00/18:00 UTC), one-shot `worker --once` | 0.5c-512mb, metered per second ($1/mo minimum) | ~$1–3 |
 | Postgres | Supabase (WO-03), session pooler | free tier | $0 |
 | Frontend | Cloudflare Pages, static export | free | $0 |
@@ -134,8 +134,9 @@ curl https://jobfinderos-api.onrender.com/health        # {"status":"ok","databa
   `One-shot hunt complete: {'status': 'ran', 'users': N, 'errors': 0}`.
 - Trigger a manual run from the cron service's dashboard to avoid
   waiting for the next scheduled slot (06:00 or 18:00 UTC).
-- First request after idle takes ~1 min (free-instance cold start) —
-  that is the documented free-plan behavior, not an outage.
+- The API no longer spins down (paid instance since 2026-10-15). A slow
+  or failing first request now means a deploy/restart in progress or a
+  real outage — check the service's Events/Logs, don't wait it out.
 
 ## Operations
 
@@ -186,10 +187,10 @@ curl https://jobfinderos-api.onrender.com/health        # {"status":"ok","databa
      verifies the destination file count and exits NON-ZERO on mismatch.
      Anything other than that line is a failure; investigate before
      trusting the backups again.
-- **Cost ceiling**: ~$1–3/mo total until a paid instance is justified.
-  Growth path: upgrade the API instance first (cold starts hurt more than
-  hunt latency), keep the cron shape until hunts exceed ~10 h/month of
-  runtime, then compare with a 24/7 worker.
+- **Cost**: ~$8–10/mo total — the API instance ($7, upgraded 2026-10-15:
+  cold starts hurt more than hunt latency) plus the metered cron. Keep
+  the cron shape until hunts exceed ~10 h/month of runtime, then compare
+  with a 24/7 worker.
 - **Secrets rotation**: everything prompted in Step 2 lives in Render's
   dashboard — rotate there, then redeploy. Never put real values in
   `render.yaml` (CI enforces this).
