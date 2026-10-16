@@ -1,6 +1,6 @@
 # WO-31 — AI capacity: survive 10–500 concurrent users
 
-> Priority: **P0** (owner decision §D1 needed first) · Depends on: PR #132 ✅
+> Priority: **P0** (phase A is beta-safe now; phase B is the post-beta launch prerequisite) · Depends on: PR #132 ✅
 > (in-process `AICallGate`, interactive 429 retry, zero-token 429 rows) ·
 > Status: **design + measurements only (2026-10-16); build waits for owner approval**
 > Origin: 2026-10-16 beta day, the first real multi-user load (3 signups).
@@ -16,9 +16,15 @@
    websites, SaaS products or other systems". §4.3 ("Personal-Use Only")
    prohibits letting "customers" use the quota. Penalties: suspension,
    termination, quota reclaimed, no refund (§4.1, §4.3, §6). Error code
-   **1313** ("Fair Usage Policy") is how this would show up. Scaling to
+   **1313** ("Fair Usage Policy") is how this would show up. The usage
+   policy adds that concurrency "dynamically adjusts" by tier and that
+   "Accounts with more than three violations may be banned". Scaling to
    500 users on this key would mean scaling a terms violation.
-   **This is decision D1, and it comes before every build step below.**
+   **Owner decision (2026-10-16 13:45 CEST):** the Coding Plan key stays
+   for the beta (a handful of testers). **Swapping to pay-as-you-go is
+   the post-beta launch PREREQUISITE (phase B), not an option.** It is a
+   separate small config change, not built by this WO, and it does not
+   block the beta-safe work in phase A.
 2. **The 3-sample keeper protocol is the biggest volume lever, not the
    prefilter.** Calls per job follow `needs_another_sample` exactly:
    sub-13 jobs cost 1 call, the dead-band costs about 2, keepers cost 3.
@@ -81,9 +87,24 @@ CV or job text). Scripts are in the session notes folder
 | tailor | 59 | 3,532 / 2,928 / 1,852 | $0.0098 |
 | judge | 14 | 2,993 / 745 / 148 | $0.0040 |
 
-The prompt-cache hit rate on match calls is ~80–88%. That is what keeps
-the per-call cost this low, so keep it: the CV prefix must stay
-byte-identical across one user's calls.
+The prompt-cache hit rate on match calls is ~80–90%. The peer
+session's 08:50–09:45 read: match 89.9% cached, tailor 91.5%; $3.53
+recorded for the window's 3 partial first hunts. Z.ai prefix caching is
+automatic, and the CV-first prompt layout (`CV_GUARD_CHARS` comment in
+`ai_service.py`; 86% measured in WO-05) is what earns it.
+
+**What caching saves:** an average match call (3,703 prompt / 332
+completion tokens) costs **$0.0066 uncached** against **$0.0029–0.0033
+measured**. Caching removes **~55%** of match spend. Onboarding goes from
+570 calls × $0.0066 = $3.79 uncached to **$1.67** cached per first hunt.
+
+Two consequences for the build:
+- Stage 1 must **never touch the stage-2 prompt**, and the
+  CV-first prefix stays byte-identical across one user's calls
+  (assertion T4b).
+- **The hit rate was measured on the Coding Plan endpoint only.**
+  Confirm it on the pay-as-you-go endpoint in phase B. Every cost
+  number below assumes it holds there; at 0% cache, double them.
 
 ### Prefilter feasibility (lexical, measured)
 I ranked each user's scored jobs by a BM25-style overlap between the
@@ -114,23 +135,26 @@ lexical stage 1 is rejected on evidence.**
 | Residency | Singapore; DPA names no SCCs (MIG-WO5) | same as Coding Plan | **EU processing**, DPA names SCCs, Z.ai not a sub-processor |
 | Batch lane | — | — | 50% off, no SLA (cron backlog only) |
 
-Recommendation for **D1**:
-- **(a) Now:** move to Z.ai pay-as-you-go. It is config only:
-  `GLM_BASE_URL=https://api.z.ai/api/paas/v4` plus a new key with a
-  balance. The model is the same, so calibration is untouched.
+**D1 (decided by the owner, 2026-10-16):**
+- **Beta (now):** the Coding Plan key stays.
+- **Phase B, post-beta launch prerequisite:** move to Z.ai
+  pay-as-you-go. It is config only, done as its own small change:
+  `GLM_API_KEY` + `GLM_BASE_URL=https://api.z.ai/api/paas/v4` on
+  **both** Render services (API and hunt cron). The model is the same,
+  so calibration is untouched. Then confirm the cache hit rate there.
 - **(b)** Run the MIG-WO5 Mistral EU flip as its own recalibration WO,
   triggered by "beta ends / GDPR posture goes live". The price is
   equivalent and the residency is better.
 - **Measure before 100 users.** No provider publishes limits we can plan
   on. Run the build-phase rate probe (§Load test, step L3) against
-  whichever endpoint D1 picks.
+  the pay-as-you-go endpoint (phase B).
 
 Cheap-model option for stage 1 (if embeddings fail their gate): Z.ai
 GLM-4.7-FlashX is $0.07 / $0.01 / $0.40. It could run a batched title
 triage (one call per ~40 titles). That is AI-judged and has variance, so
 it is the fallback, not the default.
 
-## Cost model (per month, list prices, D1 = Z.ai pay-as-you-go)
+## Cost model (per month, list prices, post-beta Z.ai pay-as-you-go; assumes the measured ~90% cache hit holds)
 
 Assumptions: steady state 10–30 match calls per active user-day
 (measured median 9, max 24). 20 drafts per active user-month × (1.3
@@ -175,7 +199,7 @@ N minutes") and fair. It does not make it disappear.
   collapse and WO-19 eligibility all run first, unchanged. Stage 1 only
   ever sees their survivors (function-span test, T5).
 - Provider: Mistral `mistral-embed` on the EU endpoint (residency
-  aligned with MIG-WO5) or Z.ai's equivalent if D1 stays with Z.ai.
+  aligned with MIG-WO5) or Z.ai's equivalent while on Z.ai.
   Verify the price at build. Order of magnitude: ~1M tokens/day of
   inflow, cents per day.
 - It is a new processor of CV text, so the privacy notice and processor
@@ -265,8 +289,8 @@ How it works:
   backoff with jitter. On quota codes **1308/1310/1316/1317** (and their
   spend-cap variants 1318–1321), pause background work until the reset
   time parsed from the message, and alert. **1313 (fair-use) pauses all
-  background work and pages the owner**, because it means D1 was not
-  done.
+  background work and pages the owner**: on the Coding Plan it is the
+  terms risk materialising. After phase B it should never happen.
 - **Interactive pressure, cross-process:** every interactive 429 in the
   API upserts one row, `ai_pressure(last_interactive_429_at,
   interactive_inflight)`. The worker reads it at most every 5 s (a
@@ -345,9 +369,12 @@ How it works:
 
 ## Acceptance criteria
 
-1. D1 is decided and recorded here. Production `GLM_BASE_URL` is not the
-   Coding Plan endpoint (CI asserts this on the `render.yaml` value, and
-   the boot log prints the host).
+1. **Launch gate (phase B):** before beta ends, production
+   `GLM_BASE_URL` on both services is not the Coding Plan endpoint. The
+   boot log prints the host. T10 becomes a hard CI failure when
+   `BETA_UNCAPPED_HUNTS` flips to False, and is a warning until then.
+   The cache hit rate on the new endpoint is measured and recorded here
+   (≥80%, or the cost model is re-run).
 2. Under the fake-provider load test (500 signups over 60 min, provider
    ceiling 300 RPM with 429 above it):
    - **zero interactive failures**
@@ -380,7 +407,8 @@ How it works:
 | T7 | Atomic item: a crash after sample 2 of 3 writes no row; lease expiry re-queues; no partial-sample row | New code: revert-check by committing per sample |
 | T8 | Two workers, one queue: every `(user, job)` is scored exactly once | New code: revert-check by removing `SKIP LOCKED` |
 | T9 | GDPR delete mid-queue: queued items cascade; an in-flight item drops its result | New code (the user-gone path exists inline today) |
-| T10 | Provider guard: CI fails if `render.yaml` / config defaults point at `/api/coding/` | It passes today **and is wrong**: red-first by asserting on the current default |
+| T10 | Provider guard: CI fails if `render.yaml` / config defaults point at `/api/coding/` while `BETA_UNCAPPED_HUNTS` is False (warning during beta) | It passes today **and is wrong** for launch: red-first by asserting on the current default with the beta flag off |
+| T4b | Cache prefix preserved: for one user, two match calls' prompts share an identical CV-first prefix ≥ `CV_GUARD_CHARS`, before and after stage 1 lands | Guard: revert-check by inserting rank metadata ahead of the CV |
 | T11 | Interactive `AIBusyError` does not occur under the T-load profile with 10 users at 40 RPM | Today's two un-coordinated gates (API + cron) sum to 2× the cap |
 
 Postgres-only tests (SKIP LOCKED, leases) run on the CI Postgres 16
@@ -409,13 +437,20 @@ reached which call (standard #2, TestOutboundIdentity pattern).
 - **L3 — real-provider rate probe (owner-run, costs money, opt-in):** a
   ramp of synthetic, CV-free match calls (canned public job text +
   fictional CV) at 20 → 600 RPM, recording when 429s start. This is how
-  we get the real limit for D1's endpoint. Fictional data only: no user
+  we get the real limit for the pay-as-you-go endpoint. Fictional data only: no user
   CV leaves for a capacity test.
 
 ## Build order (each a PR, red-first)
 
-1. **D1 config flip** + T10. This is the only step that is safe before
-   anything else.
+**Phase A: beta-safe, reduces burst load now (Coding Plan key stays):**
+
+0. No code, today: set `MATCH_CONCURRENCY=4` on both Render services
+   (PR #132's note). Keep the beta caps lifted only while there are
+   fewer than ~10 testers.
+1. Cross-process interactive priority, the minimum version: the
+   `ai_pressure` row plus the cron yielding to it (T2), and match calls
+   backing off on 429 (T3). This is a small change inside today's
+   architecture, and it closes "API + cron = 2× the cap".
 2. ai_usage observability columns + `SENTRY_DSN` + alerts (§4). We need
    to see before we change anything.
 3. `match_work` queue + AI worker + AIMD + `ai_pressure` (T1–T3, T7–T9,
@@ -425,12 +460,18 @@ reached which call (standard #2, TestOutboundIdentity pattern).
    streaming copy in EN+SV.
 5. Stage 1 embeddings: measure the recall gate on the labelled set
    first, then ship (T4–T6, privacy-notice update).
-6. L3 probe on the D1 endpoint. Then set `AI_BG_CONCURRENCY_MAX` and
-   record the RPM here.
+   Steps 3–5 stagger first hunts: the fair queue spreads signups, and
+   stage 1 limits the first look. They are beta-safe, and the sooner the
+   better.
 
-Interim, no code (do today): set `MATCH_CONCURRENCY=4` on both Render
-services (PR #132's note). Keep the beta caps lifted only while there
-are fewer than ~10 testers.
+**Phase B: post-beta launch prerequisites:**
+
+6. Key + base-URL swap to pay-as-you-go on BOTH services (separate small
+   change, owner-created key), then the T10 hard gate. Confirm the cache
+   hit rate on the new endpoint.
+7. L3 probe on the pay-as-you-go endpoint. Then set
+   `AI_BG_CONCURRENCY_MAX` and record the RPM here. This must happen
+   before marketing pushes toward 100+ users.
 
 ## Out of scope / coordinated elsewhere
 
@@ -448,6 +489,7 @@ are fewer than ~10 testers.
 
 - Z.ai subscription terms (§4.1–4.3, §6): https://docs.z.ai/legal-agreement/subscription-terms
 - GLM Coding Plan overview (credits per window, off-peak): https://docs.z.ai/devpack/overview
+- Z.ai usage policy (concurrency by tier, >3 violations → ban, no refunds): https://docs.z.ai/devpack/usage-policy
 - Z.ai error codes (1302, 1305, 1308–1321): https://docs.z.ai/api-reference/api-code
 - Z.ai pay-as-you-go pricing: https://docs.z.ai/guides/overview/pricing
 - Z.ai standard endpoint: https://docs.z.ai/api-reference/introduction
