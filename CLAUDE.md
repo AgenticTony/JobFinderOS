@@ -158,6 +158,11 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   bounded backoff honouring Retry-After, then fail with `AIBusyError`;
   match calls never retry. 429s now leave a zero-token ai_usage row
   (detail `rate_limited (429)`). Per process: the hunt cron has its own gate.
+  Same day, reproduced with NO load: 2 of the 3 failures were deterministic
+  — raw newlines inside JSON strings (`_parse_json` now uses
+  `strict=False`) and long-CV packages cut at the shared 2000-token cap
+  (tailor calls now get `TAILOR_MAX_TOKENS=8000`; a `finish_reason=length`
+  reply fails on the first attempt instead of three identical re-asks).
 - Tailoring: default temperature 0.3 (variety in cover letters is desirable).
   Craft rules adopted 2026-09-15 from the cv-writing.skill tier-1 review
   (posting-aligned emphasis, voice preservation / anti-AI-tell register,

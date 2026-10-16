@@ -60,13 +60,13 @@ def _rate_limit(retry_after=None):
         "for requests'}", response=resp, body=None)
 
 
-def _resp(content):
+def _resp(content, finish_reason="stop"):
     return SimpleNamespace(
         id=f"req_{uuid.uuid4().hex[:6]}",
         usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5,
                               prompt_tokens_details=None),
         choices=[SimpleNamespace(
-            finish_reason="stop",
+            finish_reason=finish_reason,
             message=SimpleNamespace(content=content, reasoning_content=None))],
     )
 
@@ -80,6 +80,7 @@ class _ScriptedClient:
         self.script = list(script)
         self.judge_reply = judge_reply
         self.calls = []
+        self.max_tokens = []
         self.chat = SimpleNamespace(
             completions=SimpleNamespace(create=self._create))
 
@@ -87,11 +88,14 @@ class _ScriptedClient:
         system = kw["messages"][0]["content"]
         kind = "judge" if "strict fact-checker" in system else "tailor"
         self.calls.append((kind, kw["messages"][1]["content"]))
+        self.max_tokens.append((kind, kw.get("max_tokens")))
         if kind == "judge":
             return _resp(self.judge_reply)
         step = self.script.pop(0) if len(self.script) > 1 else self.script[0]
         if isinstance(step, Exception):
             raise step
+        if isinstance(step, tuple):  # (content, finish_reason)
+            return _resp(*step)
         return _resp(step)
 
     def kinds(self):
@@ -238,6 +242,58 @@ class TestRateLimitObservability:
         assert [(r.kind, r.detail) for r in rows] == [
             ("tailor", "rate_limited (429)"), ("tailor", None)], rows
         assert rows[0].prompt_tokens == 0 and rows[0].cost_usd == 0
+
+
+class TestDeterministicTailorFormatFailures:
+    """Peer reproduction 2026-10-16 12:55-13:00 CEST, NO load: drafts 39
+    and 41 failed again sequentially on main. Two deterministic causes —
+    neither is provider weather, so re-asking cannot fix them:
+      1. raw newlines/control chars INSIDE JSON string values
+         (finish=stop) — json.loads(strict=True) rejects them
+      2. output cut at the token cap (finish=length) on a long CV."""
+
+    def test_literal_newline_inside_a_string_parses(self, sleeps):
+        # The raw form GLM emits: real newline/tab characters inside the
+        # string values (json.dumps would have escaped them).
+        raw = ('{"cover_letter": "Dear Acme,\n\nI built payment services.", '
+               '"tailored_cv": "Erik Lindberg\n\tSoftware Engineer", '
+               '"changes_summary": []}')
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(raw)  # the fixture reproduces the strict failure
+        client = _ScriptedClient([raw])
+        out = _svc(client).tailor_application("profile", CV, "job")
+        assert out["cover_letter"].startswith("Dear Acme,\n\nI built")
+        assert out["tailored_cv"] == "Erik Lindberg\n\tSoftware Engineer"
+        assert client.kinds() == ["tailor"], (
+            "a control char inside a string value is valid content, not a "
+            "malformed reply — it must not burn re-asks")
+
+    def test_tailor_call_gets_a_document_sized_token_cap(self, sleeps):
+        import app.services.ai_service as ai_mod
+
+        client = _ScriptedClient([GOOD])
+        svc = _svc(client)
+        svc.tailor_application("profile", CV, "job")
+        svc._complete("s", "u", temperature=0.0, kind="match")
+        # the client labels by system prompt; order is what's reliable
+        caps = {"tailor": client.max_tokens[0][1],
+                "match": client.max_tokens[-1][1]}
+        assert caps["tailor"] >= ai_mod.TAILOR_MAX_TOKENS >= 6000, (
+            f"tailor cap {caps['tailor']} — 2000 truncated a long CV's "
+            "package at ~8.5k chars (draft 39)")
+        assert caps["match"] == 2000, "match cap must not move (scores)"
+
+    def test_truncation_fails_fast_with_a_clear_error(self, sleeps):
+        import app.services.ai_service as ai_mod
+
+        client = _ScriptedClient([('{"cover_letter": "Dear Acme', "length")])
+        with pytest.raises(ValueError, match="finish_reason=length") as ei:
+            _svc(client).tailor_application("profile", CV, "job")
+        assert client.kinds() == ["tailor"], (
+            f"{len(client.calls)} calls — an identical re-ask of a truncated "
+            "reply truncates again; it must fail on the first")
+        assert "too long" in str(ei.value).lower()
+        assert ai_mod.TAILOR_FORMAT_RETRIES > 0
 
 
 # =====================================================================

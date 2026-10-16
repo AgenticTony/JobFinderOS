@@ -41,6 +41,14 @@ logger = logging.getLogger(__name__)
 TAILOR_FORMAT_RETRIES = 2
 TAILOR_RETRY_DELAY_S = 3.0
 
+# Output cap for tailor calls (thinking disabled; +4000 when enabled, the
+# reasoning budget the base cap already reserves). The shared 2000 cap is
+# sized for match JSON: on 2026-10-16 a long CV's package was cut at
+# ~8.5k chars (finish_reason=length) on every attempt — draft 39,
+# reproduced with no load. A cap is a ceiling, not spend: short packages
+# cost the same. Match/judge caps are unchanged.
+TAILOR_MAX_TOKENS = 8000
+
 # 2026-10-16: 429 retry for INTERACTIVE calls (the user is waiting on a
 # prepare request). Background match calls are never retried here — the
 # matcher leaves the job 'new' for the next run, and re-asking would add
@@ -442,19 +450,26 @@ Prepare my tailored application package.
             if self._non_empty_str(parsed.get("cover_letter")) and \
                     self._non_empty_str(parsed.get("tailored_cv")):
                 break
+            truncated = getattr(self, "_last_finish_reason", None) == "length"
             logger.warning(
                 "tailor attempt %d/%d malformed (%s) — %s",
                 attempt + 1, 1 + TAILOR_FORMAT_RETRIES,
                 self._response_shape(raw),
-                "retrying" if attempt < TAILOR_FORMAT_RETRIES else "giving up",
+                "retrying" if attempt < TAILOR_FORMAT_RETRIES and not truncated
+                else "giving up",
             )
+            if truncated:
+                # The same prompt re-asked truncates the same way (draft
+                # 39: 3/3 at the cap) — fail on the first, clearly.
+                raise ValueError(
+                    "Malformed tailoring response: the generated package was "
+                    "too long and was cut off (finish_reason=length). Try "
+                    "again; if it keeps happening, a shorter CV helps."
+                )
             if attempt >= TAILOR_FORMAT_RETRIES:
-                truncated = getattr(self, "_last_finish_reason", None) == "length"
                 raise ValueError(
                     "Malformed tailoring response: cover_letter/tailored_cv "
                     "missing or empty"
-                    + (" (finish_reason=length — output was truncated)"
-                       if truncated else "")
                 )
             time.sleep(TAILOR_RETRY_DELAY_S * (2 ** attempt))
             raw = ask()
@@ -959,7 +974,7 @@ An empty list means the document is faithful."""
                         # points at 0.0 (vs 12-16 at 0.3). Treat scores as
                         # noisy to about +/-7, never as reproducible values.
                         temperature=temperature,
-                        max_tokens=self.max_tokens,
+                        max_tokens=self._max_tokens_for(kind),
                         extra_body={"thinking": {"type": self.thinking}},
                     )
                 break
@@ -1002,6 +1017,11 @@ An empty list means the document is faithful."""
 
         return result_text
 
+    def _max_tokens_for(self, kind: str) -> int:
+        if kind == "tailor":
+            return TAILOR_MAX_TOKENS + (0 if self.thinking == "disabled" else 4000)
+        return self.max_tokens
+
     @staticmethod
     def _parse_json(text: str) -> Dict[str, Any]:
         """Parse the AI response, handling markdown code blocks (TalentHive pattern)."""
@@ -1014,8 +1034,13 @@ An empty list means the document is faithful."""
             end = text.find("```", start)
             text = text[start:end].strip()
 
+        # strict=False: GLM routinely puts raw newlines/tabs INSIDE string
+        # values (a cover letter's paragraph breaks). Strict mode rejected
+        # them as "Invalid control character" and failed draft 41 on 3/3
+        # attempts with finish=stop (2026-10-16, reproduced with no load).
+        # The characters are content, not malformation.
         try:
-            parsed = json.loads(text)
+            parsed = json.loads(text, strict=False)
             return parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError as e:
             logger.error("Failed to parse GLM response as JSON: %s", e)
@@ -1023,7 +1048,7 @@ An empty list means the document is faithful."""
             match = re.search(r"\{[\s\S]*\}", text)
             if match:
                 try:
-                    return json.loads(match.group(0))
+                    return json.loads(match.group(0), strict=False)
                 except json.JSONDecodeError:
                     return {}
             return {}
