@@ -2299,6 +2299,181 @@ class TestFabricationLiveFPClasses:
         assert org == [], [f.value for f in org]
 
 
+class TestHeadingLabelFPClass:
+    """Live FP class (2026-10-16, draft 39, first beta users): a CV
+    written in the common '• Heading & Heading — facts' bullet style was
+    BLOCKED with four high-tier 'organisation' findings that were the
+    bullet headings themselves. Every fact after the em-dash was in the
+    CV. Mechanism: Layer A tokenisation skipped '—', '|' and '&', so
+    capitalised runs glued across structural separators ('Manager |
+    Production Reliability', 'Tooling — Databricks') and '&'-joined
+    topic lists ('Team Leadership & Budget') became 3+-token 'employers'.
+
+    The other half of this class is the hole it must NOT open: an
+    invented employer written as a heading, a headline segment or in
+    prose still blocks, and a heading cannot smuggle a credential."""
+
+    # Anonymised from draft 39's source CV: the supporting facts are
+    # present, the heading words ('Reliability', 'Incident', 'Tooling',
+    # 'Leadership', 'Budget') are not — exactly the production shape.
+    CV = (
+        "Jane Doe\nTechnical Product Manager\n"
+        "• Stakeholder Alignment & Governance — led a ~30-person team "
+        "with budget and P&L, reporting to the country head.\n"
+        "• Owned global 24/7 eCommerce operations across up to 31 "
+        "countries.\n"
+        "• Databricks platform on Azure; multi-cloud estate (AWS, Azure, "
+        "GCP, OCI).\n"
+        "Experience: Svenska Spel, Stockholm 2015-2020. Delivery "
+        "governance and operations."
+    )
+    # The four production contexts, verbatim shape.
+    TAILORED = (
+        "Technical Product Manager | Production Reliability, 24/7 "
+        "Operations & Delivery Governance\n"
+        "• Production Reliability & Incident Management — owned global "
+        "24/7 eCommerce operations across up to 31 countries.\n"
+        "• Team Leadership & Budget/P&L — led a ~30-person team with "
+        "budget and P&L, reporting to the country head.\n"
+        "• Platforms & Tooling — Databricks platform on Azure; "
+        "multi-cloud estate (AWS, Azure, GCP, OCI).\n"
+    )
+
+    @staticmethod
+    def _high_orgs(src, tailored, allowed=None):
+        from app.services.fabrication import split_tiers, unsupported_claims
+
+        high, _ = split_tiers(unsupported_claims(src, tailored, allowed))
+        return [c.value for c in high if c.kind == "organisation"]
+
+    def test_production_heading_labels_do_not_block(self):
+        high = self._high_orgs(self.CV, self.TAILORED)
+        assert high == [], (
+            f"bullet/headline heading labels blocked as employers: {high} "
+            "— a faithful draft in the CV's own bullet style cannot be sent"
+        )
+
+    def test_demoted_headings_stay_visible_as_advisory(self):
+        """Demotion, not deletion: the runs still reach the review UI as
+        advisory flags, and (Layer A high empty) the judge still runs."""
+        from app.services.fabrication import split_tiers, unsupported_claims
+
+        _, advisory = split_tiers(unsupported_claims(self.CV, self.TAILORED))
+        values = {c.value.lower() for c in advisory
+                  if c.kind == "organisation"}
+        assert "production reliability incident management" in values, values
+        assert "team leadership budget" in values, values
+
+    def test_remainder_cannot_repromote_a_demoted_heading(self):
+        """allowed_names subtraction rebuilds the claim; its tier must not
+        exceed the original run's (a 4-token remainder re-tiered from
+        scratch would be 'high' again)."""
+        tailored = ("• Production Reliability & Incident Management "
+                    "Delivery — owned global 24/7 eCommerce operations.\n")
+        high = self._high_orgs(self.CV, tailored, allowed=["Delivery"])
+        assert high == [], high
+
+    # ---- the hole it must not open -------------------------------------
+
+    def test_invented_employer_as_bullet_heading_still_blocks(self):
+        for line in (
+            "• Northwind Trading Company — led a ~30-person team.\n",
+            "• Northwind Trading Company: led a ~30-person team.\n",
+            "• Acme Corp — led a ~30-person team.\n",
+            "• Acme Nordic AB — led a ~30-person team.\n",
+            # '&' inside a marker-bearing name keeps the marker's weight
+            "• Johnson & Johnson Consulting — led a ~30-person team.\n",
+        ):
+            high = self._high_orgs(self.CV, line)
+            assert high, (
+                f"invented employer written as a heading did not block: "
+                f"{line!r}"
+            )
+
+    def test_invented_employer_in_prose_still_blocks(self):
+        for line in ("I worked at Acme Corp as a product manager.",
+                     "I worked at Northwind Trading Company for years.",
+                     "Previously at Northwind Corporation, I led delivery."):
+            high = self._high_orgs(self.CV, line)
+            assert high, f"invented employer in prose did not block: {line!r}"
+
+    def test_invented_employer_in_headline_segment_still_blocks(self):
+        line = "Technical Product Manager | Northwind Trading Company | 2019\n"
+        high = self._high_orgs(self.CV, line)
+        assert any("northwind trading company" in v.lower() for v in high), (
+            f"an employer as a '|' headline segment must block: {high}"
+        )
+
+    def test_ampersand_employer_heading_is_not_dropped(self):
+        """'Procter & Gamble' is markerless and 2-token — advisory in
+        prose today; as a heading it must not vanish entirely (the
+        judge and the review UI still see it)."""
+        from app.services.fabrication import unsupported_claims
+
+        found = [c.value.lower() for c in unsupported_claims(
+            self.CV, "• Procter & Gamble — led a ~30-person team.\n")
+            if c.kind == "organisation"]
+        assert any("procter" in v and "gamble" in v for v in found), found
+
+    def test_colon_heading_label_is_demoted_too(self):
+        tailored = ("• Production Reliability & Incident Management: owned "
+                    "global 24/7 eCommerce operations.\n")
+        assert self._high_orgs(self.CV, tailored) == []
+
+    def test_colon_heading_cannot_demote_content_glued_after_it(self):
+        """':' does not break runs (live_catch_580 depends on that), so a
+        heading can glue onto a capitalised employer after the colon. The
+        demotion covers runs INSIDE the label only — the glued run keeps
+        its high tier."""
+        line = ("• Leadership & Strategy: Northwind Trading Company "
+                "engagement.\n")
+        high = self._high_orgs(self.CV, line)
+        assert any("northwind" in v.lower() for v in high), (
+            f"a heading demoted an employer glued after its colon: {high}"
+        )
+
+    def test_heading_cannot_smuggle_a_credential_or_year(self):
+        from app.services.fabrication import split_tiers, unsupported_claims
+
+        high, _ = split_tiers(unsupported_claims(
+            self.CV,
+            "• AWS Certified Solutions Architect — passed in 2021.\n"))
+        kinds = {c.kind for c in high}
+        assert "credential" in kinds, [(c.kind, c.value) for c in high]
+        assert "year" in kinds, [(c.kind, c.value) for c in high]
+
+    def test_heading_draft_reaches_the_judge_and_its_finding_blocks(
+            self, monkeypatch):
+        """Outbound path: with Layer A clean, check_package hands the
+        FULL document (headings included) to the judge, and a judge
+        finding is a high-tier block — the demotion moves the decision
+        to semantic evidence, it does not skip it."""
+        from app.models import Profile
+        from app.services import draft_service as ds
+
+        seen = {}
+
+        class _Judge:
+            def judge_fabrication(self, source, document):
+                seen["document"] = document
+                return [{"claim": "Incident Management",
+                         "why": "heading not in the CV"}]
+
+        monkeypatch.setattr(ds, "get_ai_service_with_judge", lambda: _Judge())
+
+        class _Job:
+            company, title = "Hiring Co", "Product Manager"
+
+        profile = Profile(cv_text=self.CV)
+        high, _ = ds.check_package(profile, _Job(), "", self.TAILORED)
+        assert "Production Reliability & Incident Management" in seen.get(
+            "document", ""), "the judge never saw the heading text"
+        assert [c.kind for c in high] == ["judge"], (
+            f"judge finding must be the high-tier result: "
+            f"{[(c.kind, c.value) for c in high]}"
+        )
+
+
 class TestAllowedNamesSubtraction:
     """WO-01 review: allowed_names matched as SUBSTRINGS, so with
     job.title in the list the standard CV line 'Title, Company — years'

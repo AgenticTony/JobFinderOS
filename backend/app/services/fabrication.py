@@ -183,31 +183,100 @@ def _org_tier(tokens) -> str:
     return "advisory"
 
 
+# Structural separators (2026-10-16, draft 39). The token regex skips
+# these, so a capitalised run used to glue straight across them:
+# 'Manager | Production Reliability', 'Tooling — Databricks'. No
+# organisation name spans an em/en dash or a pipe; a run now breaks
+# there. ('&' does NOT break — 'Procter & Gamble', 'Johnson & Johnson
+# Consulting' are names; see _heading_label_spans.) ':' does NOT break
+# either: live_catch_580's real embellishment 'AI-baserade' is caught
+# only as 'LLM AI-baserade', glued across '• AI & LLM: …' — breaking
+# there would drop a recorded catch. ':' still ENDS a heading label.
+_RUN_BREAK_RE = re.compile(r"[—–|]")
+_LABEL_SEP_RE = re.compile(r"[—–|:]")
+_BULLET_RE = re.compile(r"^[•●▪◦·*\-–]\s*")
+_HEADING_CONNECTORS = {"&", "and", "och", "of", "for", "för", "the", "in"}
+
+
+def _is_heading_shaped(segment: str) -> bool:
+    """Short and Title-Case throughout: every word token is capitalised,
+    a number, or a connector. Prose before a colon ('• Led a team at
+    Northwind: …') has lowercase words and is NOT a heading."""
+    words = re.findall(r"[\w'’.-]+|&", segment)
+    return 0 < len(words) <= 8 and all(
+        w[0].isupper() or w[0].isdigit() or w.casefold() in _HEADING_CONNECTORS
+        for w in words)
+
+
+def _heading_label_spans(sentence: str):
+    """Character spans of HEADING LABELS — the framing text of a bullet
+    ('• Team Leadership & Budget — led…': the part before the first
+    separator) and every segment of a '|' headline. Within a label, an
+    '&'-joined run is a topic list ('Production Reliability & Incident
+    Management'), not an employer, and is demoted to advisory unless it
+    carries a corporate marker — and only when the run lies ENTIRELY
+    inside the label (a run glued across ':' into the content keeps its
+    tier). Runs WITHOUT '&' keep their normal tier in a label —
+    'Northwind Trading Company — led…' still blocks."""
+    bullet = _BULLET_RE.match(sentence)
+    body = bullet.end() if bullet else 0  # an '–' bullet is not a separator
+    seps = list(_LABEL_SEP_RE.finditer(sentence, body))
+    spans = []
+    if "|" in sentence:
+        starts = [body] + [m.end() for m in seps]
+        ends = [m.start() for m in seps] + [len(sentence)]
+        spans = list(zip(starts, ends))
+    elif bullet and seps:
+        spans = [(body, seps[0].start())]
+    return [(a, b) for a, b in spans if _is_heading_shaped(sentence[a:b])]
+
+
 def _extract_organisations(text: str) -> List[Claim]:
     """Runs of >=2 consecutive capitalised tokens, with stoplist tokens
-    breaking runs. Single proper nouns are skipped — they are mostly
-    sentence starts and cities, and the false-positive cost outweighs
-    the coverage."""
+    and structural separators breaking runs. Single proper nouns are
+    skipped — they are mostly sentence starts and cities, and the
+    false-positive cost outweighs the coverage."""
     claims = []
     for sentence in _sentences(text):
-        tokens = [t.rstrip(".") for t in re.findall(r"[\w'’.-]+", sentence)]
+        labels = _heading_label_spans(sentence)
         run: List[str] = []
-        for tok in tokens:
+        state = {"amp": False, "start": 0, "end": 0}
+
+        def flush():
+            if len(run) >= 2 and not all(
+                    t.casefold() in _GENERIC_TITLE_WORDS for t in run):
+                tier = _org_tier(run)
+                in_label = any(a <= state["start"] and state["end"] <= b
+                               for a, b in labels)
+                if (tier == "high" and in_label and state["amp"]
+                        and not any(t.casefold() in _CORPORATE_MARKERS
+                                    for t in run)):
+                    tier = "advisory"
+                claims.append(Claim(kind="organisation", value=" ".join(run),
+                                    context=sentence, tier=tier))
+            run.clear()
+            state["amp"] = False
+
+        for m in re.finditer(r"[\w'’.-]+|&|[—–|]", sentence):
+            raw = m.group(0)
+            if raw == "&":
+                if run:
+                    state["amp"] = True  # glue, as before — but recorded
+                continue
+            if _RUN_BREAK_RE.fullmatch(raw):
+                flush()
+                continue
+            tok = raw.rstrip(".")
             if (len(tok) >= 2 and tok[0].isupper()
                     and tok.casefold() not in _ORG_STOPWORDS
                     and any(c.isalpha() for c in tok)):
+                if not run:
+                    state["start"] = m.start()
                 run.append(tok)
+                state["end"] = m.end()
             else:
-                if len(run) >= 2 and not all(
-                        t.casefold() in _GENERIC_TITLE_WORDS for t in run):
-                    claims.append(Claim(
-                        kind="organisation", value=" ".join(run),
-                        context=sentence, tier=_org_tier(run)))
-                run = []
-        if len(run) >= 2 and not all(
-                t.casefold() in _GENERIC_TITLE_WORDS for t in run):
-            claims.append(Claim(kind="organisation", value=" ".join(run),
-                                context=sentence, tier=_org_tier(run)))
+                flush()
+        flush()
     return claims
 
 
@@ -390,9 +459,13 @@ def unsupported_claims(source_cv: str, tailored_text: str,
                 continue
             if remainder != value:
                 # the glue was context; the remainder is the real claim
-                findings.append(Claim(kind="organisation", value=remainder,
-                                      context=claim.context,
-                                      tier=_org_tier(v_tokens)))
+                # never MORE confident than the run it came from (a
+                # demoted heading label must not re-promote on rebuild)
+                findings.append(Claim(
+                    kind="organisation", value=remainder,
+                    context=claim.context,
+                    tier=(_org_tier(v_tokens) if claim.tier == "high"
+                          else "advisory")))
             else:
                 findings.append(claim)
             continue
@@ -457,6 +530,8 @@ def _credential_supported(claim: Claim, src: str) -> bool:
 _CORPORATE_MARKERS = {"ab", "ab", "ltd", "llc", "inc", "plc", "gmbh",
                       "ag", "group", "holding", "holdings", "solutions",
                       "consulting", "technologies", "systems", "labs",
+                      # 2026-10-16: 'worked at Acme Corp' was advisory
+                      "corp", "corporation",
                       "studio", "studios", "ventures", "capital"}
 
 _GENERIC_TITLE_WORDS = {
