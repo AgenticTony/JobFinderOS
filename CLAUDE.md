@@ -78,6 +78,19 @@ After committing, run the 3-command checklist in
 `gbrain import docs`, re-capture edited root/config files). The brain is
 a snapshot — it only knows what has been synced.
 
+### 10. Production cases never enter the repo verbatim — the repo is PUBLIC
+Bugs found on real user data (drafts, CVs, job matches) become tests, but
+the fixture must be **invented**, not copied: rewrite every fact that came
+from a user (team sizes, countries, employers, tools, phrasing) while
+keeping the *shape* that triggers the bug. No names, emails, user/draft
+IDs, CV sentences or AI output from production in code, tests, comments,
+commit messages, PR bodies or work orders — aggregate numbers (counts,
+tokens, costs) are fine. Then prove the invented fixture still goes red
+against the pre-fix code (an anonymised test that no longer reproduces
+the bug is worthless). Learned 2026-10-16: PR #133's fixture copied a
+beta tester's CV lines into the public repo and was merged before the
+outward sweep caught it.
+
 ## What this is
 
 **JobFinderOS** — an operating system for job hunting. The job-seeker inversion of

@@ -2300,43 +2300,42 @@ class TestFabricationLiveFPClasses:
 
 
 class TestHeadingLabelFPClass:
-    """Live FP class (2026-10-16, draft 39, first beta users): a CV
+    """Live FP class (2026-10-16, first beta users): a CV
     written in the common '• Heading & Heading — facts' bullet style was
     BLOCKED with four high-tier 'organisation' findings that were the
     bullet headings themselves. Every fact after the em-dash was in the
     CV. Mechanism: Layer A tokenisation skipped '—', '|' and '&', so
     capitalised runs glued across structural separators ('Manager |
-    Production Reliability', 'Tooling — Databricks') and '&'-joined
-    topic lists ('Team Leadership & Budget') became 3+-token 'employers'.
+    Service Continuity', 'Tooling — Snowflake') and '&'-joined
+    topic lists ('People Leadership & Budget') became 3+-token 'employers'.
 
     The other half of this class is the hole it must NOT open: an
     invented employer written as a heading, a headline segment or in
     prose still blocks, and a heading cannot smuggle a credential."""
 
-    # Anonymised from draft 39's source CV: the supporting facts are
-    # present, the heading words ('Reliability', 'Incident', 'Tooling',
-    # 'Leadership', 'Budget') are not — exactly the production shape.
+    # Invented CV with the production shape (no real user's facts): the supporting facts are
+    # present, the heading words ('Continuity', 'Release', 'Tooling',
+    # 'Leadership', 'Coordination') are not — exactly the production shape.
     CV = (
         "Jane Doe\nTechnical Product Manager\n"
-        "• Stakeholder Alignment & Governance — led a ~30-person team "
-        "with budget and P&L, reporting to the country head.\n"
-        "• Owned global 24/7 eCommerce operations across up to 31 "
-        "countries.\n"
-        "• Databricks platform on Azure; multi-cloud estate (AWS, Azure, "
-        "GCP, OCI).\n"
+        "• Stakeholder Alignment & Governance — led a ~12-person team "
+        "with budget and P&L, reporting to the regional director.\n"
+        "• Owned round-the-clock retail operations across 9 "
+        "markets.\n"
+        "• Snowflake platform on AWS; hybrid estate (AWS, on-prem).\n"
         "Experience: Svenska Spel, Stockholm 2015-2020. Delivery "
         "governance and operations."
     )
     # The four production contexts, verbatim shape.
     TAILORED = (
-        "Technical Product Manager | Production Reliability, 24/7 "
+        "Technical Product Manager | Service Continuity, Platform "
         "Operations & Delivery Governance\n"
-        "• Production Reliability & Incident Management — owned global "
-        "24/7 eCommerce operations across up to 31 countries.\n"
-        "• Team Leadership & Budget/P&L — led a ~30-person team with "
-        "budget and P&L, reporting to the country head.\n"
-        "• Platforms & Tooling — Databricks platform on Azure; "
-        "multi-cloud estate (AWS, Azure, GCP, OCI).\n"
+        "• Service Continuity & Release Coordination — owned "
+        "round-the-clock retail operations across 9 markets.\n"
+        "• People Leadership & Budget/P&L — led a ~12-person team with "
+        "budget and P&L, reporting to the regional director.\n"
+        "• Platforms & Tooling — Snowflake platform on AWS; "
+        "hybrid estate (AWS, on-prem).\n"
     )
 
     @staticmethod
@@ -2361,15 +2360,15 @@ class TestHeadingLabelFPClass:
         _, advisory = split_tiers(unsupported_claims(self.CV, self.TAILORED))
         values = {c.value.lower() for c in advisory
                   if c.kind == "organisation"}
-        assert "production reliability incident management" in values, values
-        assert "team leadership budget" in values, values
+        assert "service continuity release coordination" in values, values
+        assert "people leadership budget" in values, values
 
     def test_remainder_cannot_repromote_a_demoted_heading(self):
         """allowed_names subtraction rebuilds the claim; its tier must not
         exceed the original run's (a 4-token remainder re-tiered from
         scratch would be 'high' again)."""
-        tailored = ("• Production Reliability & Incident Management "
-                    "Delivery — owned global 24/7 eCommerce operations.\n")
+        tailored = ("• Service Continuity & Release Coordination "
+                    "Delivery — owned round-the-clock retail operations.\n")
         high = self._high_orgs(self.CV, tailored, allowed=["Delivery"])
         assert high == [], high
 
@@ -2377,12 +2376,12 @@ class TestHeadingLabelFPClass:
 
     def test_invented_employer_as_bullet_heading_still_blocks(self):
         for line in (
-            "• Northwind Trading Company — led a ~30-person team.\n",
-            "• Northwind Trading Company: led a ~30-person team.\n",
-            "• Acme Corp — led a ~30-person team.\n",
-            "• Acme Nordic AB — led a ~30-person team.\n",
+            "• Northwind Trading Company — led a ~12-person team.\n",
+            "• Northwind Trading Company: led a ~12-person team.\n",
+            "• Acme Corp — led a ~12-person team.\n",
+            "• Acme Nordic AB — led a ~12-person team.\n",
             # '&' inside a marker-bearing name keeps the marker's weight
-            "• Johnson & Johnson Consulting — led a ~30-person team.\n",
+            "• Johnson & Johnson Consulting — led a ~12-person team.\n",
         ):
             high = self._high_orgs(self.CV, line)
             assert high, (
@@ -2411,13 +2410,13 @@ class TestHeadingLabelFPClass:
         from app.services.fabrication import unsupported_claims
 
         found = [c.value.lower() for c in unsupported_claims(
-            self.CV, "• Procter & Gamble — led a ~30-person team.\n")
+            self.CV, "• Procter & Gamble — led a ~12-person team.\n")
             if c.kind == "organisation"]
         assert any("procter" in v and "gamble" in v for v in found), found
 
     def test_colon_heading_label_is_demoted_too(self):
-        tailored = ("• Production Reliability & Incident Management: owned "
-                    "global 24/7 eCommerce operations.\n")
+        tailored = ("• Service Continuity & Release Coordination: owned "
+                    "round-the-clock retail operations.\n")
         assert self._high_orgs(self.CV, tailored) == []
 
     def test_colon_heading_cannot_demote_content_glued_after_it(self):
@@ -2456,7 +2455,7 @@ class TestHeadingLabelFPClass:
         class _Judge:
             def judge_fabrication(self, source, document):
                 seen["document"] = document
-                return [{"claim": "Incident Management",
+                return [{"claim": "Release Coordination",
                          "why": "heading not in the CV"}]
 
         monkeypatch.setattr(ds, "get_ai_service_with_judge", lambda: _Judge())
@@ -2466,7 +2465,7 @@ class TestHeadingLabelFPClass:
 
         profile = Profile(cv_text=self.CV)
         high, _ = ds.check_package(profile, _Job(), "", self.TAILORED)
-        assert "Production Reliability & Incident Management" in seen.get(
+        assert "Service Continuity & Release Coordination" in seen.get(
             "document", ""), "the judge never saw the heading text"
         assert [c.kind for c in high] == ["judge"], (
             f"judge finding must be the high-tier result: "
