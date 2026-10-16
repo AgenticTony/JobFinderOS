@@ -183,9 +183,9 @@ def _org_tier(tokens) -> str:
     return "advisory"
 
 
-# Structural separators (2026-10-16, draft 39). The token regex skips
+# Structural separators (2026-10-16, first beta users). The token regex skips
 # these, so a capitalised run used to glue straight across them:
-# 'Manager | Production Reliability', 'Tooling — Databricks'. No
+# 'Manager | Service Continuity', 'Tooling — Snowflake'. No
 # organisation name spans an em/en dash or a pipe; a run now breaks
 # there. ('&' does NOT break — 'Procter & Gamble', 'Johnson & Johnson
 # Consulting' are names; see _heading_label_spans.) ':' does NOT break
@@ -210,10 +210,10 @@ def _is_heading_shaped(segment: str) -> bool:
 
 def _heading_label_spans(sentence: str):
     """Character spans of HEADING LABELS — the framing text of a bullet
-    ('• Team Leadership & Budget — led…': the part before the first
+    ('• People Leadership & Budget — led…': the part before the first
     separator) and every segment of a '|' headline. Within a label, an
-    '&'-joined run is a topic list ('Production Reliability & Incident
-    Management'), not an employer, and is demoted to advisory unless it
+    '&'-joined run is a topic list ('Service Continuity & Release
+    Coordination'), not an employer, and is demoted to advisory unless it
     carries a corporate marker — and only when the run lies ENTIRELY
     inside the label (a run glued across ':' into the content keeps its
     tier). Runs WITHOUT '&' keep their normal tier in a label —
