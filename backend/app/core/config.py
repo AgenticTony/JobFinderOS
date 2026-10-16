@@ -122,6 +122,16 @@ class Settings(BaseSettings):
     # is UNMEASURED — watch latency/errors on the first uncapped hunts
     # and tune here, not in code.
     MATCH_CONCURRENCY: int = 8
+    # Process-wide cap on in-flight GLM calls, ACROSS hunts and users
+    # (2026-10-16 beta day: three first hunts × MATCH_CONCURRENCY=8 on
+    # one flat-rate key → a 429 and two malformed replies on user-waiting
+    # tailors). Background matching may use at most
+    # AI_MAX_CONCURRENCY - AI_INTERACTIVE_RESERVE slots; interactive calls
+    # (tailor, judge, extract, suggest) may use all of them and jump the
+    # queue. Per PROCESS: the hunt cron is a separate service with its
+    # own gate.
+    AI_MAX_CONCURRENCY: int = 8
+    AI_INTERACTIVE_RESERVE: int = 2
     COMPOSIO_API_KEY: str = ""  # integrations layer (Settings page)
     # Beta (owner decision 2026-09-01): email applications ship from the
     # USER'S OWN connected Gmail, not a platform sender. The interim

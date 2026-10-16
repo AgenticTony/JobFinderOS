@@ -149,8 +149,15 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
 - Matching: temperature=0.0, anchored rubric in prompt, ~6s/call, fanned out
   MATCH_CONCURRENCY-wide (default 8) on a bounded pool — AI calls on pool
   threads inside copied contexts (ai_usage attribution survives), every DB
-  write on the calling thread. The flat-rate key's behavior under
-  parallelism is unmeasured: watch the first uncapped hunts and tune.
+  write on the calling thread. First measured under load 2026-10-16
+  (3 concurrent first hunts → a 429 + 2 malformed replies on user-waiting
+  tailors). Since then every GLM call passes a process-wide gate
+  (`AICallGate`: AI_MAX_CONCURRENCY=8, AI_INTERACTIVE_RESERVE=2 —
+  background matching gets ≤6 slots, interactive calls jump the queue);
+  interactive kinds (tailor/judge/extract/suggest) retry 429 with
+  bounded backoff honouring Retry-After, then fail with `AIBusyError`;
+  match calls never retry. 429s now leave a zero-token ai_usage row
+  (detail `rate_limited (429)`). Per process: the hunt cron has its own gate.
 - Tailoring: default temperature 0.3 (variety in cover letters is desirable).
   Craft rules adopted 2026-09-15 from the cv-writing.skill tier-1 review
   (posting-aligned emphasis, voice preservation / anti-AI-tell register,
