@@ -19,23 +19,43 @@ import hashlib
 import json
 import logging
 import math
+import random
 import re
+import threading
 import time
+from contextlib import contextmanager
 from typing import Any, Dict, Optional
 
 import httpx
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# AI-14: re-asks on a malformed tailor response before failing the draft.
-# 2 retries ≈ worst case ~75s total (each GLM call runs 15-25s) — inside
-# the frontend's 120s prepare timeout. Backoff grows per attempt so a
-# burst of format drift can pass through.
+# AI-14: re-asks on a malformed (or empty) tailor response before failing
+# the draft. Backoff doubles per attempt (3s, 6s): on 2026-10-16 two
+# drafts burned all three attempts inside 1s+2s of sleep during a load
+# spike — the re-asks must outlast a burst, not land inside it.
+# Time budget: prepareDraft uses the frontend's slowApi (600s), not the
+# 120s client. Each call's httpx read timeout is 180s, so 3 attempts +
+# 9s backoff ≈ 9 min worst case — inside 600s only if no attempt also
+# pays the SDK's own timeout retry (max_retries=1). Typical: 15-60s.
+# A truncated reply (finish_reason=length) is never re-asked.
 TAILOR_FORMAT_RETRIES = 2
-TAILOR_RETRY_DELAY_S = 1.0
+TAILOR_RETRY_DELAY_S = 3.0
+
+# 2026-10-16: 429 retry for INTERACTIVE calls (the user is waiting on a
+# prepare request). Background match calls are never retried here — the
+# matcher leaves the job 'new' for the next run, and re-asking would add
+# load exactly when the key is saturated. Retry-After is honoured, capped;
+# otherwise exponential backoff with jitter. Each attempt is ALSO one
+# SDK-level retry (OpenAI max_retries=1), so 5 attempts ≈ 10 HTTP calls
+# over ~30-60s worst case before the draft fails with AIBusyError.
+INTERACTIVE_KINDS = frozenset({"tailor", "judge", "extract", "suggest"})
+RATE_LIMIT_RETRIES = 4
+RATE_LIMIT_BACKOFF_S = 2.0
+RATE_LIMIT_MAX_WAIT_S = 20.0
 
 # WO-04: request-context for per-user cost attribution. The middleware
 # sets this per request; scheduler/worker calls leave it None (system).
@@ -73,13 +93,17 @@ def compute_cost_usd(model: str, prompt: int, cached: int, completion: int) -> i
     return int(round(usd * 1_000_000))
 
 
-def record_ai_usage(kind: str, model: str, response) -> None:  # noqa: C901
+def record_ai_usage(kind: str, model: str, response,
+                    detail: Optional[str] = None) -> None:  # noqa: C901
     """Insert one ai_usage row on a short-lived session.
 
     Deliberately independent of caller sessions (works for matcher,
     drafts, judge, scheduler alike) and failure-tolerant: observability
     must never break the call it observes. The endpoint field is the
     RESIDENCY-AUDIT field (which hostname served this call).
+
+    response=None + detail records a REJECTED attempt (zero tokens,
+    zero cost) — the 2026-10-16 429s left no trace in ai_usage.
     """
     try:
         from urllib.parse import urlparse
@@ -106,6 +130,7 @@ def record_ai_usage(kind: str, model: str, response) -> None:  # noqa: C901
                 completion_tokens=completion,
                 cost_usd=compute_cost_usd(model, prompt, min(cached, prompt),
                                           completion),
+                detail=detail,
             ))
             db.commit()
         finally:
@@ -116,6 +141,86 @@ def record_ai_usage(kind: str, model: str, response) -> None:  # noqa: C901
 
 class AIServiceError(Exception):
     """Raised when the AI service cannot complete a request."""
+
+
+class AIEmptyResponseError(AIServiceError):
+    """The provider answered 200 with no content — a format failure the
+    tailor path re-asks, same as a malformed reply."""
+
+
+class AIBusyError(AIServiceError):
+    """The provider kept rate-limiting an interactive call past the
+    bounded retry. The message is user-facing (draft.error)."""
+
+
+class AICallGate:
+    """Process-wide cap on in-flight provider calls, interactive first.
+
+    Background (match) calls may hold at most capacity - interactive_reserve
+    slots and wait while any interactive call is queued; interactive calls
+    may take every slot. Held only around the HTTP call itself — never
+    across a backoff sleep.
+    """
+
+    def __init__(self, capacity: int, interactive_reserve: int):
+        self.capacity = max(1, capacity)
+        self.background_capacity = max(
+            1, self.capacity - max(0, interactive_reserve))
+        self.in_use = 0
+        self._interactive_waiting = 0
+        self._cond = threading.Condition()
+
+    @contextmanager
+    def slot(self, *, interactive: bool):
+        with self._cond:
+            if interactive:
+                self._interactive_waiting += 1
+                try:
+                    while self.in_use >= self.capacity:
+                        self._cond.wait()
+                finally:
+                    self._interactive_waiting -= 1
+            else:
+                while (self.in_use >= self.background_capacity
+                       or self._interactive_waiting):
+                    self._cond.wait()
+            self.in_use += 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                self.in_use -= 1
+                self._cond.notify_all()
+
+
+_gate_lock = threading.Lock()
+_gate: Optional[AICallGate] = None
+
+
+def _ai_gate() -> AICallGate:
+    global _gate
+    with _gate_lock:
+        if _gate is None:
+            _gate = AICallGate(settings.AI_MAX_CONCURRENCY,
+                               settings.AI_INTERACTIVE_RESERVE)
+        return _gate
+
+
+def _rate_limit_delay(err: RateLimitError, attempt: int) -> float:
+    """Retry-After (seconds or -ms) when the provider sends one, else
+    exponential backoff with jitter; always capped."""
+    headers = getattr(getattr(err, "response", None), "headers", None) or {}
+    delay = None
+    try:
+        if headers.get("retry-after-ms") is not None:
+            delay = float(headers["retry-after-ms"]) / 1000.0
+        elif headers.get("retry-after") is not None:
+            delay = float(headers["retry-after"])
+    except (TypeError, ValueError):
+        delay = None  # HTTP-date form or garbage: fall back to backoff
+    if delay is None or delay < 0:
+        delay = RATE_LIMIT_BACKOFF_S * (2 ** attempt) * random.uniform(0.75, 1.25)
+    return min(delay, RATE_LIMIT_MAX_WAIT_S)
 
 
 class AIService:
@@ -306,7 +411,22 @@ Prepare my tailored application package.
             # the named untraceable claims, so the retry targets the defect
             user_message += f"\n\n--- CORRECTION ---\n{correction}"
 
-        raw = self._complete(system_prompt, user_message, kind="tailor")
+        def ask():
+            # 2026-10-16: an empty reply is a format failure like any
+            # other — it used to raise straight past the re-ask below.
+            # AIBusyError (429s exhausted) is NOT caught: it already
+            # retried, and the draft must fail with its message.
+            try:
+                # settings.TAILOR_MAX_TOKENS: the package is a whole CV +
+                # letter; the base cap truncated long CVs (draft 39).
+                text = self._complete(system_prompt, user_message,
+                                      kind="tailor",
+                                      max_tokens=settings.TAILOR_MAX_TOKENS)
+            except AIEmptyResponseError:
+                return ""
+            return text
+
+        raw = ask()
         parsed = self._parse_json(raw)
 
         # AI-9 (live-confirmed): a malformed response parses to {} (or drops
@@ -330,22 +450,29 @@ Prepare my tailored application package.
             if self._non_empty_str(parsed.get("cover_letter")) and \
                     self._non_empty_str(parsed.get("tailored_cv")):
                 break
+            truncated = getattr(self, "_last_finish_reason", None) == "length"
             logger.warning(
                 "tailor attempt %d/%d malformed (%s) — %s",
                 attempt + 1, 1 + TAILOR_FORMAT_RETRIES,
                 self._response_shape(raw),
-                "retrying" if attempt < TAILOR_FORMAT_RETRIES else "giving up",
+                "retrying" if attempt < TAILOR_FORMAT_RETRIES and not truncated
+                else "giving up",
             )
+            if truncated:
+                # The same prompt re-asked truncates the same way (draft
+                # 39: 3/3 at the cap) — fail on the first, clearly.
+                raise ValueError(
+                    "Malformed tailoring response: the generated package was "
+                    "too long and was cut off (finish_reason=length). Try "
+                    "again; if it keeps happening, a shorter CV helps."
+                )
             if attempt >= TAILOR_FORMAT_RETRIES:
-                truncated = getattr(self, "_last_finish_reason", None) == "length"
                 raise ValueError(
                     "Malformed tailoring response: cover_letter/tailored_cv "
                     "missing or empty"
-                    + (" (finish_reason=length — output was truncated)"
-                       if truncated else "")
                 )
-            time.sleep(TAILOR_RETRY_DELAY_S * (attempt + 1))
-            raw = self._complete(system_prompt, user_message, kind="tailor")
+            time.sleep(TAILOR_RETRY_DELAY_S * (2 ** attempt))
+            raw = ask()
             parsed = self._parse_json(raw)
 
         return {
@@ -817,30 +944,59 @@ An empty list means the document is faithful."""
     # ------------------------------------------------------------------
 
     def _complete(self, system_prompt: str, user_message: str,
-                  temperature: float = 0.3, kind: str = "unknown") -> str:
+                  temperature: float = 0.3, kind: str = "unknown",
+                  max_tokens: Optional[int] = None) -> str:
         """Run a chat completion and return raw content text.
 
         kind labels the ai_usage row (WO-05): match | tailor | judge |
-        extract | suggest | unknown.
+        extract | suggest | unknown. max_tokens overrides the base cap
+        for this call only (tailor passes settings.TAILOR_MAX_TOKENS).
         """
         # Reset per call: callers (AI-9) read this when a response turns
         # out malformed, to distinguish truncation from pure garbage.
         self._last_finish_reason = None
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            # Scoring calls pass 0.0. NOTE: temperature 0 makes sampling
-            # greedy, NOT deterministic — MoE routing and batched GPU
-            # reduction still vary. Measured on glm-5.1, same CV + same job,
-            # 5 runs: spread 6-10 points at 0.0 (vs 12-16 at 0.3). Treat
-            # scores as noisy to about +/-7, never as reproducible values.
-            temperature=temperature,
-            max_tokens=self.max_tokens,
-            extra_body={"thinking": {"type": self.thinking}},
-        )
+        interactive = kind in INTERACTIVE_KINDS
+        attempts = 1 + (RATE_LIMIT_RETRIES if interactive else 0)
+        for attempt in range(attempts):
+            try:
+                # The gate is held for the HTTP call only — the backoff
+                # sleep below runs OUTSIDE it, so a waiting retry never
+                # sits on a slot someone else could use.
+                with _ai_gate().slot(interactive=interactive):
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message},
+                        ],
+                        # Scoring calls pass 0.0. NOTE: temperature 0 makes
+                        # sampling greedy, NOT deterministic — MoE routing
+                        # and batched GPU reduction still vary. Measured on
+                        # glm-5.1, same CV + same job, 5 runs: spread 6-10
+                        # points at 0.0 (vs 12-16 at 0.3). Treat scores as
+                        # noisy to about +/-7, never as reproducible values.
+                        temperature=temperature,
+                        max_tokens=max_tokens or self.max_tokens,
+                        extra_body={"thinking": {"type": self.thinking}},
+                    )
+                break
+            except RateLimitError as e:
+                record_ai_usage(kind, self.model, None,
+                                detail="rate_limited (429)")
+                if not interactive:
+                    raise  # background: the matcher retries next run
+                if attempt + 1 >= attempts:
+                    logger.warning("%s call rate-limited %d times — giving up",
+                                   kind, attempts)
+                    raise AIBusyError(
+                        "The AI service is busy right now (rate limited). "
+                        "Nothing was generated — try again in a minute."
+                    ) from e
+                delay = _rate_limit_delay(e, attempt)
+                logger.warning("%s call rate-limited (attempt %d/%d) — "
+                               "retrying in %.1fs", kind, attempt + 1,
+                               attempts, delay)
+                time.sleep(delay)
         if response.choices:
             self._last_finish_reason = getattr(
                 response.choices[0], "finish_reason", None
@@ -859,7 +1015,7 @@ An empty list means the document is faithful."""
                     result_text = json_match.group(0)
 
         if not result_text:
-            raise AIServiceError("GLM returned empty content")
+            raise AIEmptyResponseError("GLM returned empty content")
 
         return result_text
 
@@ -875,8 +1031,13 @@ An empty list means the document is faithful."""
             end = text.find("```", start)
             text = text[start:end].strip()
 
+        # strict=False: GLM routinely puts raw newlines/tabs INSIDE string
+        # values (a cover letter's paragraph breaks). Strict mode rejected
+        # them as "Invalid control character" and failed draft 41 on 3/3
+        # attempts with finish=stop (2026-10-16, reproduced with no load).
+        # The characters are content, not malformation.
         try:
-            parsed = json.loads(text)
+            parsed = json.loads(text, strict=False)
             return parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError as e:
             logger.error("Failed to parse GLM response as JSON: %s", e)
@@ -884,7 +1045,7 @@ An empty list means the document is faithful."""
             match = re.search(r"\{[\s\S]*\}", text)
             if match:
                 try:
-                    return json.loads(match.group(0))
+                    return json.loads(match.group(0), strict=False)
                 except json.JSONDecodeError:
                     return {}
             return {}

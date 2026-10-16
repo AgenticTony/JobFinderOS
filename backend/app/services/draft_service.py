@@ -418,7 +418,12 @@ def create_draft_for_job(
     except Exception as e:  # noqa: BLE001 — surface the failure on the draft row
         db.rollback()
         draft.status = "failed"
-        draft.error = f"Tailoring failed: {type(e).__name__}: {e}"
+        from app.services.ai_service import AIBusyError
+
+        # A provider that stayed busy past the bounded retry gets a plain
+        # message (the "Try again" path), not the raw 429 payload.
+        draft.error = (f"Tailoring failed: {e}" if isinstance(e, AIBusyError)
+                       else f"Tailoring failed: {type(e).__name__}: {e}")
         db.add(draft)
         db.commit()
         db.refresh(draft)
