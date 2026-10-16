@@ -3046,7 +3046,7 @@ class TestUserIdOnCostRows:
                 "reasoning_content": None})()})()]
 
         def fake_complete(self, system_prompt, user_message,
-                          temperature=0.3, kind="unknown"):
+                          temperature=0.3, kind="unknown", max_tokens=None):
             from app.services.ai_service import record_ai_usage
             record_ai_usage(kind, "glm-5.1", _R())
             return _R().choices[0].message.content

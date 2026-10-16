@@ -36,18 +36,14 @@ logger = logging.getLogger(__name__)
 # AI-14: re-asks on a malformed (or empty) tailor response before failing
 # the draft. Backoff doubles per attempt (3s, 6s): on 2026-10-16 two
 # drafts burned all three attempts inside 1s+2s of sleep during a load
-# spike — the re-asks must outlast a burst, not land inside it. Worst
-# case ~3 GLM calls + 9s, well inside the 600s prepare (slowApi) timeout.
+# spike — the re-asks must outlast a burst, not land inside it.
+# Time budget: prepareDraft uses the frontend's slowApi (600s), not the
+# 120s client. Each call's httpx read timeout is 180s, so 3 attempts +
+# 9s backoff ≈ 9 min worst case — inside 600s only if no attempt also
+# pays the SDK's own timeout retry (max_retries=1). Typical: 15-60s.
+# A truncated reply (finish_reason=length) is never re-asked.
 TAILOR_FORMAT_RETRIES = 2
 TAILOR_RETRY_DELAY_S = 3.0
-
-# Output cap for tailor calls (thinking disabled; +4000 when enabled, the
-# reasoning budget the base cap already reserves). The shared 2000 cap is
-# sized for match JSON: on 2026-10-16 a long CV's package was cut at
-# ~8.5k chars (finish_reason=length) on every attempt — draft 39,
-# reproduced with no load. A cap is a ceiling, not spend: short packages
-# cost the same. Match/judge caps are unchanged.
-TAILOR_MAX_TOKENS = 8000
 
 # 2026-10-16: 429 retry for INTERACTIVE calls (the user is waiting on a
 # prepare request). Background match calls are never retried here — the
@@ -421,7 +417,11 @@ Prepare my tailored application package.
             # AIBusyError (429s exhausted) is NOT caught: it already
             # retried, and the draft must fail with its message.
             try:
-                text = self._complete(system_prompt, user_message, kind="tailor")
+                # settings.TAILOR_MAX_TOKENS: the package is a whole CV +
+                # letter; the base cap truncated long CVs (draft 39).
+                text = self._complete(system_prompt, user_message,
+                                      kind="tailor",
+                                      max_tokens=settings.TAILOR_MAX_TOKENS)
             except AIEmptyResponseError:
                 return ""
             return text
@@ -944,11 +944,13 @@ An empty list means the document is faithful."""
     # ------------------------------------------------------------------
 
     def _complete(self, system_prompt: str, user_message: str,
-                  temperature: float = 0.3, kind: str = "unknown") -> str:
+                  temperature: float = 0.3, kind: str = "unknown",
+                  max_tokens: Optional[int] = None) -> str:
         """Run a chat completion and return raw content text.
 
         kind labels the ai_usage row (WO-05): match | tailor | judge |
-        extract | suggest | unknown.
+        extract | suggest | unknown. max_tokens overrides the base cap
+        for this call only (tailor passes settings.TAILOR_MAX_TOKENS).
         """
         # Reset per call: callers (AI-9) read this when a response turns
         # out malformed, to distinguish truncation from pure garbage.
@@ -974,7 +976,7 @@ An empty list means the document is faithful."""
                         # points at 0.0 (vs 12-16 at 0.3). Treat scores as
                         # noisy to about +/-7, never as reproducible values.
                         temperature=temperature,
-                        max_tokens=self._max_tokens_for(kind),
+                        max_tokens=max_tokens or self.max_tokens,
                         extra_body={"thinking": {"type": self.thinking}},
                     )
                 break
@@ -1016,11 +1018,6 @@ An empty list means the document is faithful."""
             raise AIEmptyResponseError("GLM returned empty content")
 
         return result_text
-
-    def _max_tokens_for(self, kind: str) -> int:
-        if kind == "tailor":
-            return TAILOR_MAX_TOKENS + (0 if self.thinking == "disabled" else 4000)
-        return self.max_tokens
 
     @staticmethod
     def _parse_json(text: str) -> Dict[str, Any]:

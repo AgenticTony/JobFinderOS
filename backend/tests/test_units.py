@@ -4679,7 +4679,7 @@ class TestTailorPromptLanguageRule:
         svc.model = "glm-test"
         captured = {}
 
-        def fake_complete(system_prompt, user_message, kind="tailor"):
+        def fake_complete(system_prompt, user_message, kind="tailor", **kw):
             captured["system"] = system_prompt
             return _json.dumps({
                 "cover_letter": "Hej, jag söker rollen. Med vänlig hälsning",
@@ -4724,7 +4724,7 @@ class TestTailorPromptCraft:
         svc.model = "glm-test"
         captured = {}
 
-        def fake_complete(system_prompt, user_message, kind="tailor"):
+        def fake_complete(system_prompt, user_message, kind="tailor", **kw):
             captured["system"] = system_prompt
             return _json.dumps({
                 "cover_letter": "Hej, jag söker rollen. Med vänlig hälsning",

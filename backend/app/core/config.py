@@ -130,6 +130,12 @@ class Settings(BaseSettings):
     # (tailor, judge, extract, suggest) may use all of them and jump the
     # queue. Per PROCESS: the hunt cron is a separate service with its
     # own gate.
+    # Output cap for TAILOR calls only (owner decision 2026-10-16): the
+    # package is the whole rewritten CV + cover letter + changes summary
+    # in one JSON; the shared 2000 cap (sized for match JSON) cut long
+    # CVs at ~8.5k chars every time. A ceiling, not spend.
+    # Match/judge/extract/suggest keep GLM's base cap (2000).
+    TAILOR_MAX_TOKENS: int = 20000
     AI_MAX_CONCURRENCY: int = 8
     AI_INTERACTIVE_RESERVE: int = 2
     COMPOSIO_API_KEY: str = ""  # integrations layer (Settings page)

@@ -269,7 +269,7 @@ class TestDeterministicTailorFormatFailures:
             "malformed reply — it must not burn re-asks")
 
     def test_tailor_call_gets_a_document_sized_token_cap(self, sleeps):
-        import app.services.ai_service as ai_mod
+        from app.core.config import settings
 
         client = _ScriptedClient([GOOD])
         svc = _svc(client)
@@ -278,10 +278,17 @@ class TestDeterministicTailorFormatFailures:
         # the client labels by system prompt; order is what's reliable
         caps = {"tailor": client.max_tokens[0][1],
                 "match": client.max_tokens[-1][1]}
-        assert caps["tailor"] >= ai_mod.TAILOR_MAX_TOKENS >= 6000, (
+        # Owner decision 2026-10-16 13:11 CEST: 20000, a named setting.
+        assert settings.TAILOR_MAX_TOKENS == 20000
+        assert caps["tailor"] == settings.TAILOR_MAX_TOKENS, (
             f"tailor cap {caps['tailor']} — 2000 truncated a long CV's "
             "package at ~8.5k chars (draft 39)")
         assert caps["match"] == 2000, "match cap must not move (scores)"
+
+    def test_judge_cap_is_unchanged(self, sleeps):
+        client = _ScriptedClient([GOOD])
+        _svc(client).judge_fabrication("src", "doc")
+        assert client.max_tokens == [("judge", 2000)]
 
     def test_truncation_fails_fast_with_a_clear_error(self, sleeps):
         import app.services.ai_service as ai_mod

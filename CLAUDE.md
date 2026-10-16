@@ -161,8 +161,10 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   Same day, reproduced with NO load: 2 of the 3 failures were deterministic
   — raw newlines inside JSON strings (`_parse_json` now uses
   `strict=False`) and long-CV packages cut at the shared 2000-token cap
-  (tailor calls now get `TAILOR_MAX_TOKENS=8000`; a `finish_reason=length`
-  reply fails on the first attempt instead of three identical re-asks).
+  (tailor calls now pass `settings.TAILOR_MAX_TOKENS=20000`, owner
+  decision; match/judge/extract/suggest stay at 2000). A
+  `finish_reason=length` reply fails on the first attempt instead of
+  three identical re-asks.
 - Tailoring: default temperature 0.3 (variety in cover letters is desirable).
   Craft rules adopted 2026-09-15 from the cv-writing.skill tier-1 review
   (posting-aligned emphasis, voice preservation / anti-AI-tell register,
