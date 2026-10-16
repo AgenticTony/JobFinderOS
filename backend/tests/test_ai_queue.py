@@ -32,7 +32,14 @@ from app.core.config import settings
 from app.core.database import SessionLocal, engine
 from app.core.timeutil import utc_now
 from app.main import app
-from app.models import AIJob, AIUsage, ApplicationDraft, JobPosting, MatchResult, Profile
+from app.models import (
+    AIJob,
+    AIUsage,
+    ApplicationDraft,
+    JobPosting,
+    MatchResult,
+    Profile,
+)
 from app.models import User as UserModel
 from app.services import ai_queue
 from app.services.ai_queue import AIDrainer, ConcurrencyController
