@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_authenticated_user
 from app.core.config import settings
-from app.core.database import SessionLocal, get_db
+from app.core.database import SessionLocal, get_db, release_transaction
 from app.core.ratelimit import enforce
 from app.crud import get_stats, list_scrape_runs
 from app.models import MatchResult, User
@@ -80,6 +80,9 @@ async def run(
         finally:
             renew_db.close()
 
+    # run_pipeline works on its OWN sessions for minutes (scrape + match);
+    # the request session must not sit "idle in transaction" meanwhile.
+    release_transaction(db)
     try:
         summary = await run_in_threadpool(
             run_pipeline,
