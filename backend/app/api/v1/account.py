@@ -122,6 +122,13 @@ def _erase_local_rows(db: Session, user: User, uid, user_email: str) -> None:
     # so deleting parents first raises IntegrityError -> 500 -> rollback
     # that keeps EVERY personal row. Children first, always:
     # applications -> drafts -> matches -> profiles -> user.
+    # WO-31: queued AI work dies first — the users row is TOMBSTONED, not
+    # deleted, so the FK's ON DELETE CASCADE never fires. A suggest
+    # result is CV-derived; an in-flight job's result is dropped by its
+    # handler (draft/user gone), never written.
+    from app.models import AIJob
+
+    db.query(AIJob).filter(AIJob.user_id == uid).delete(synchronize_session=False)
     applications = db.query(Application).filter(Application.user_id == uid).delete()
     drafts = db.query(ApplicationDraft).filter(ApplicationDraft.user_id == uid).delete()
     matches = db.query(MatchResult).filter(MatchResult.user_id == uid).delete()
