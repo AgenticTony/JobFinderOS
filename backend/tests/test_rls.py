@@ -372,3 +372,75 @@ class TestListenerIsLoadBearing:
         assert _unscoped_count("profiles") == 0, (
             "isolation did not return with the listener restored"
         )
+
+
+class TestEnsureRlsLocksOnlyIncompleteTables:
+    """2026-10-16 deploy failure (WO-31 ai_jobs migration): one new table
+    made rls_layer_complete() False, and ensure_rls then re-ran ALTER
+    TABLE / DROP+CREATE POLICY on EVERY table — ACCESS EXCLUSIVE on users,
+    profiles, match_results… The live API's idle-in-transaction sessions
+    held ACCESS SHARE on those, the migration hit its 30s lock_timeout and
+    the new build refused to boot. Only the NEW table needed the layer."""
+
+    PROBE = "rls_probe_new_table"
+
+    @pytest.fixture()
+    def probe_table(self, monkeypatch):
+        from app.core import rls_sql
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                f"CREATE TABLE IF NOT EXISTS {self.PROBE} "
+                "(id serial PRIMARY KEY, user_id uuid)"))
+        monkeypatch.setattr(rls_sql, "USER_TABLES",
+                            rls_sql.USER_TABLES + [self.PROBE])
+        monkeypatch.setattr(rls_sql, "ALL_RLS_TABLES",
+                            rls_sql.ALL_RLS_TABLES + [self.PROBE])
+        yield self.PROBE
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP TABLE IF EXISTS {self.PROBE}"))
+
+    def test_new_table_does_not_relock_complete_tables(self, probe_table):
+        from app.core.rls_sql import ensure_rls
+
+        # The production blocker: an open transaction that has READ
+        # profiles (ACCESS SHARE), like the API's idle-in-transaction
+        # sessions. Any ALTER on profiles must wait for it.
+        blocker = engine.connect()
+        blocker.begin()
+        blocker.execute(text("SELECT count(*) FROM profiles"))
+        try:
+            with engine.connect() as conn:
+                with conn.begin():
+                    conn.execute(text("SET LOCAL lock_timeout = '2s'"))
+                    ensure_rls(conn)  # pre-fix: LockNotAvailable on profiles
+        finally:
+            blocker.rollback()
+            blocker.close()
+
+        with engine.connect() as conn:
+            relayed = conn.execute(text(
+                "SELECT relrowsecurity FROM pg_class WHERE relname = :t"),
+                {"t": probe_table}).scalar()
+            policy = conn.execute(text(
+                "SELECT count(*) FROM pg_policies WHERE schemaname='public' "
+                "AND tablename = :t AND policyname = 'own_rows'"),
+                {"t": probe_table}).scalar()
+        assert relayed, "the new table did not get ROW LEVEL SECURITY"
+        assert policy == 1, "the new table did not get its own_rows policy"
+
+    def test_existing_table_missing_its_policy_is_still_repaired(self):
+        """Narrowing must not weaken repair: a complete-looking table whose
+        policy went missing is restored on the next ensure_rls."""
+        from app.core.rls_sql import ensure_rls, rls_layer_complete
+
+        with engine.begin() as conn:
+            conn.execute(text("DROP POLICY IF EXISTS own_rows ON feedback"))
+            assert not rls_layer_complete(conn)
+        with engine.begin() as conn:
+            ensure_rls(conn)
+        with engine.connect() as conn:
+            assert conn.execute(text(
+                "SELECT count(*) FROM pg_policies WHERE schemaname='public' "
+                "AND tablename='feedback' AND policyname='own_rows'")).scalar() == 1
+            assert rls_layer_complete(conn)
