@@ -20,6 +20,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from app.core.database import release_transaction
 from app.models import AIJob, ApplicationDraft, JobPosting, Profile, User
 from app.services import ai_queue
 from app.services.ai_queue import Handler, Outcome, Requeue
@@ -70,6 +71,10 @@ def run_tailor(db: Session, job: AIJob) -> Outcome:
         db.add(draft)
         return Outcome("failed", error=draft.error)
     posting = draft.job or db.get(JobPosting, draft.job_id)
+    # Every read is done: end the read transaction before the provider
+    # calls (tailor + judge + regenerations take minutes). Results are
+    # staged in memory (autoflush off) and written once, at the lease CAS.
+    release_transaction(db)
     # The package is built against the CV on file NOW — snapshot it in the
     # result transaction (P1-5b), not at enqueue time.
     draft_service._snapshot_cv(draft, profile)
@@ -109,7 +114,9 @@ def run_recheck(db: Session, job: AIJob) -> Outcome:
     profile = get_active_profile(db, user_id=job.user_id)
     if not profile or not profile.cv_text:
         return Outcome("failed", error="No CV on file for this account")
-    draft_service._recheck_into(db, draft, profile)
+    posting = draft.job or db.get(JobPosting, draft.job_id)
+    release_transaction(db)  # no transaction open across the judge call
+    draft_service._recheck_into(db, draft, profile, job=posting)
     return Outcome("done")
 
 
@@ -143,6 +150,7 @@ def run_extract(db: Session, job: AIJob) -> Outcome:
     if not text.strip():
         return Outcome("failed", error=EXTRACT_EMPTY_ERROR)
     before = cv_service.cv_sha256(text)
+    release_transaction(db)  # no transaction open across the provider call
     extracted = cv_service.get_ai_service().extract_profile(text)
     db.refresh(profile)
     if cv_service.cv_sha256(profile.cv_text) != before:
@@ -196,7 +204,9 @@ def run_suggest(db: Session, job: AIJob) -> Outcome:
     params = json.loads(job.params or "{}")
     country = params.get("country", "")
     mode = params.get("mode", "field")
-    result = cv_service.get_ai_service().suggest_search_queries(profile.cv_text, country, mode)
+    cv_text = profile.cv_text
+    release_transaction(db)  # no transaction open across the provider call
+    result = cv_service.get_ai_service().suggest_search_queries(cv_text, country, mode)
     return Outcome("done", result={"country": country, "mode": mode, **result})
 
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_authenticated_user, owns_or_404
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, release_transaction
 from app.core.ratelimit import enforce
 from app.crud import get_match, list_matches, set_match_decision
 from app.models import User
@@ -144,5 +144,10 @@ async def run_matching(
             current_user_id.reset(ctx_token)
             task_db.close()
 
+    # The background task uses its OWN session; this request's session
+    # (SELECT profiles above) would otherwise stay "idle in transaction"
+    # for the whole matching run — FastAPI keeps yield-dependencies open
+    # until background tasks finish (measured, 0.141).
+    release_transaction(db)
     background.add_task(_task)
     return {"status": "started", "message": "Matching running in background — refresh matches shortly"}

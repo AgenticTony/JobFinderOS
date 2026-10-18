@@ -123,6 +123,35 @@ _sa_event.listen(RequestSessionLocal, "after_begin", _propagate_request_jwt)
 
 
 
+def release_transaction(db) -> None:
+    """End `db`'s current transaction BEFORE slow work (an AI call, a
+    background task, a scrape). An open transaction holds ACCESS SHARE
+    locks on everything it read and pins a pooled connection: in
+    production (2026-10-16) sessions sat "idle in transaction" for
+    minutes and blocked migration DDL until the deploy failed.
+
+    Loaded objects stay usable afterwards — expiry is suspended for this
+    commit, because touching an expired attribute during the wait would
+    silently reload it and re-open a transaction. Refuses (RuntimeError)
+    when writes are pending: releasing must never publish a half-staged
+    result early (the ai_jobs drainer commits results exactly once, at
+    its lease CAS). Reads-only callers only.
+    """
+    if db.new or db.dirty or db.deleted:
+        raise RuntimeError(
+            "release_transaction() with pending writes — commit or stage "
+            "them after the slow work, never before it"
+        )
+    if not db.in_transaction():
+        return
+    previous = db.expire_on_commit
+    db.expire_on_commit = False
+    try:
+        db.commit()
+    finally:
+        db.expire_on_commit = previous
+
+
 def get_db():
     """FastAPI dependency yielding a REQUEST session (MIG-WO3: RLS-
     propagated on Postgres — see RequestSessionLocal above)."""
