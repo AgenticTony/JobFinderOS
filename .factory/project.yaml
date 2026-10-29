@@ -1,0 +1,143 @@
+# JobFinderOS adapter for the Software Factory (work order F-13, steps 1–2).
+# Validated against the factory's schema/project.schema.json via
+# factory.contract.load_profile.
+#
+# Every value was read from this repo at origin/main 9daedd1 (2026-10-29
+# verification pass) and the commands were run unattended on a clean clone
+# (readiness rehearsal, step 1): CLAUDE.md, .github/workflows/ci.yml, and the
+# scripts and services named. The factory's scaffold draft carried six
+# TODO(verify) lines; all are resolved here (merge_method, drift-script
+# interface, frontend auth paths, external-dispatch paths, sentry location,
+# deploy command). Two resolutions corrected against evidence vs. the
+# 2026-10-18 rehearsal draft:
+#   - paths.risk.auth: the reset-password surface (routes, sv routes,
+#     ResetPasswordView.tsx) is part of the hosted Supabase auth flows
+#     (CLAUDE.md: "/login + /reset-password") and was missing.
+#   - paths.risk.external_service: composio_service.py + gmail_scan.py are
+#     outbound calls on the Composio platform (connected Gmail); the scaffold's
+#     original *composio*/*gmail* guess was right, the draft had dropped it.
+
+name: jobfinderos
+
+repo:
+  path: ~/Desktop/JobFinderOS
+  default_branch: main
+  remote: https://github.com/AgenticTony/JobFinderOS.git
+  merge_method: merge   # repo history is merge commits ("Merge pull request #138 ...")
+
+commands:
+  # CI pins Python 3.12 and Node 24; the venv and node_modules land inside the clean clone.
+  setup: >-
+    cd backend && python3.12 -m venv .venv && .venv/bin/pip install -q -r requirements.dev.lock
+    && cd ../frontend && npm install --no-audit --no-fund
+  lint: cd backend && .venv/bin/ruff check --select I,F app/ tests/ scripts/   # CI's exact ruleset (ci.yml "Lint")
+  typecheck: cd frontend && npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+  # SQLite leg of CI. The Postgres leg (and the prod drift read) stay in JobFinderOS CI, which
+  # branch protection requires before any merge.
+  test: cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/ -q
+  # No `build` gate in the factory (readiness 2026-10-18): Turbopack's next/font fetch does not
+  # use srt's authenticated proxy, so the production build can't reach Google Fonts inside the
+  # sandbox. The build stays enforced before merge by JobFinderOS CI ("Frontend (type-check +
+  # build)", a required status check on main). `typecheck` above still gates every slice here.
+  # One contract test. Refs are repo-relative (backend/tests/...); pytest runs from backend/
+  # (no pytest config, so rootdir = backend). The shell strips the backend/ prefix.
+  test_ref: cd backend && r='{ref}' && PYTHONPATH=. .venv/bin/python -m pytest -q "${r#backend/}"
+  extra:
+    frontend_unit: cd frontend && node --test 'tests/**/*.test.ts'
+    flow: cd backend && PYTHONPATH=. .venv/bin/python tests/test_flow.py
+    # No URL and DRIFT_CHECK_OPTIONAL=true: the single-head check runs, the prod drift read is
+    # skipped (the sandbox has no prod credential, by design). The script takes no CLI flag;
+    # DRIFT_CHECK_OPTIONAL is its documented env switch (check_migration_drift.py:48).
+    migration_single_head: cd backend && DRIFT_CHECK_OPTIONAL=true .venv/bin/python scripts/check_migration_drift.py
+    dev_lock: cd backend && .venv/bin/python scripts/check_dev_lock.py
+
+# CLAUDE.md standard 8: the test database must NEVER be the live database.
+# The sandbox has no production DSN, so this is enforced structurally, not by instruction.
+
+paths:
+  risk:
+    migration: ["backend/alembic/**", "backend/app/core/database.py", "backend/app/core/dburl.py"]
+    auth:
+      - "backend/app/users.py"
+      - "backend/app/core/*auth*"
+      - "frontend/src/app/login/**"
+      - "frontend/src/app/sv/login/**"
+      - "frontend/src/components/LoginView.tsx"
+      - "frontend/src/lib/supabase.ts"
+      # Reset-password: the other hosted Supabase auth flow (PKCE /reset-password, en+sv).
+      - "frontend/src/app/reset-password/**"
+      - "frontend/src/app/sv/reset-password/**"
+      - "frontend/src/components/ResetPasswordView.tsx"
+    payments: ["**/billing/**", "**/*paddle*"]          # WO-13/WO-16 will create these
+    deploy: ["render.yaml", "ops/**", ".github/workflows/**", "backend/Dockerfile*"]
+    # Outbound dispatch: _send_with_pdfs in draft_service.py goes through Resend;
+    # composio_service.py + gmail_scan.py call the Composio platform (connected Gmail).
+    external_service: ["backend/app/services/draft_service.py", "backend/app/services/pdf_service.py", "backend/app/services/composio_service.py", "backend/app/services/gmail_scan.py"]
+    privacy: ["backend/app/core/telemetry.py", "backend/app/models/**"]   # Sentry init + PII-bearing models
+  protected:
+    - ".factory/**"
+    - ".github/workflows/**"
+    - "backend/tests/test_calibration.py"        # pins prompt versions; silent edits must fail CI
+    - "backend/tests/**/conftest.py"
+    - "CLAUDE.md"
+    # Per task, the orchestrator also protects the test files named in the approved contract.
+  # What `setup` installs. L1 keeps these through its between-phase clean, so the red and green
+  # runs of each contract test still have the venv and node_modules.
+  setup_outputs:
+    - backend/.venv
+    - frontend/node_modules
+
+dependency_manifests:
+  - backend/requirements.lock
+  - backend/requirements.dev.lock
+  - backend/requirements.txt
+  - frontend/package.json
+  - frontend/package-lock.json
+
+baselines: .factory/baselines.json
+
+deploy:
+  mechanism: render (backend api + hunt cron) + cloudflare-pages direct upload (frontend)
+  auto_on_merge: false           # render.yaml autoDeploy: false (line 42); Pages is NOT git-integrated
+  command: bash ops/deploy_frontend.sh   # frontend only (backend deploys via the Render dashboard/API). Not used until F-14 (L4); the factory never deploys in v0.
+  notes: >-
+    Merging does not ship. Deploy debt can accumulate silently (#120/#121 were merged but not deployed).
+    The orchestrator must record "merged" and "deployed" separately and never infer one from the other.
+    The backend deploys through Render; no factory step triggers it before F-14.
+
+live_checks:
+  verify_deployment:
+    command: bash ops/verify_deployment.sh   # reads PROBE_PASS / SUPABASE_ANON_KEY from the environment
+    secrets: [JFO_PROBE_PASS, JFO_SUPABASE_ANON_KEY]   # exported as PROBE_PASS / SUPABASE_ANON_KEY
+    when: every_deploy
+  migration_drift:
+    command: gh run list --workflow migration-drift.yml --branch main --limit 1 --json conclusion -q '.[0].conclusion'   # must print "success"
+    when: risk:migration
+
+holdouts:
+  dir: ~/factory/holdouts/jobfinderos      # outside the repo; the sandbox denies reads here
+  runner: "Not used until F-15 (L3 is not built). Planned first scenarios: signup -> first hunt; draft with zero fabrication flags; landing renders in /sv."
+
+docs_allowlist:
+  - fastapi.tiangolo.com
+  - docs.sqlalchemy.org
+  - alembic.sqlalchemy.org
+  - docs.pydantic.dev
+  - pypdf.readthedocs.io
+  - supabase.com
+  - nextjs.org
+  - react.dev
+  - tailwindcss.com
+  - docs.z.ai
+  - resend.com
+  - developers.cloudflare.com
+  - render.com
+
+network_allowlist:
+  - pypi.org
+  - files.pythonhosted.org
+  - registry.npmjs.org
+  - fonts.googleapis.com   # next/font/google fetches at build time
+  - fonts.gstatic.com
+
+cross_repo: []
