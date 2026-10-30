@@ -2473,6 +2473,137 @@ class TestHeadingLabelFPClass:
         )
 
 
+class TestAllCapsProjectHeadingFPClass:
+    """Live FP class (2026-10-26): a draft was blocked after 2 regenerations
+    on one high-tier 'organisation' finding that was an ALL-CAPS project
+    heading with no bullet. The words after the dash glued across '(' into
+    a 3+-token 'employer'. TestHeadingLabelFPClass does not reach it: that
+    demotion needs a bullet and an '&', and the run sits AFTER the separator.
+
+    All-caps alone proves nothing: 'NORTHWIND TRADING COMPANY — SENIOR
+    ENGINEER' is an ordinary employer line. Demotion needs a project label
+    before the separator AND a run ending in a project noun, and everything
+    else on the line keeps its tier. Fixture invented (standard 10)."""
+
+    CV = (
+        "Jane Doe\nData Analyst\n"
+        "Built weekly reporting for a retail client.\n"
+        "Experience: Contoso Retail, Stockholm 2015-2020.\n"
+    )
+    HEADING = "SELECTED PROJECT — STOCK LEVEL FORECASTING PLATFORM (RETAILER)\n"
+    TAILORED = HEADING + "Built weekly reporting for a retail client.\n"
+
+    _high_orgs = staticmethod(TestHeadingLabelFPClass._high_orgs)
+
+    def test_production_shape_does_not_block(self):
+        high = self._high_orgs(self.CV, self.TAILORED)
+        assert high == [], (
+            f"an all-caps project heading blocked as an employer: {high} — "
+            "a faithful draft cannot be sent"
+        )
+
+    def test_separator_and_label_variants_do_not_block(self):
+        for line in (
+            "SELECTED PROJECT - STOCK LEVEL FORECASTING PLATFORM\n",
+            "SELECTED PROJECT: STOCK LEVEL FORECASTING PLATFORM\n",
+            "SELECTED PROJECT | STOCK LEVEL FORECASTING PLATFORM\n",
+            "• KEY PROJECT — STOCK LEVEL FORECASTING PLATFORM\n",
+            "CASE STUDY — STOCK LEVEL FORECASTING MIGRATION\n",
+            "UTVALT PROJEKT — LAGERNIVÅ PROGNOS PLATTFORM (KUND)\n",
+        ):
+            assert self._high_orgs(self.CV, line) == [], line
+
+    def test_demoted_heading_stays_visible_as_advisory(self):
+        from app.services.fabrication import split_tiers, unsupported_claims
+
+        _, advisory = split_tiers(unsupported_claims(self.CV, self.TAILORED))
+        values = {c.value.lower() for c in advisory
+                  if c.kind == "organisation"}
+        assert "stock level forecasting platform" in values, values
+
+    # ---- the hole it must not open -------------------------------------
+
+    def test_invented_employer_in_capitals_still_blocks(self):
+        for line in (
+            "ACME NORDIC AB — led the team\n",
+            "ACME NORDIC AB — LED THE TEAM\n",
+            "WORKED AT NORTHWIND TRADING COMPANY\n",
+            # the common CV employer line: all-caps, separator, no anchor
+            "NORTHWIND TRADING COMPANY — SENIOR ENGINEER\n",
+            "NORTHWIND TRADING COMPANY — DATA PLATFORM\n",
+            "NORTHWIND DATA PLATFORM — SENIOR ENGINEER\n",
+        ):
+            high = self._high_orgs(self.CV, line)
+            assert high, f"invented capitalised employer passed: {line!r}"
+
+    def test_invented_employer_behind_a_project_label_still_blocks(self):
+        for line, name in (
+            ("SELECTED PROJECT — ACME NORDIC AB\n", "acme nordic ab"),
+            ("SELECTED PROJECT — NORTHWIND TRADING COMPANY\n", "northwind"),
+            ("SELECTED PROJECT — NORTHWIND FOOD LOGISTICS\n", "northwind"),
+            # a corporate marker vetoes the project noun
+            ("SELECTED PROJECT — ACME CONSULTING PLATFORM\n", "acme"),
+            # the segment after a further dash is judged on its own
+            ("SELECTED PROJECT — DATA PLATFORM — NORTHWIND TRADING COMPANY\n",
+             "northwind"),
+            # a parenthetical is a client claim, not framing
+            ("SELECTED PROJECT — DATA PLATFORM (NORTHWIND TRADING COMPANY)\n",
+             "northwind"),
+            ("SELECTED PROJECT — STOCK PLATFORM (NORTHWIND DATA PLATFORM)\n",
+             "northwind"),
+        ):
+            high = self._high_orgs(self.CV, line)
+            assert any(name in v.lower() for v in high), (
+                f"a project label hid an invented employer: {line!r} → {high}"
+            )
+
+    def test_invented_employer_as_heading_and_in_prose_still_blocks(self):
+        for line in ("• Northwind Trading Company — led a team.\n",
+                     "I worked at Northwind Data Platform for years.\n",
+                     "Selected project — Northwind Data Platform at work.\n"):
+            high = self._high_orgs(self.CV, line)
+            assert high, f"invented employer passed: {line!r}"
+
+    def test_heading_cannot_smuggle_a_credential_or_year(self):
+        from app.services.fabrication import split_tiers, unsupported_claims
+
+        high, _ = split_tiers(unsupported_claims(
+            self.CV, "SELECTED PROJECT — MBA CAPSTONE PLATFORM 2021\n"))
+        kinds = {c.kind for c in high}
+        assert {"credential", "year"} <= kinds, (
+            [(c.kind, c.value) for c in high])
+
+    def test_heading_draft_reaches_the_judge_and_its_finding_blocks(
+            self, monkeypatch):
+        """Layer A clean is what lets the judge run at all — before this
+        fix it never saw the draft. It reads the whole document, and a
+        finding of its own still blocks."""
+        from app.models import Profile
+        from app.services import draft_service as ds
+
+        seen = {}
+
+        class _Judge:
+            def judge_fabrication(self, source, document):
+                seen["document"] = document
+                return [{"claim": "Stock Level Forecasting Platform",
+                         "why": "project not in the CV"}]
+
+        monkeypatch.setattr(ds, "get_ai_service_with_judge", lambda: _Judge())
+
+        class _Job:
+            company, title = "Hiring Co", "Data Analyst"
+
+        profile = Profile(cv_text=self.CV)
+        high, _ = ds.check_package(profile, _Job(), "", self.TAILORED)
+        assert self.HEADING.strip() in seen.get("document", ""), (
+            "the judge never saw the heading text")
+        assert [c.kind for c in high] == ["judge"], (
+            f"judge finding must be the high-tier result: "
+            f"{[(c.kind, c.value) for c in high]}"
+        )
+
+
 class TestAllowedNamesSubtraction:
     """WO-01 review: allowed_names matched as SUBSTRINGS, so with
     job.title in the list the standard CV line 'Title, Company — years'
