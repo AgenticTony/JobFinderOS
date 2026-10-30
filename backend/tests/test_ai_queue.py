@@ -531,6 +531,28 @@ class TestExtractAndSuggestQueued:
         assert me["full_name"] == "Carla Holm" and me["professional_title"] == "QA Engineer"
         assert all("Carla Holm" in p for k, p in fake.calls if k == "extract")
 
+    def test_partial_extract_reply_fails_the_job_and_applies_nothing(self, client, monkeypatch, plain_pdf):
+        """2026-10-30 degenerate-success audit: an extract reply that
+        PARSES but omits keys is a format failure. It must fail the job
+        (visible, retryable) — not apply replace-semantics over a good
+        profile, nulling every field the reply omitted."""
+        uid, _job, h = _user(client, cv="", approved_job=False)
+        fake = FakeAI()
+        orig_answer = fake._answer
+        fake._answer = lambda kind, prompt: (
+            '{"full_name": "Erik Ek"}' if kind == "extract"
+            else orig_answer(kind, prompt))
+        _wire(monkeypatch, fake)
+        cv = "Carla Holm. QA Engineer, Ericsson, Lund 2017 to 2024. Tested 5G software."
+        r = client.post("/api/v1/profile/upload", headers=h,
+                        files={"file": ("carla.pdf", _pdf_bytes(cv), "application/pdf")})
+        assert r.status_code == 202, r.text
+        assert AIDrainer(clock=Clock()).drain_once() == ["failed"]
+        me = client.get("/api/v1/profile/me", headers=h).json()
+        assert me["extraction"]["status"] == "failed"
+        assert me["cv_file_name"] == "carla.pdf", "the CV itself is saved"
+        assert not me["full_name"], "a partial reply must write nothing"
+
     def test_reupload_while_running_reruns_on_the_new_cv(self, client, monkeypatch, plain_pdf):
         uid, _job, h = _user(client, cv="", approved_job=False)
         state = {}

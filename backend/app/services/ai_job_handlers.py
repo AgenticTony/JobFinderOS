@@ -157,8 +157,11 @@ def run_extract(db: Session, job: AIJob) -> Outcome:
         # Re-uploaded while the call ran: these fields describe the OLD
         # CV. Run again on the new text (no load penalty).
         raise Requeue()
-    if not extracted:
-        # AI-11: an empty extraction never wipes existing fields.
+    if not extracted or not cv_service._extraction_complete(extracted):
+        # AI-11: an empty extraction never wipes existing fields. The
+        # 2026-10-30 audit extends it: a reply that parses but omits keys
+        # is the same format failure — applying it would null every
+        # omitted field on a previously-good profile.
         return Outcome("failed", error=EXTRACT_EMPTY_ERROR)
     cv_service._apply_extraction(profile, extracted)
     db.add(profile)

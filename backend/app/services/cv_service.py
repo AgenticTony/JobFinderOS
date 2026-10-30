@@ -246,7 +246,7 @@ def create_or_replace_profile_from_cv(
     profile.cv_file_path = path
     profile.cv_file_name = filename.rsplit("/", 1)[-1]
     profile.cv_file_size = len(file_content)
-    if extracted:
+    if extracted and _extraction_complete(extracted):
         _apply_extraction(profile, extracted)
     elif not extract:
         pass  # queued: run_extract_job applies the fields when it lands
@@ -259,10 +259,15 @@ def create_or_replace_profile_from_cv(
         # service does not help — this function swallows it. An empty
         # extraction is a no-op for the derived fields: the new CV text and
         # file metadata above still land, and the existing fields survive.
+        # 2026-10-30 audit: a reply that parses but omits keys is the same
+        # format failure — the prompt demands every key ("string or empty"),
+        # so a missing key is model slop, not a sparse CV. Replace-semantics
+        # on a partial dict nulls every omitted field (the AI-11 wipe one
+        # level shallower).
         logger.warning(
-            "AI profile extraction produced no fields for user %s — keeping "
-            "existing profile fields (extracted=%r)",
-            user_id, extracted,
+            "AI profile extraction produced no complete field set for user "
+            "%s — keeping existing profile fields (keys=%r)",
+            user_id, sorted(extracted.keys()) if extracted else None,
         )
     db.add(profile)
     db.commit()
@@ -343,6 +348,23 @@ def _retire_replaced_cv(db: Session, user_id, replaced_path: str) -> None:
             "is stored; orphan cleanup did not complete: %s",
             replaced_path, user_id, e,
         )
+
+
+#: Every key _apply_extraction writes. The extract prompt demands ALL of
+#: them ("string or empty" for the scalars), so a reply missing any key is
+#: a format failure, not a sparse CV — degenerate, same class as {}.
+#: If _apply_extraction learns a new field, this tuple must learn it too.
+_EXTRACTION_KEYS = (
+    "full_name", "email", "phone", "location", "professional_title",
+    "experience_years", "skills", "recent_roles", "education",
+    "certifications", "keywords", "summary",
+)
+
+
+def _extraction_complete(extracted: dict) -> bool:
+    """True when the reply carries every key (presence, not truthiness —
+    empty strings are legitimate values for a sparse CV)."""
+    return all(k in extracted for k in _EXTRACTION_KEYS)
 
 
 def _apply_extraction(profile: Profile, extracted: dict) -> None:

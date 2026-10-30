@@ -489,6 +489,47 @@ class TestEmptyExtractionKeepsProfile:
             f"failure, not a normal empty CV (warnings: {warnings})"
         )
 
+    class _PartialService:
+        """Valid JSON, but structurally incomplete — one field of eleven.
+        The prompt demands every key ("string or empty" for the scalars),
+        so a missing key is a format failure, the same class as {}: the
+        empty-dict guard must not be the only line of defence."""
+
+        def extract_profile(self, cv_text):
+            return {"full_name": "Anna Svensson"}
+
+    def test_partial_extraction_on_reupload_keeps_omitted_fields(self, db, monkeypatch):
+        """A reply that PARSES but omits keys is not a sparse CV — a
+        compliant reply always carries all keys. Replace-semantics on a
+        partial dict nulls every omitted field: the AI-11 wipe one level
+        shallower (found in the 2026-10-30 degenerate-success audit)."""
+        from app.services import cv_service
+
+        profile = self._good_profile(db)
+        self._patch_upload(monkeypatch, self._PartialService())
+
+        warnings = []
+        monkeypatch.setattr(
+            cv_service.logger, "warning",
+            lambda msg, *a, **k: warnings.append(msg % a if a else msg),
+        )
+
+        updated = cv_service.create_or_replace_profile_from_cv(
+            db, b"%PDF-fresh", "new_cv.pdf", user_id=profile.user_id
+        )
+
+        assert updated.full_name == "Jane Doe", (
+            "partial wipe: full_name overwritten/null by an incomplete reply"
+        )
+        assert updated.email == "jane@example.com", "partial wipe: email nulled"
+        assert updated.phone == "+46700000000", "partial wipe: phone nulled"
+        assert updated.professional_title == "Backend Developer", "partial wipe: title nulled"
+        assert updated.experience_years == 7, "partial wipe: years nulled"
+        assert any("extraction" in w.lower() for w in warnings), (
+            "an incomplete extraction must be logged like the empty one "
+            f"(warnings: {warnings})"
+        )
+
     def test_raised_extraction_on_reupload_keeps_fields(self, db, monkeypatch):
         """The exception path funnels into the same {} — the live incident
         was a Z.ai hiccup, which can arrive as either shape."""
@@ -518,10 +559,16 @@ class TestEmptyExtractionKeepsProfile:
 
         class GoodService:
             def extract_profile(self, cv_text):
+                # Compliant shape: every prompt key present — empty values
+                # are legitimate (sparse CV), MISSING keys are not.
                 return {
                     "full_name": "New Name", "email": "new@example.com",
+                    "phone": "", "location": "",
                     "professional_title": "Platform Engineer",
                     "experience_years": 9,
+                    "skills": [{"name": "FastAPI", "level": "advanced"}],
+                    "recent_roles": [], "education": [], "certifications": [],
+                    "keywords": ["fastapi"], "summary": "Platform engineer.",
                 }
 
         self._patch_upload(monkeypatch, GoodService())
