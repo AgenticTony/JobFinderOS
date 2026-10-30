@@ -147,3 +147,15 @@ network_allowlist:
   - fonts.gstatic.com
 
 cross_repo: []
+
+# F-22: the project's vetted agent toolkit. Every name must be an admitted
+# entry in the factory's toolkit/index.yaml (admission: factory PR #79 —
+# strict-api, alirezarezvani/claude-skills @ 0496583, MIT, vet report
+# toolkit/reports/strict-api.md); an unknown name refuses this profile at
+# load. Sessions get these skills (and nothing else) from a staged
+# read-only copy outside the clone; attempts record name@content-hash.
+toolkit:
+  skills:
+    - strict-api
+  plugins: []
+  mcp_servers: []
