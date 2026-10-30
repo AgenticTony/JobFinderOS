@@ -757,19 +757,30 @@ Respond with ONLY valid JSON (no markdown):
   "occupation_names": ["Standard Occupation Name", "..."]
 }}"""
 
-        raw = self._complete(system_prompt, f"## CV\n{cv_text[:CV_GUARD_CHARS]}\n\nSuggest search queries.",
-                           kind="suggest")
-        parsed = self._parse_json(raw)
+        # _parse_json answers {} for an unreadable reply. Saved as-is that was
+        # a "done" job with nothing to tick: the wizard's Continue stayed
+        # disabled with no error and no retry (2026-10-30, 1 reply in 6 on a
+        # CV that otherwise parses). Re-ask once, then fail so the user gets
+        # the retry path.
+        for _ in range(2):
+            raw = self._complete(system_prompt, f"## CV\n{cv_text[:CV_GUARD_CHARS]}\n\nSuggest search queries.",
+                               kind="suggest")
+            parsed = self._parse_json(raw)
 
-        direct = [str(q).strip() for q in parsed.get("from_your_experience", []) if str(q).strip()][:8]
-        pivot = []
-        for item in parsed.get("worth_a_look", []):
-            if isinstance(item, dict) and item.get("query"):
-                pivot.append(
-                    {"query": str(item["query"]).strip(), "why": str(item.get("why", "")).strip()}
-                )
-            elif isinstance(item, str) and item.strip():
-                pivot.append({"query": item.strip(), "why": ""})
+            direct = [str(q).strip() for q in parsed.get("from_your_experience", []) if str(q).strip()][:8]
+            pivot = []
+            for item in parsed.get("worth_a_look", []):
+                if isinstance(item, dict) and item.get("query"):
+                    pivot.append(
+                        {"query": str(item["query"]).strip(), "why": str(item.get("why", "")).strip()}
+                    )
+                elif isinstance(item, str) and item.strip():
+                    pivot.append({"query": item.strip(), "why": ""})
+            if direct or pivot or parsed.get("occupation_names"):
+                break
+            logger.warning("suggest reply had no titles: %s", self._response_shape(raw))
+        else:
+            raise AIEmptyResponseError("suggest reply had no titles after a re-ask")
         result = {"from_your_experience": direct, "worth_a_look": pivot[:7]}
 
         # Occupation concepts, SE only: the model outputs LABELS; the
