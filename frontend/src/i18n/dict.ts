@@ -15,9 +15,9 @@ export type Dict = typeof en;
 
 const en = {
   meta: {
-    title: 'JobFinderOS · Stop refreshing job boards',
+    title: 'JobFinderOS · AI job matching for Sweden & the UK',
     description:
-      "Sweden's and the UK's job markets, hunted twice daily and scored against your CV. Applications you approve, drafts that never invent facts.",
+      'Stop refreshing job boards. Jobs across Sweden and the UK, hunted twice daily and scored against your CV — drafts that never invent facts.',
   },
   nav: {
     sections: 'Landing sections',
@@ -340,9 +340,9 @@ const en = {
 
 const sv: Dict = {
   meta: {
-    title: 'JobFinderOS · Sluta uppdatera jobbsajter',
+    title: 'JobFinderOS · AI-jobbmatchning i Sverige och Storbritannien',
     description:
-      'Sveriges och Storbritanniens jobbmarknader, bevakade två gånger om dagen och poängsatta mot ditt CV. Ansökningar du godkänner — utkast som aldrig hittar på fakta.',
+      'Sluta uppdatera jobbsajter. Jobb i Sverige och Storbritannien bevakas två gånger om dagen och poängsätts mot ditt CV — utkast som aldrig hittar på fakta.',
   },
   nav: {
     sections: 'Landningssidans sektioner',

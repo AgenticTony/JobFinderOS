@@ -420,7 +420,10 @@ export default function Home() {
           status: 'failed',
           jobs_considered: 0,
           matches_created: 0,
-          error: err instanceof Error ? err.message : t.shell.pipelineFailed,
+          // apiErrorMessage: the backend's 409 carries an honest "hunt
+          // already running" detail — err.message is the useless
+          // "Request failed with status code 409" string.
+          error: apiErrorMessage(err) || t.shell.pipelineFailed,
         },
         top_matches: [],
       });
@@ -1272,7 +1275,7 @@ function RetryButton({
             await retryApplication(applicationId);
             await onChanged();
           } catch (err) {
-            setError(err instanceof Error ? err.message : t.retryFailed);
+            setError(apiErrorMessage(err) || t.retryFailed);
           } finally {
             setBusy(false);
           }
