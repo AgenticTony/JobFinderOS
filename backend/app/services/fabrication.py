@@ -231,6 +231,43 @@ def _heading_label_spans(sentence: str):
     return [(a, b) for a, b in spans if _is_heading_shaped(sentence[a:b])]
 
 
+# All-caps project headings (2026-10-26): 'SELECTED PROJECT — X Y PLATFORM
+# (CUSTOMER)' is framing, but capitals alone prove nothing — 'NORTHWIND
+# TRADING COMPANY — SENIOR ENGINEER' is an ordinary employer line. So the
+# label before the separator must be project vocabulary, and a run is only
+# demoted when it ENDS in a project noun: a fail-closed list, because an
+# unknown shape staying blocked is recoverable and a hidden employer is not.
+_PROJECT_LABEL_HEADS = {"project", "projects", "projekt", "nyckelprojekt",
+                        "referensprojekt", "case"}
+_PROJECT_LABEL_MODIFIERS = {"selected", "key", "notable", "featured", "recent",
+                            "relevant", "major", "study", "studies", "utvalt",
+                            "utvald", "utvalda"}
+_PROJECT_NOUNS = {
+    "project", "platform", "system", "migration", "programme", "program",
+    "pipeline", "portal", "application", "app", "dashboard", "tool", "service",
+    "engine", "rollout", "integration", "implementation", "transformation",
+    "modernisation", "modernization", "upgrade", "redesign", "initiative",
+    "plattform", "plattformen", "systemet", "migrering", "programmet",
+    "lösning", "lösningen", "verktyg", "tjänst", "tjänsten", "införande",
+    "modernisering",
+}
+_PROJECT_SEP_RE = re.compile(r"[—–|:]|\s-\s")
+
+
+def _is_project_heading(sentence: str) -> bool:
+    """An all-caps line of at most 12 words whose label, before the first
+    separator, is project vocabulary and nothing else."""
+    bullet = _BULLET_RE.match(sentence)
+    body = sentence[bullet.end():] if bullet else sentence
+    sep = _PROJECT_SEP_RE.search(body)
+    if (sep is None or body != body.upper() or len(body.split()) > 12
+            or not any(c.isalpha() for c in body)):
+        return False
+    label = set(re.findall(r"\w+", body[:sep.start()].casefold()))
+    return (bool(label & _PROJECT_LABEL_HEADS)
+            and label <= _PROJECT_LABEL_HEADS | _PROJECT_LABEL_MODIFIERS)
+
+
 def _extract_organisations(text: str) -> List[Claim]:
     """Runs of >=2 consecutive capitalised tokens, with stoplist tokens
     and structural separators breaking runs. Single proper nouns are
@@ -239,8 +276,9 @@ def _extract_organisations(text: str) -> List[Claim]:
     claims = []
     for sentence in _sentences(text):
         labels = _heading_label_spans(sentence)
+        project_heading = _is_project_heading(sentence)
         run: List[str] = []
-        state = {"amp": False, "start": 0, "end": 0}
+        state = {"amp": False, "start": 0, "end": 0, "paren": False}
 
         def flush():
             if len(run) >= 2 and not all(
@@ -252,13 +290,25 @@ def _extract_organisations(text: str) -> List[Claim]:
                         and not any(t.casefold() in _CORPORATE_MARKERS
                                     for t in run)):
                     tier = "advisory"
+                # A parenthetical names a client, so it is never framing.
+                if (tier == "high" and project_heading and not state["paren"]
+                        and run[-1].casefold() in _PROJECT_NOUNS
+                        and not any(t.casefold() in _CORPORATE_MARKERS
+                                    for t in run)):
+                    tier = "advisory"
                 claims.append(Claim(kind="organisation", value=" ".join(run),
                                     context=sentence, tier=tier))
             run.clear()
             state["amp"] = False
 
-        for m in re.finditer(r"[\w'’.-]+|&|[—–|]", sentence):
+        for m in re.finditer(r"[\w'’.-]+|&|[—–|]|[():]", sentence):
             raw = m.group(0)
+            if raw in "():":
+                # skipped elsewhere; a heading's segments must not glue
+                if project_heading:
+                    flush()
+                    state["paren"] = raw == "("
+                continue
             if raw == "&":
                 if run:
                     state["amp"] = True  # glue, as before — but recorded
