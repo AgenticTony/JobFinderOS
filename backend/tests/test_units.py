@@ -607,8 +607,34 @@ class TestCVSentWhole:
             "CV (the transfer evidence) is invisible to it"
         )
 
+    def test_suggest_reasks_once_when_a_reply_has_no_titles(self):
+        svc, _ = self._svc("")
+        replies = iter(['{"from_your_experience": ["unterminated', '{"from_your_experience": ["Kemist"], "worth_a_look": []}'])
+        calls = []
+        svc._complete = lambda *a, **k: (calls.append(k.get("kind")), next(replies))[1]
+        result = svc.suggest_search_queries(cv_text="cv", country="GB")
+        assert calls == ["suggest", "suggest"]
+        assert result["from_your_experience"] == ["Kemist"]
+
+    def test_suggest_raises_rather_than_returning_nothing_to_tick(self):
+        svc, _ = self._svc("")
+        calls = []
+        svc._complete = lambda *a, **k: (calls.append(1), "not json")[1]
+        from app.services.ai_service import AIEmptyResponseError
+
+        with pytest.raises(AIEmptyResponseError):
+            svc.suggest_search_queries(cv_text="cv", country="GB")
+        assert len(calls) == 2, "exactly one re-ask — unbounded retries spend the quota"
+
+    def test_suggest_keeps_a_reply_with_only_occupations(self):
+        svc, _ = self._svc("")
+        calls = []
+        svc._complete = lambda *a, **k: (calls.append(1), '{"occupation_names": ["Kemist"]}')[1]
+        result = svc.suggest_search_queries(cv_text="cv", country="GB")
+        assert len(calls) == 1 and result["from_your_experience"] == []
+
     def test_suggest_search_queries_sends_the_whole_cv(self):
-        svc, captured = self._svc('{"from_your_experience": [], "worth_a_look": []}')
+        svc, captured = self._svc('{"from_your_experience": ["Kemist"], "worth_a_look": []}')
         long_cv = "FULL CAREER HISTORY. " * 350  # ~7k chars, past the old 6000 cap
         svc.suggest_search_queries(cv_text=long_cv, country="SE")
         assert long_cv in captured["user"], (

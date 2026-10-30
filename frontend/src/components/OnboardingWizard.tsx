@@ -289,6 +289,15 @@ export default function OnboardingWizard({
     try {
       // WO-31: the request may wait in the AI queue — show where it is
       const result = await suggestQueries(country, mode, setSuggestJob);
+      // Nothing to tick means Continue can never enable — surface the
+      // retry rather than a silent dead end.
+      if (
+        result.from_your_experience.length === 0 &&
+        result.worth_a_look.length === 0 &&
+        (result.occupation_suggestions ?? []).length === 0
+      ) {
+        throw new Error('no suggestions');
+      }
       setDirectQueries(result.from_your_experience);
       setPivotSuggestions(result.worth_a_look);
       setSelected(
