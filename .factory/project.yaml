@@ -68,7 +68,10 @@ paths:
       - "frontend/src/app/reset-password/**"
       - "frontend/src/app/sv/reset-password/**"
       - "frontend/src/components/ResetPasswordView.tsx"
-    payments: ["**/billing/**", "**/*paddle*"]          # WO-13/WO-16 will create these
+    # WO-13/WO-16 will create these. The bare billing/** and *paddle* spellings cover a
+    # top-level location: fnmatch's **/ requires >=1 directory, so **/billing/** alone
+    # would not match a root-level billing/ (same zero-depth gap as tests/**/conftest.py).
+    payments: ["billing/**", "**/billing/**", "*paddle*"]
     deploy: ["render.yaml", "ops/**", ".github/workflows/**", "backend/Dockerfile*"]
     # Outbound dispatch: _send_with_pdfs in draft_service.py goes through Resend;
     # composio_service.py + gmail_scan.py call the Composio platform (connected Gmail).
@@ -78,6 +81,9 @@ paths:
     - ".factory/**"
     - ".github/workflows/**"
     - "backend/tests/test_calibration.py"        # pins prompt versions; silent edits must fail CI
+    # fnmatch's **/ matches >=1 directory, so tests/**/conftest.py alone leaves the TOP-level
+    # conftest (the shared fixtures that own DATABASE_URL) unprotected — named explicitly.
+    - "backend/tests/conftest.py"
     - "backend/tests/**/conftest.py"
     - "CLAUDE.md"
     # Per task, the orchestrator also protects the test files named in the approved contract.
