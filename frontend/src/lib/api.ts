@@ -261,6 +261,7 @@ export const waitForAiJob = async (
   isCancelled?: () => boolean
 ): Promise<AiJob> => {
   let current = job;
+  let consecutiveFailures = 0;
   while (current.status === 'queued' || current.status === 'running') {
     if (isCancelled?.()) return current;
     onProgress?.(current);
@@ -268,8 +269,16 @@ export const waitForAiJob = async (
     if (isCancelled?.()) return current;
     try {
       current = await getAiJob(current.id);
+      consecutiveFailures = 0;
     } catch {
-      // transient (cold start, network): keep waiting on the same job
+      // transient (cold start, network): keep waiting on the same job.
+      // But a poll that NEVER succeeds (job pruned, persistent 5xx)
+      // must not loop forever — the eternal spinner hid the manual
+      // fallback and locked the wizard (2026-10-30 audit). After 5
+      // straight failures the wait throws; callers surface it.
+      if (++consecutiveFailures >= 5) {
+        throw new Error('job status unreachable — try again');
+      }
     }
   }
   return current;

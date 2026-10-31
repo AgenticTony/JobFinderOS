@@ -264,9 +264,23 @@ export default function OnboardingWizard({
   // it is invisible: the error must show IN here.
   const [finishError, setFinishError] = useState<string | null>(null);
 
-  useEffect(() => {
-    getGeo().then(setGeo).catch(() => setGeo(null));
+  // A /geo failure used to be indistinguishable from "not loaded yet":
+  // null geo renders zero country buttons and an empty region select,
+  // Continue needs a country → silently locked forever with no error and
+  // no retry (2026-10-30 audit — the titles dead-end's class, on every
+  // first-run user's path). Failure is now its own state, with a retry.
+  const [geoError, setGeoError] = useState(false);
+  const loadGeo = useCallback(() => {
+    setGeoError(false);
+    getGeo().then(setGeo).catch(() => {
+      setGeo(null);
+      setGeoError(true);
+    });
   }, []);
+
+  useEffect(() => {
+    loadGeo();
+  }, [loadGeo]);
 
   const municipalities = useMemo(
     () => (geo && country && region ? (geo.geo[country]?.[region] ?? []) : []),
@@ -503,6 +517,14 @@ export default function OnboardingWizard({
               {step === 1 && (
                 <div>
                   <StepTitle icon={<Globe2 className="h-4 w-4" />} title={t.country.title} />
+                  {geoError && (
+                    <div className="mt-5 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
+                      {t.geo.loadFailed}{' '}
+                      <button onClick={loadGeo} className="font-semibold text-signal hover:underline">
+                        {t.geo.retry}
+                      </button>
+                    </div>
+                  )}
                   <div className="mt-5 grid grid-cols-2 gap-3">
                     {(geo?.countries ?? []).map((c) => (
                       <button
@@ -564,6 +586,14 @@ export default function OnboardingWizard({
               {step === 2 && (
                 <div>
                   <StepTitle icon={<MapPin className="h-4 w-4" />} title={t.area.title} />
+                  {geoError && (
+                    <div className="mt-5 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
+                      {t.geo.loadFailed}{' '}
+                      <button onClick={loadGeo} className="font-semibold text-signal hover:underline">
+                        {t.geo.retry}
+                      </button>
+                    </div>
+                  )}
                   <div className="mt-5 space-y-4">
                     <label className="block">
                       <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-low">{t.area.region}</span>
@@ -794,7 +824,7 @@ export default function OnboardingWizard({
                       </button>
                     </div>
                   )}
-                  {loadingQueries ? (
+                  {loadingQueries && (
                     <div className="flex flex-col items-center py-10 text-low" role="status">
                       <Loader2 className="mb-3 h-6 w-6 animate-spin text-signal" />
                       {suggestJob?.status === 'queued' ? (
@@ -816,7 +846,8 @@ export default function OnboardingWizard({
                         </>
                       )}
                     </div>
-                  ) : (
+                  )}
+                  {!loadingQueries && (
                     <>
                       {directQueries.length > 0 && (
                         <div className="mt-5">
@@ -904,24 +935,28 @@ export default function OnboardingWizard({
                         </div>
                       )}
 
-                      <div className="mt-5 flex gap-2">
-                        <input
-                          value={customInput}
-                          onChange={(e) => setCustomInput(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && addCustom()}
-                          placeholder={t.titles.addPlaceholder}
-                          className="flex-1 rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
-                        />
-                        <button
-                          onClick={addCustom}
-                          aria-label={t.titles.addAria}
-                          className="rounded-lg border border-line px-3 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                      </div>
                     </>
                   )}
+                  {/* Manual entry stays reachable WHILE loading too
+                      (2026-10-30 audit): hiding it behind the spinner
+                      meant a slow/stuck suggestion fetch locked Continue
+                      with no way to add a title by hand. */}
+                  <div className="mt-5 flex gap-2">
+                    <input
+                      value={customInput}
+                      onChange={(e) => setCustomInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addCustom()}
+                      placeholder={t.titles.addPlaceholder}
+                      className="flex-1 rounded-lg border border-line bg-ink px-3 py-2 text-sm text-hi outline-none transition-colors placeholder:text-low focus:border-signal"
+                    />
+                    <button
+                      onClick={addCustom}
+                      aria-label={t.titles.addAria}
+                      className="rounded-lg border border-line px-3 py-2 text-sm text-mid transition-colors hover:border-line-2 hover:text-hi"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               )}
 

@@ -2804,12 +2804,17 @@ function SettingsView() {
   const [integrations, setIntegrations] = useState<IntegrationsStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 2026-10-30 audit (D2): a failed status LOAD or an unreachable
+  // provider is UNKNOWN, not "not configured" — never fake a
+  // configured:false payload over the truth.
+  const [unreachable, setUnreachable] = useState(false);
 
   const load = async () => {
+    setUnreachable(false);
     try {
       setIntegrations(await getIntegrations());
     } catch {
-      setIntegrations({ composio: { configured: false, accounts: [] } });
+      setUnreachable(true);
     }
   };
 
@@ -2865,6 +2870,15 @@ function SettingsView() {
         {composio && !composio.configured && (
           <p className="mt-4 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
             {t.notAvailable}
+          </p>
+        )}
+
+        {(unreachable || (composio && composio.reachable === false)) && (
+          <p className="mt-4 rounded-lg bg-bad/10 p-3 text-sm text-hi" role="alert">
+            {t.statusUnavailable}{' '}
+            <button onClick={load} className="font-semibold text-signal hover:underline">
+              {t.retry}
+            </button>
           </p>
         )}
 

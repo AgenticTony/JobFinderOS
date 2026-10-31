@@ -143,6 +143,14 @@ async def scan(
     if not composio_service.is_configured():
         raise HTTPException(status_code=503, detail="Integrations are not configured on this deployment")
     connections = await composio_service.list_connections(str(user.id))
+    if connections is None:
+        # Unknown ≠ not connected (2026-10-30 audit, D2): telling a
+        # connected user to "connect Gmail" during a provider hiccup is
+        # a false claim — say the status is unavailable instead.
+        raise HTTPException(
+            status_code=503,
+            detail="Integration status is temporarily unavailable — try again shortly",
+        )
     if not any(c.get("app_name") == "gmail" for c in connections):
         raise HTTPException(
             status_code=400, detail="Connect your Gmail in Settings first"
