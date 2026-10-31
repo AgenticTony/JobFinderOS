@@ -182,10 +182,14 @@ def run_extract(db: Session, job: AIJob) -> Outcome:
 
 
 def fail_extract(db: Session, job: AIJob, exc: Exception) -> Outcome:
+    # A ValueError names the real cause (truncation, 2026-10-30 audit) —
+    # surface it instead of the generic "upload it again" advice that
+    # misdirects when the file was fine.
+    detail = f" ({exc})" if isinstance(exc, ValueError) else ""
     return Outcome(
         "failed",
-        error=("Reading your CV failed. Your CV is saved — upload it again "
-               "to retry, or fill in your profile by hand."),
+        error=(f"Reading your CV failed{detail}. Your CV is saved — upload "
+               "it again to retry, or fill in your profile by hand."),
     )
 
 

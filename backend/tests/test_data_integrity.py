@@ -516,6 +516,47 @@ class TestDoubleSubmitWindow:
         )
         assert rows[0].id == application.id
 
+    def test_unreadable_original_cv_fails_the_send(self, db, monkeypatch):
+        """2026-10-30 audit (D1): the send is approved on the promise of
+        three attachments. An unreadable original-CV file must FAIL the
+        send — the old code silently shipped two PDFs, marked the
+        application 'sent', and left the user believing the employer had
+        their original CV."""
+        from app.core.config import settings
+        from app.services import draft_service, storage
+
+        monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)
+        monkeypatch.setattr(settings, "RESEND_API_KEY", "re_test")
+        monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "apply@jobfinderos.com")
+
+        import resend as _resend
+
+        sent = []
+
+        class _Emails:
+            @staticmethod
+            def send(params):
+                sent.append(params)
+                return {"id": "re_123"}
+
+        monkeypatch.setattr(_resend, "Emails", _Emails)
+        monkeypatch.setattr(storage, "read_cv_at_path", lambda path: None)
+
+        uid, profile, job = _make_user_with_profile(db, cv_text="MISSING FILE CV")
+        draft = _make_ready_draft(db, uid, job)
+
+        application = draft_service.submit_draft(db, draft, "email", profile, user_id=uid)
+        assert application.status == "failed", (
+            f"an unreadable original CV must fail the send, not ship 2 of "
+            f"3 PDFs (status={application.status})"
+        )
+        assert "CV" in (application.error or ""), (
+            f"the error must name the missing CV, got: {application.error!r}"
+        )
+        assert sent == [], "nothing may be dispatched when the package is incomplete"
+        db.refresh(draft)
+        assert draft.status == "ready", "a failed send stays retryable"
+
     def test_submit_conflict_maps_to_409(self, client, db):
         """A submit that loses the race (draft already 'sending') is a
         CONFLICT, not a 400 'not ready' — the caller's package is fine,

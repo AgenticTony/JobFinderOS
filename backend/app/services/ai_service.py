@@ -415,6 +415,17 @@ Respond with ONLY valid JSON (no markdown):
 
         result = self._complete(system_prompt, f"## CV\n{cv_text}\n\nExtract the structured profile as JSON.",
                             kind="extract")
+        if getattr(self, "_last_finish_reason", None) == "length":
+            # Same rule as tailor (draft 39): re-asking the same CV
+            # truncates the same way — fail once, honestly, instead of
+            # parsing the cut JSON to {} and surfacing a repeatable
+            # "re-upload your PDF" error that blames a fine file
+            # (2026-10-30 audit, D3).
+            raise ValueError(
+                "Malformed extraction: the structured profile was too "
+                "long and was cut off (finish_reason=length). A shorter "
+                "CV helps, or fill in your profile by hand."
+            )
         return self._parse_json(result)
 
     # ------------------------------------------------------------------
