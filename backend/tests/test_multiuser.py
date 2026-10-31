@@ -4258,7 +4258,13 @@ class TestOnboardingNameSync:
         monkeypatch.setattr(
             cv_service, "get_ai_service",
             lambda: type("AI", (), {"extract_profile": lambda *a, **k: {
-                "full_name": "Anna Andersson",
+                # compliant shape: every prompt key present (2026-10-30
+                # audit — partial dicts are degenerate, fields won't apply)
+                "full_name": "Anna Andersson", "email": "", "phone": "",
+                "location": "", "professional_title": "",
+                "experience_years": 0, "skills": [], "recent_roles": [],
+                "education": [], "certifications": [], "keywords": [],
+                "summary": "",
             }})(),
         )
         monkeypatch.setattr(
