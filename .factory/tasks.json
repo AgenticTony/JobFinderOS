@@ -867,7 +867,7 @@
       ],
       "budget": {
         "max_attempts": 2,
-        "max_turns": 30,
+        "max_turns": 100,
         "size": "S",
         "wall_clock_min": 150
       },
