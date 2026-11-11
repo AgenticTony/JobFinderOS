@@ -134,8 +134,12 @@ class Settings(BaseSettings):
     # package is the whole rewritten CV + cover letter + changes summary
     # in one JSON; the shared 2000 cap (sized for match JSON) cut long
     # CVs at ~8.5k chars every time. A ceiling, not spend.
-    # Match/judge/extract/suggest keep GLM's base cap (2000).
+    # Match/judge/suggest keep GLM's base cap (2000).
     TAILOR_MAX_TOKENS: int = 20000
+    # Extract returns a whole structured profile (roles, skills, summary);
+    # 2000 cut long CVs' JSON on every attempt. Owner decision 2026-11-11:
+    # raise it. A ceiling, not spend.
+    EXTRACT_MAX_TOKENS: int = 8000
     AI_MAX_CONCURRENCY: int = 8
     AI_INTERACTIVE_RESERVE: int = 2
     # WO-31: the durable ai_jobs queue. Which process drains it:

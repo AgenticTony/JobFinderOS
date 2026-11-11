@@ -31,6 +31,7 @@ import {
 import CvUpload from '@/components/CvUpload';
 import { apiErrorMessage, getGeo, suggestQueries } from '@/lib/api';
 import { queueDetail } from '@/lib/aiQueue';
+import { mergeSuggestedSelection } from '@/lib/titleSelection';
 import type { AiJob, GeoData, OnboardingPayload, OccupationSuggestion, SearchMode } from '@/types';
 import { cn } from '@/lib/utils';
 import { useT } from '@/i18n/LocaleContext';
@@ -254,6 +255,12 @@ export default function OnboardingWizard({
   );
   const [selected, setSelected] = useState<Set<string>>(new Set(initialQueries ?? []));
   const [customQueries, setCustomQueries] = useState<string[]>([]);
+  // Read by loadSuggestions when results land, so a title typed during
+  // the wait is still known (the callback's closure would be stale).
+  const customQueriesRef = useRef(customQueries);
+  useEffect(() => {
+    customQueriesRef.current = customQueries;
+  }, [customQueries]);
   const [customInput, setCustomInput] = useState('');
   const [loadingQueries, setLoadingQueries] = useState(false);
   const [suggestJob, setSuggestJob] = useState<AiJob | null>(null);
@@ -314,8 +321,11 @@ export default function OnboardingWizard({
       }
       setDirectQueries(result.from_your_experience);
       setPivotSuggestions(result.worth_a_look);
-      setSelected(
-        new Set([...result.from_your_experience, ...result.worth_a_look.map((p) => p.query)])
+      setSelected((prev) =>
+        mergeSuggestedSelection(prev, customQueriesRef.current, [
+          ...result.from_your_experience,
+          ...result.worth_a_look.map((p) => p.query),
+        ])
       );
       const occs = result.occupation_suggestions ?? [];
       // MERGE into the rendered list — never a replacement: a stored

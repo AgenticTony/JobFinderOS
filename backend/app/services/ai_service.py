@@ -414,7 +414,7 @@ Respond with ONLY valid JSON (no markdown):
 }"""
 
         result = self._complete(system_prompt, f"## CV\n{cv_text}\n\nExtract the structured profile as JSON.",
-                            kind="extract")
+                            kind="extract", max_tokens=settings.EXTRACT_MAX_TOKENS)
         if getattr(self, "_last_finish_reason", None) == "length":
             # Same rule as tailor (draft 39): re-asking the same CV
             # truncates the same way — fail once, honestly, instead of

@@ -524,3 +524,20 @@ class TestDraftSurvivesLoad:
             f"exception class name is noise to the user: {d.error!r}")
         assert d.fabrication_blocked is False
 
+
+
+class TestExtractCap:
+    """PR #153 review (2026-11-11): extract kept the 2000-token base cap, so a
+    long CV's profile JSON was cut every time — honestly reported since
+    WO-32, but still unusable. Owner decision: raise it."""
+
+    def test_extract_call_gets_a_profile_sized_token_cap(self, sleeps):
+        from app.core.config import settings
+
+        reply = json.dumps({"full_name": "Erik Lindberg", "skills": []})
+        client = _ScriptedClient([reply])
+        _svc(client).extract_profile(CV)
+        assert settings.EXTRACT_MAX_TOKENS >= 8000
+        assert client.max_tokens[0][1] == settings.EXTRACT_MAX_TOKENS, (
+            f"extract cap {client.max_tokens[0][1]} — 2000 truncates the "
+            "profile JSON of a long CV on every attempt")
