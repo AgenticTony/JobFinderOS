@@ -16,124 +16,118 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": true,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/models/ai_job.py",
+          "backend/app/services/ai_queue*.py",
+          "backend/app/services/ai_service.py",
+          "backend/app/services/matcher_service.py",
+          "backend/app/services/pipeline.py",
+          "backend/app/services/worker.py",
+          "backend/app/api/v1/*.py",
+          "backend/app/core/config.py",
+          "backend/alembic/versions/*.py",
+          "backend/tests/**",
+          "backend/scripts/load_ai.py",
+          "ops/ai_health.py",
+          "frontend/src/i18n/*.ts",
+          "frontend/src/app/app/page.tsx"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "T1/T2/T11 load tests on the CI Postgres leg",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "Every AI-backed user action (tailor, recheck/judge, extract, suggest, hunt matching) goes through ai_jobs; no interactive request ends in a user-visible failure because of provider load - it ends done or stays queued with an honest EN+SV message; jobs survive an API restart or deploy (T2a, T2b).",
-          "check": {
-            "type": "test",
-            "ref": "backend tests per WO-31 red-first plan T2-T2b"
-          }
+          "text": "The cron and Hunt route become enqueuers with zero provider calls from the cron; fair share within a priority class and at most C-2 slots to match (T1, T2, T11); a job below N has no match row and no dismissal (REG1 discipline, T5)."
         },
         {
+          "check": {
+            "ref": "scripts/load_ai.py (L2) acceptance run",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Queued work is idempotent: pressing Prepare twice or a retry after lease expiry creates one job and one draft; results for deleted drafts/users are dropped (T2c); the fabrication guard runs on every completed result.",
-          "check": {
-            "type": "test",
-            "ref": "T2c idempotency test"
-          }
+          "text": "Under the fake-provider load test (500 signups/60min, 300 RPM ceiling): zero interactive jobs failed for load causes, interactive p95 queue wait under 10s, TTFM p90 under 25min, background 429 rate under 2% after AIMD settles."
         },
         {
+          "check": {
+            "ref": "migration round-trip + i18n parity test (T2e)",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "429/quota/timeout re-queue the job with Retry-After or capped backoff and never fail it; failed is reserved for non-load causes each with a user action; AIMD halves concurrency on 429 and pauses match claims on quota codes (T3).",
-          "check": {
-            "type": "test",
-            "ref": "T3 AIMD + Retry-After test"
-          }
+          "text": "ai_usage gains latency_ms, status, provider_code, priority_class, queue_wait_ms; SENTRY_DSN set (EU region) and the WO-31 alert table armed; new UI strings exist in EN and SV (T2e)."
         },
         {
+          "check": {
+            "ref": "ops/ai_health.py derived metrics + Sentry alerts in production",
+            "type": "prod_probe"
+          },
           "id": "AC-4",
-          "text": "The cron and Hunt route become enqueuers with zero provider calls from the cron; fair share within a priority class and at most C-2 slots to match (T1, T2, T11); a job below N has no match row and no dismissal (REG1 discipline, T5).",
-          "check": {
-            "type": "test",
-            "ref": "T1/T2/T11 load tests on the CI Postgres leg"
-          }
-        },
-        {
-          "id": "AC-5",
-          "text": "Under the fake-provider load test (500 signups/60min, 300 RPM ceiling): zero interactive jobs failed for load causes, interactive p95 queue wait under 10s, TTFM p90 under 25min, background 429 rate under 2% after AIMD settles.",
-          "check": {
-            "type": "test",
-            "ref": "scripts/load_ai.py (L2) acceptance run"
-          }
-        },
-        {
-          "id": "AC-6",
-          "text": "ai_usage gains latency_ms, status, provider_code, priority_class, queue_wait_ms; SENTRY_DSN set (EU region) and the WO-31 alert table armed; new UI strings exist in EN and SV (T2e).",
-          "check": {
-            "type": "test",
-            "ref": "migration round-trip + i18n parity test (T2e)"
-          }
-        },
-        {
-          "id": "AC-7",
-          "text": "Load-caused interactive failures stay 0 in production for one week after deploy; oldest-queued-interactive alerting works.",
-          "check": {
-            "type": "prod_probe",
-            "ref": "ops/ai_health.py derived metrics + Sentry alerts in production"
-          }
+          "text": "Load-caused interactive failures stay 0 in production for one week after deploy; oldest-queued-interactive alerting works."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 90,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Set MATCH_CONCURRENCY=4 on both Render services (WO-31 build-order step 0) and keep beta caps lifted only while testers are fewer than ~10.",
-          "done": false
+          "done": false,
+          "text": "Set MATCH_CONCURRENCY=4 on both Render services (WO-31 build-order step 0) and keep beta caps lifted only while testers are fewer than ~10."
         },
         {
-          "text": "Approve the WO-31 design and phase-A build start (doc status: build awaits owner approval).",
-          "done": false
+          "done": false,
+          "text": "Approve the WO-31 design and phase-A build start (doc status: build awaits owner approval)."
         },
         {
-          "text": "Set SENTRY_DSN (EU region, *.de.sentry.io) on both services when step 2 ships.",
-          "done": false
+          "done": false,
+          "text": "Set SENTRY_DSN (EU region, *.de.sentry.io) on both services when step 2 ships."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "ai_jobs table (partial unique idempotency key) + drainer in API process (AI_DRAINER=api) for interactive kinds + queued UX EN+SV + fake client L1",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "ai_jobs table (partial unique idempotency key) + drainer in API process (AI_DRAINER=api) for interactive kinds + queued UX EN+SV + fake client L1"
         },
         {
-          "id": "s2",
-          "text": "ai_usage observability columns + SENTRY_DSN + alert table",
-          "status": "todo",
           "acceptance_ids": [
             "AC-6"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "ai_usage observability columns + SENTRY_DSN + alert table"
         },
         {
-          "id": "s3",
-          "text": "Matching moves onto ai_jobs: cron/Hunt become enqueuers, AIMD + fair share, load harness L2",
-          "status": "todo",
           "acceptance_ids": [
             "AC-4",
             "AC-5"
-          ]
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "Matching moves onto ai_jobs: cron/Hunt become enqueuers, AIMD + fair share, load harness L2"
         },
         {
-          "id": "s4",
-          "text": "Admission + UX: priority classes, first-visible boost, streaming copy EN+SV",
-          "status": "todo",
           "acceptance_ids": [
             "AC-4",
             "AC-6"
-          ]
+          ],
+          "id": "s4",
+          "status": "todo",
+          "text": "Admission + UX: priority classes, first-visible boost, streaming copy EN+SV"
         }
       ],
       "attempts": []
@@ -155,84 +149,98 @@
         "safety"
       ],
       "gates": {
-        "spec_approval": true,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/models/job.py",
+          "backend/app/models/profile.py",
+          "backend/app/services/matcher_service.py",
+          "backend/app/services/embedding*.py",
+          "backend/app/core/config.py",
+          "backend/alembic/versions/*.py",
+          "backend/tests/**",
+          "frontend/src/components/PrivacyNotice.tsx",
+          "frontend/src/components/PrivacyView.tsx",
+          "frontend/src/i18n/*.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "WO-31 measured labelled set (902 scored rows, per-user recall)",
+            "type": "holdout"
+          },
           "id": "AC-1",
-          "text": "Stage 1 passes its recall gate on the 902 labelled rows: at least 80% of good matches (score 50+) in the top 40 per user and zero good matches below the floor; the result table is recorded in the WO.",
-          "check": {
-            "type": "holdout",
-            "ref": "WO-31 measured labelled set (902 scored rows, per-user recall)"
-          }
+          "text": "Stage 1 passes its recall gate on the 902 labelled rows: at least 80% of good matches (score 50+) in the top 40 per user and zero good matches below the floor; the result table is recorded in the WO."
         },
         {
+          "check": {
+            "ref": "test_calibration + T4b prefix test",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Calibration pins byte-unchanged; stage 1 never writes score, tier or dismissed_reason; the prompt-cache CV-first prefix is preserved across stage 1 (T4, T4b).",
-          "check": {
-            "type": "test",
-            "ref": "test_calibration + T4b prefix test"
-          }
+          "text": "Calibration pins byte-unchanged; stage 1 never writes score, tier or dismissed_reason; the prompt-cache CV-first prefix is preserved across stage 1 (T4, T4b)."
         },
         {
+          "check": {
+            "ref": "T5 function-span test + T6 cross-lingual test",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "Gate order holds: ineligible/out-of-scope/duplicate jobs never reach ranking or ai_jobs (T5); cross-lingual ranking ranks a Swedish Systemutvecklare ad above an unrelated English ad for an English CV (T6).",
-          "check": {
-            "type": "test",
-            "ref": "T5 function-span test + T6 cross-lingual test"
-          }
+          "text": "Gate order holds: ineligible/out-of-scope/duplicate jobs never reach ranking or ai_jobs (T5); cross-lingual ranking ranks a Swedish Systemutvecklare ad above an unrelated English ad for an English CV (T6)."
         },
         {
+          "check": {
+            "ref": "per-user budget + audit-sample tests",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "First-look N_first=40 and later N_run=60 enforced; below-floor jobs go to deep_backlog with a 5% audit sample producing prefilter_miss_rate; the rest stay candidates (no dismissal).",
-          "check": {
-            "type": "test",
-            "ref": "per-user budget + audit-sample tests"
-          }
+          "text": "First-look N_first=40 and later N_run=60 enforced; below-floor jobs go to deep_backlog with a 5% audit sample producing prefilter_miss_rate; the rest stay candidates (no dismissal)."
         },
         {
-          "id": "AC-5",
-          "text": "Privacy notice (/privacy + /sv/privacy) names the embedding provider as a processor of CV text before ship.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-5",
+          "text": "Privacy notice (/privacy + /sv/privacy) names the embedding provider as a processor of CV text before ship."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 80,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [],
       "slices": [
         {
-          "id": "s1",
-          "text": "Measure the recall gate on the labelled set before shipping anything",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Measure the recall gate on the labelled set before shipping anything"
         },
         {
-          "id": "s2",
-          "text": "Embedding storage (pgvector on job_postings + per-user profile embedding) + rank-after-cheap-gates + budgets/audit sample",
-          "status": "todo",
           "acceptance_ids": [
             "AC-2",
             "AC-3",
             "AC-4"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Embedding storage (pgvector on job_postings + per-user profile embedding) + rank-after-cheap-gates + budgets/audit sample"
         },
         {
-          "id": "s3",
-          "text": "Privacy notice update EN+SV",
-          "status": "todo",
           "acceptance_ids": [
             "AC-5"
-          ]
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "Privacy notice update EN+SV"
         }
       ],
       "attempts": []
@@ -253,76 +261,84 @@
         "auth"
       ],
       "gates": {
-        "spec_approval": true,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/core/config.py",
+          "backend/tests/**",
+          "render.yaml",
+          "docs/work-orders/WO-31-ai-capacity.md"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "Render boot logs for jobfinderos-api and jobfinderos-hunt",
+            "type": "prod_probe"
+          },
           "id": "AC-1",
-          "text": "Production GLM_BASE_URL on BOTH services (API + hunt cron) is not the Coding Plan endpoint; the boot log prints the host.",
-          "check": {
-            "type": "prod_probe",
-            "ref": "Render boot logs for jobfinderos-api and jobfinderos-hunt"
-          }
+          "text": "Production GLM_BASE_URL on BOTH services (API + hunt cron) is not the Coding Plan endpoint; the boot log prints the host."
         },
         {
+          "check": {
+            "ref": "T10 provider-guard test",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "T10 provider guard becomes a hard CI failure when BETA_UNCAPPED_HUNTS flips to False (warning until then).",
-          "check": {
-            "type": "test",
-            "ref": "T10 provider-guard test"
-          }
+          "text": "T10 provider guard becomes a hard CI failure when BETA_UNCAPPED_HUNTS flips to False (warning until then)."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-3",
-          "text": "Prompt-cache hit rate on the pay-as-you-go endpoint measured and recorded; at least 80% or the cost model is re-run.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Prompt-cache hit rate on the pay-as-you-go endpoint measured and recorded; at least 80% or the cost model is re-run."
         },
         {
-          "id": "AC-4",
-          "text": "L3 real-provider rate probe run (fictional data only) and AI_BG_CONCURRENCY_MAX set from the measured RPM, recorded in the WO.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-4",
+          "text": "L3 real-provider rate probe run (fictional data only) and AI_BG_CONCURRENCY_MAX set from the measured RPM, recorded in the WO."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 2,
         "max_turns": 30,
-        "wall_clock_min": 180
+        "size": "S",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Create the Z.ai pay-as-you-go API key and provide it for both Render services (owner-created secret).",
-          "done": false
+          "done": false,
+          "text": "Create the Z.ai pay-as-you-go API key and provide it for both Render services (owner-created secret)."
         },
         {
-          "text": "Run the L3 rate probe against the pay-as-you-go endpoint (costs money; fictional data only) before marketing pushes toward 100+ users.",
-          "done": false
+          "done": false,
+          "text": "Run the L3 rate probe against the pay-as-you-go endpoint (costs money; fictional data only) before marketing pushes toward 100+ users."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "GLM_API_KEY + GLM_BASE_URL swap on both services (config change, no recalibration - same model) + T10 hard gate",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "GLM_API_KEY + GLM_BASE_URL swap on both services (config change, no recalibration - same model) + T10 hard gate"
         },
         {
-          "id": "s2",
-          "text": "Cache-hit-rate confirmation + AI_BG_CONCURRENCY_MAX from the L3 probe",
-          "status": "todo",
           "acceptance_ids": [
             "AC-3",
             "AC-4"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Cache-hit-rate confirmation + AI_BG_CONCURRENCY_MAX from the L3 probe"
         }
       ],
       "attempts": []
@@ -342,106 +358,122 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/api/v1/*.py",
+          "backend/app/api/deps.py",
+          "backend/app/core/config.py",
+          "backend/app/core/ratelimit.py",
+          "backend/app/models/*.py",
+          "backend/app/schemas/*.py",
+          "backend/app/services/billing*.py",
+          "backend/alembic/versions/*.py",
+          "backend/tests/**",
+          "frontend/src/app/app/page.tsx",
+          "frontend/src/i18n/*.ts",
+          "docs/work-orders/WO-13-billing-and-tax.md"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "lapsed-subscription route test per WO-13 acceptance",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "No route that spends AI money is reachable without an active entitlement, proven by a test calling it with a lapsed subscription; require_plan sits at the route boundary beside get_authenticated_user.",
-          "check": {
-            "type": "test",
-            "ref": "lapsed-subscription route test per WO-13 acceptance"
-          }
+          "text": "No route that spends AI money is reachable without an active entitlement, proven by a test calling it with a lapsed subscription; require_plan sits at the route boundary beside get_authenticated_user."
         },
         {
+          "check": {
+            "ref": "two-user entitlement test (TestOutboundIdentity pattern)",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Two-tenant trap: user A active subscription never grants user B entitlement - asserted at the route boundary, not just in the model.",
-          "check": {
-            "type": "test",
-            "ref": "two-user entitlement test (TestOutboundIdentity pattern)"
-          }
+          "text": "Two-tenant trap: user A active subscription never grants user B entitlement - asserted at the route boundary, not just in the model."
         },
         {
+          "check": {
+            "ref": "webhook idempotency test",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "Webhook replay and out-of-order delivery handled idempotently - a duplicated renewed event must not double-extend.",
-          "check": {
-            "type": "test",
-            "ref": "webhook idempotency test"
-          }
+          "text": "Webhook replay and out-of-order delivery handled idempotently - a duplicated renewed event must not double-extend."
         },
         {
+          "check": {
+            "ref": "payment-failure degradation test",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "Payment failure degrades to read-only access, retains all user data, and notifies the user - no silent stoppage of hunts.",
-          "check": {
-            "type": "test",
-            "ref": "payment-failure degradation test"
-          }
+          "text": "Payment failure degrades to read-only access, retains all user data, and notifies the user - no silent stoppage of hunts."
         },
         {
+          "check": {
+            "ref": "trial-cap AI-call-count test",
+            "type": "test"
+          },
           "id": "AC-5",
-          "text": "Trial cap enforced on jobs SCORED (v1 count cap, 10/day), verified by counting AI calls, not rendered cards.",
-          "check": {
-            "type": "test",
-            "ref": "trial-cap AI-call-count test"
-          }
+          "text": "Trial cap enforced on jobs SCORED (v1 count cap, 10/day), verified by counting AI calls, not rendered cards."
         },
         {
-          "id": "AC-6",
-          "text": "Price displayed VAT-inclusive; the displayed figure is what is charged; Paddle named in the privacy policy / sub-processor list.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-6",
+          "text": "Price displayed VAT-inclusive; the displayed figure is what is charged; Paddle named in the privacy policy / sub-processor list."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 90,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Confirm with Paddle before signing: 5% on gross or net, settlement currency + FX margin for a Swedish entity, negotiability, and quote at least one other MoR.",
-          "done": false
+          "done": false,
+          "text": "Confirm with Paddle before signing: 5% on gross or net, settlement currency + FX margin for a Swedish entity, negotiability, and quote at least one other MoR."
         },
         {
-          "text": "One hour with a tax/privacy professional before the first paying user (MoR vs direct, Chapter V transfer stack, AI Act Art. 50 marking).",
-          "done": false
+          "done": false,
+          "text": "One hour with a tax/privacy professional before the first paying user (MoR vs direct, Chapter V transfer stack, AI Act Art. 50 marking)."
         },
         {
-          "text": "Create the Paddle account / approve the vendor as legal seller of record; add Paddle to the sub-processor list.",
-          "done": false
+          "done": false,
+          "text": "Create the Paddle account / approve the vendor as legal seller of record; add Paddle to the sub-processor list."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Paddle integration: checkout, entitlement require_plan at route boundary, plan-to-rate-limit bucket mapping",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-6"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Paddle integration: checkout, entitlement require_plan at route boundary, plan-to-rate-limit bucket mapping"
         },
         {
-          "id": "s2",
-          "text": "Webhook lifecycle handling (created/renewed/failed/cancelled/refunded) with idempotency + graceful degradation",
-          "status": "todo",
           "acceptance_ids": [
             "AC-3",
             "AC-4"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Webhook lifecycle handling (created/renewed/failed/cancelled/refunded) with idempotency + graceful degradation"
         },
         {
-          "id": "s3",
-          "text": "Trial v1 scoring cap wired through the existing buckets",
-          "status": "todo",
           "acceptance_ids": [
             "AC-5"
-          ]
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "Trial v1 scoring cap wired through the existing buckets"
         }
       ],
       "attempts": []
@@ -461,94 +493,104 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/api/v1/*.py",
+          "backend/app/services/billing*.py",
+          "backend/tests/**",
+          "frontend/src/app/**",
+          "frontend/src/components/**",
+          "frontend/src/i18n/*.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "Prices displayed VAT-inclusive; the displayed figure is what is charged.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Prices displayed VAT-inclusive; the displayed figure is what is charged."
         },
         {
+          "check": {
+            "ref": "trial-expiry test",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Trial expires without charging - a test asserts no subscription is created at trial end absent an explicit upgrade.",
-          "check": {
-            "type": "test",
-            "ref": "trial-expiry test"
-          }
+          "text": "Trial expires without charging - a test asserts no subscription is created at trial end absent an explicit upgrade."
         },
         {
+          "check": {
+            "ref": "one-click cancel test",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "Cancellation is reachable in one action from the account page and takes effect without support contact.",
-          "check": {
-            "type": "test",
-            "ref": "one-click cancel test"
-          }
+          "text": "Cancellation is reachable in one action from the account page and takes effect without support contact."
         },
         {
+          "check": {
+            "ref": "refund flow end-to-end test",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "Refund of unused whole months issued on request with no documentation required; the flow is tested end to end.",
-          "check": {
-            "type": "test",
-            "ref": "refund flow end-to-end test"
-          }
+          "text": "Refund of unused whole months issued on request with no documentation required; the flow is tested end to end."
         },
         {
+          "check": {
+            "ref": "no-paid-metering test",
+            "type": "test"
+          },
           "id": "AC-5",
-          "text": "No code path meters, deducts or limits job scoring for a PAYING user - asserted by a test, because this is the promise most likely to erode under cost pressure.",
-          "check": {
-            "type": "test",
-            "ref": "no-paid-metering test"
-          }
+          "text": "No code path meters, deducts or limits job scoring for a PAYING user - asserted by a test, because this is the promise most likely to erode under cost pressure."
         },
         {
-          "id": "AC-6",
-          "text": "The five billing promises appear verbatim on the public pricing page (never behind a login).",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-6",
+          "text": "The five billing promises appear verbatim on the public pricing page (never behind a login)."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 70,
-        "wall_clock_min": 480
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Confirm with Paddle whether the 5% applies to gross EUR 24.99 or net EUR 19.99 and the exact FX margin (moves contribution ~EUR 0.40).",
-          "done": false
+          "done": false,
+          "text": "Confirm with Paddle whether the 5% applies to gross EUR 24.99 or net EUR 19.99 and the exact FX margin (moves contribution ~EUR 0.40)."
         },
         {
-          "text": "Decide UK pricing display (GBP vs flat EUR) before launch.",
-          "done": false
+          "done": false,
+          "text": "Decide UK pricing display (GBP vs flat EUR) before launch."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Plan catalogue on Paddle (monthly + quarterly, no annual) + trial without card or auto-renew",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Plan catalogue on Paddle (monthly + quarterly, no annual) + trial without card or auto-renew"
         },
         {
-          "id": "s2",
-          "text": "Public pricing page with the five promises verbatim + in-app one-click cancel + refund flow",
-          "status": "todo",
           "acceptance_ids": [
             "AC-3",
             "AC-4",
             "AC-5",
             "AC-6"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Public pricing page with the five promises verbatim + in-app one-click cancel + refund flow"
         }
       ],
       "attempts": []
@@ -571,87 +613,100 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/api/v1/*.py",
+          "backend/app/models/*.py",
+          "backend/app/schemas/*.py",
+          "backend/app/services/billing*.py",
+          "backend/app/services/cancellation*.py",
+          "backend/alembic/versions/*.py",
+          "backend/tests/**",
+          "frontend/src/app/app/page.tsx",
+          "frontend/src/i18n/*.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "cancel-before-survey test",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "Cancelling takes one action and completes BEFORE any question is shown - a test cancels and checks subscription state without answering anything.",
-          "check": {
-            "type": "test",
-            "ref": "cancel-before-survey test"
-          }
+          "text": "Cancelling takes one action and completes BEFORE any question is shown - a test cancels and checks subscription state without answering anything."
         },
         {
+          "check": {
+            "ref": "survey-dismissal test",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Every question is skippable; dismissing the survey leaves the cancellation intact.",
-          "check": {
-            "type": "test",
-            "ref": "survey-dismissal test"
-          }
+          "text": "Every question is skippable; dismissing the survey leaves the cancellation intact."
         },
         {
+          "check": {
+            "ref": "review-branch test",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "The review request appears ONLY on the got-a-job branch - asserted by a test, because this is the rule most likely to be loosened later for growth reasons.",
-          "check": {
-            "type": "test",
-            "ref": "review-branch test"
-          }
+          "text": "The review request appears ONLY on the got-a-job branch - asserted by a test, because this is the rule most likely to be loosened later for growth reasons."
         },
         {
+          "check": {
+            "ref": "hired-branch refund-offer test",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "Refund offer presented on the hired branch without requiring proof (WO-16 promise 3).",
-          "check": {
-            "type": "test",
-            "ref": "hired-branch refund-offer test"
-          }
+          "text": "Refund offer presented on the hired branch without requiring proof (WO-16 promise 3)."
         },
         {
+          "check": {
+            "ref": "webhook idempotency test",
+            "type": "test"
+          },
           "id": "AC-5",
-          "text": "subscription.canceled webhook produces exactly one survey email, idempotent under Paddle retries.",
-          "check": {
-            "type": "test",
-            "ref": "webhook idempotency test"
-          }
+          "text": "subscription.canceled webhook produces exactly one survey email, idempotent under Paddle retries."
         },
         {
-          "id": "AC-6",
-          "text": "cancellation_feedback rows removed by account deletion and included in account export; user A feedback never visible to user B; reason counts queryable without reading free text.",
           "check": {
-            "type": "test",
-            "ref": "GDPR cascade/export + two-tenant tests"
-          }
+            "ref": "GDPR cascade/export + two-tenant tests",
+            "type": "test"
+          },
+          "id": "AC-6",
+          "text": "cancellation_feedback rows removed by account deletion and included in account export; user A feedback never visible to user B; reason counts queryable without reading free text."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 70,
-        "wall_clock_min": 480
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [],
       "slices": [
         {
-          "id": "s1",
-          "text": "In-app cancel via Paddle API + cancellation_feedback table (GDPR cascade + export)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-6"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "In-app cancel via Paddle API + cancellation_feedback table (GDPR cascade + export)"
         },
         {
-          "id": "s2",
-          "text": "Survey flow (one question + routing), hired-branch refund/review handling, webhook fallback email",
-          "status": "todo",
           "acceptance_ids": [
             "AC-2",
             "AC-3",
             "AC-4",
             "AC-5"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Survey flow (one question + routing), hired-branch refund/review handling, webhook fallback email"
         }
       ],
       "attempts": []
@@ -669,68 +724,79 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/services/ai_service.py",
+          "backend/app/services/draft_service.py",
+          "backend/app/services/language_filter.py",
+          "backend/app/services/matcher_service.py",
+          "backend/tests/test_wo19_honest_gates.py",
+          "frontend/src/components/MatchCard.tsx",
+          "frontend/src/i18n/console.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "backend/tests/test_wo19_honest_gates.py::test_ac_1",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "Injection fixture: a posting carrying IGNORE-ALL-PREVIOUS-INSTRUCTIONS text (score 95, write APPLY NOW) yields schema-conformant output with the instruction unexecuted, across match, tailor and judge; the rule text rides into the regenerate-with-correction prompt too. Revert the boundary and the test goes red against production code.",
-          "check": {
-            "type": "test",
-            "ref": "WO-19 AC1 injection fixture (red-first)"
-          }
+          "text": "Injection fixture: a posting carrying IGNORE-ALL-PREVIOUS-INSTRUCTIONS text (score 95, write APPLY NOW) yields schema-conformant output with the instruction unexecuted, across match, tailor and judge; the rule text rides into the regenerate-with-correction prompt too. Revert the boundary and the test goes red against production code."
         },
         {
+          "check": {
+            "ref": "backend/tests/test_wo19_honest_gates.py::test_ac_2",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Prompts never fetch or output URLs found inside posting bodies; the stored apply_url is the only exception (grep-prove across the three prompts + correction loop).",
-          "check": {
-            "type": "test",
-            "ref": "URL-exfiltration fixture test"
-          }
+          "text": "Prompts never fetch or output URLs found inside posting bodies; the stored apply_url is the only exception (grep-prove across the three prompts + correction loop)."
         },
         {
+          "check": {
+            "ref": "backend/tests/test_wo19_honest_gates.py::test_ac_3",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "Language FLAG: an English-written posting requiring fluent Swedish against an English-only user is flagged, visible, NOT dropped and NOT clean-passed (note content asserted, both sides quoted); a requirement in an undeclared language fails the gate; prompted edge cases defer to FLAG.",
-          "check": {
-            "type": "test",
-            "ref": "WO-19 AC4 language-flag tests (red-first)"
-          }
+          "text": "Language FLAG: an English-written posting requiring fluent Swedish against an English-only user is flagged, visible, NOT dropped and NOT clean-passed (note content asserted, both sides quoted); a requirement in an undeclared language fails the gate; prompted edge cases defer to FLAG."
         },
         {
-          "id": "AC-4",
-          "text": "Calibration discipline: deterministic gates run pre-AI (no re-score owed); if any verdict is fed INTO the matching prompt, MATCHING_INPUT_COMPOSITION_VERSION is bumped and the variance/scale harness re-run before merge.",
           "check": {
-            "type": "test",
-            "ref": "prompt-version pin test (test_calibration)"
-          }
+            "ref": "backend/tests/test_calibration.py::TestPromptVersioning::test_prompt_version_matches_calibration",
+            "type": "test"
+          },
+          "id": "AC-4",
+          "text": "Calibration discipline: deterministic gates run pre-AI (no re-score owed); if any verdict is fed INTO the matching prompt, MATCHING_INPUT_COMPOSITION_VERSION is bumped and the variance/scale harness re-run before merge."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 80,
-        "wall_clock_min": 480
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [],
       "slices": [
         {
-          "id": "s1",
-          "text": "Part A - untrusted-data block in match/tailor/judge prompts + correction loop",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Part A - untrusted-data block in match/tailor/judge prompts + correction loop"
         },
         {
-          "id": "s2",
-          "text": "Part C - required-language detection in language_filter.py with FAIL/FLAG/PASS verdicts + card flag surface",
-          "status": "todo",
           "acceptance_ids": [
             "AC-3"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Part C - required-language detection in language_filter.py with FAIL/FLAG/PASS verdicts + card flag surface"
         }
       ],
       "attempts": []
@@ -749,62 +815,74 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/services/pdf_service.py",
+          "backend/app/services/draft_service.py",
+          "backend/app/services/apply_service.py",
+          "backend/requirements.txt",
+          "backend/requirements.lock",
+          "backend/requirements.dev.lock",
+          "backend/tests/test_wo21_pdf_text_layer.py",
+          "backend/tests/test_pdf_fonts.py"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "backend/tests/test_wo21_pdf_text_layer.py::test_ac_1",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "A deliberately broken fixture (non-embedded, glyph-only render) fails the extraction check - the test is proven red before wiring green.",
-          "check": {
-            "type": "test",
-            "ref": "broken-PDF fixture test (red-first)"
-          }
+          "text": "A deliberately broken fixture (non-embedded, glyph-only render) fails the extraction check - the test is proven red before wiring green."
         },
         {
+          "check": {
+            "ref": "backend/tests/test_wo21_pdf_text_layer.py::test_ac_2",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "All existing PDF round-trip tests extended with the extraction assertion (minimum char count + a known phrase survives); non-ascii name fixture included.",
-          "check": {
-            "type": "test",
-            "ref": "pdf_service round-trip tests"
-          }
+          "text": "All existing PDF round-trip tests extended with the extraction assertion (minimum char count + a known phrase survives); non-ascii name fixture included."
         },
         {
+          "check": {
+            "ref": "backend/tests/test_wo21_pdf_text_layer.py::test_ac_3",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "Runtime check after each PDF build in the send path blocks the send on failure with a user-facing error logged to the application error column; grep-prove the send path cannot skip it.",
-          "check": {
-            "type": "test",
-            "ref": "send-path block test + grep proof"
-          }
+          "text": "Runtime check after each PDF build in the send path blocks the send on failure with a user-facing error logged to the application error column; grep-prove the send path cannot skip it."
         },
         {
-          "id": "AC-4",
-          "text": "pypdf pinned in requirements.lock (not just requirements.txt); CI green.",
           "check": {
-            "type": "command",
-            "ref": "grep pypdf backend/requirements.lock && CI backend jobs green"
-          }
+            "ref": "grep -Eq \"^pypdf==\" backend/requirements.lock",
+            "type": "command"
+          },
+          "id": "AC-4",
+          "text": "pypdf pinned in requirements.lock (not just requirements.txt); CI green."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 2,
         "max_turns": 30,
-        "wall_clock_min": 240
+        "size": "S",
+        "wall_clock_min": 150
       },
       "owner_steps": [],
       "slices": [
         {
-          "id": "s1",
-          "text": "pypdf dependency + test-time extraction assertions + runtime send-block",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3",
             "AC-4"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "pypdf dependency + test-time extraction assertions + runtime send-block"
         }
       ],
       "attempts": []
@@ -822,62 +900,71 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/services/draft_service.py",
+          "backend/app/core/dedupe.py",
+          "backend/app/models/application.py",
+          "backend/alembic/versions/*.py",
+          "backend/tests/test_wo22_apply_link_recovery.py"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "backend/tests/test_wo22_apply_link_recovery.py::test_ac_1",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "Dead apply URL + live twin in the pool: the application row carries the twin link + the substitution note naming the source; assert the twin URL is what the row holds (outbound artifact).",
-          "check": {
-            "type": "test",
-            "ref": "WO-22 AC1 (red-first)"
-          }
+          "text": "Dead apply URL + live twin in the pool: the application row carries the twin link + the substitution note naming the source; assert the twin URL is what the row holds (outbound artifact)."
         },
         {
+          "check": {
+            "ref": "backend/tests/test_wo22_apply_link_recovery.py::test_ac_2",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Dead apply URL + twin whose link is also dead: original warning, no substitution (the twin is re-probed before being trusted).",
-          "check": {
-            "type": "test",
-            "ref": "WO-22 AC2 dead-twin test"
-          }
+          "text": "Dead apply URL + twin whose link is also dead: original warning, no substitution (the twin is re-probed before being trusted)."
         },
         {
+          "check": {
+            "ref": "backend/tests/test_wo22_apply_link_recovery.py::test_ac_3",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "401/403/timeout probe outcomes never trigger the lookup (they are not death); no twin means current behavior, byte-identical warning.",
-          "check": {
-            "type": "test",
-            "ref": "WO-22 AC3/AC4 probe-class tests"
-          }
+          "text": "401/403/timeout probe outcomes never trigger the lookup (they are not death); no twin means current behavior, byte-identical warning."
         },
         {
-          "id": "AC-4",
-          "text": "All substitutions logged as an audit trail on the application row.",
           "check": {
-            "type": "test",
-            "ref": "substitution audit test"
-          }
+            "ref": "backend/tests/test_wo22_apply_link_recovery.py::test_ac_4",
+            "type": "test"
+          },
+          "id": "AC-4",
+          "text": "All substitutions logged as an audit trail on the application row."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 2,
         "max_turns": 40,
-        "wall_clock_min": 300
+        "size": "S",
+        "wall_clock_min": 150
       },
       "owner_steps": [],
       "slices": [
         {
-          "id": "s1",
-          "text": "Pool twin lookup at hand-off (title_bucket + likely_same_job + collapse_preference) with twin re-probe + substitution note/audit",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3",
             "AC-4"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Pool twin lookup at hand-off (title_bucket + likely_same_job + collapse_preference) with twin re-probe + substitution note/audit"
         }
       ],
       "attempts": []
@@ -896,85 +983,96 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/services/career_site*.py",
+          "backend/app/services/pipeline.py",
+          "backend/app/services/scrapers/**",
+          "backend/app/services/source_packs.py",
+          "backend/app/models/*.py",
+          "backend/alembic/versions/*.py",
+          "backend/tests/**"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "grep for slug lists / teamtailor.com patterns in backend/app",
+            "type": "command"
+          },
           "id": "AC-1",
-          "text": "Discovery adds hosts without any configuration; no slug list exists anywhere in the codebase (grep-provable).",
-          "check": {
-            "type": "command",
-            "ref": "grep for slug lists / teamtailor.com patterns in backend/app"
-          }
+          "text": "Discovery adds hosts without any configuration; no slug list exists anywhere in the codebase (grep-provable)."
         },
         {
+          "check": {
+            "ref": "crawling-discipline tests",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Crawling discipline tested: identifying User-Agent with contact route, per-host rate limit, robots.txt respected, probe timeout, hard cap on probes per cycle; probes target only hosts from verified-source application_url values.",
-          "check": {
-            "type": "test",
-            "ref": "crawling-discipline tests"
-          }
+          "text": "Crawling discipline tested: identifying User-Agent with contact route, per-host rate limit, robots.txt respected, probe timeout, hard cap on probes per cycle; probes target only hosts from verified-source application_url values."
         },
         {
+          "check": {
+            "ref": "negative-cache TTL test",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "Negative cache proven: a host that 404s is probed once, not again within the TTL (stubbed clock or recorded probe log).",
-          "check": {
-            "type": "test",
-            "ref": "negative-cache TTL test"
-          }
+          "text": "Negative cache proven: a host that 404s is probed once, not again within the TTL (stubbed clock or recorded probe log)."
         },
         {
+          "check": {
+            "ref": "cross-source dedupe + summary-stat tests",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "Cross-source dedupe: the same job on Platsbanken and the career site collapses via the existing dedupe gate (tested with a real pair from the verified feeds); per-source summaries surface discovery stats (hosts probed / found / polled).",
-          "check": {
-            "type": "test",
-            "ref": "cross-source dedupe + summary-stat tests"
-          }
+          "text": "Cross-source dedupe: the same job on Platsbanken and the career site collapses via the existing dedupe gate (tested with a real pair from the verified feeds); per-source summaries surface discovery stats (hosts probed / found / polled)."
         },
         {
-          "id": "AC-5",
-          "text": "ToS gate passed and written down before shipping (Teamtailor feed terms; Greenhouse/Lever documented endpoints when those land).",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-5",
+          "text": "ToS gate passed and written down before shipping (Teamtailor feed terms; Greenhouse/Lever documented endpoints when those land)."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 80,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Teamtailor ToS check (and terms verification for any added vendor) before this ships - same discipline as the Adzuna commercial-terms item.",
-          "done": false
+          "done": false,
+          "text": "Teamtailor ToS check (and terms verification for any added vendor) before this ships - same discipline as the Adzuna commercial-terms item."
         },
         {
-          "text": "Re-measure discovery yield after the Platsbanken-dominant pool, before investing in vendor-specific parsers.",
-          "done": false
+          "done": false,
+          "text": "Re-measure discovery yield after the Platsbanken-dominant pool, before investing in vendor-specific parsers."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Post-scrape harvest + jobs.json/vendor-endpoint probe + career_sites cache (positive and negative verdicts)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Post-scrape harvest + jobs.json/vendor-endpoint probe + career_sites cache (positive and negative verdicts)"
         },
         {
-          "id": "s2",
-          "text": "Poll positive hosts as a first-class source on the hunt cycle + discovery stats in summaries",
-          "status": "todo",
           "acceptance_ids": [
             "AC-4"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Poll positive hosts as a first-class source on the hunt cycle + discovery stats in summaries"
         }
       ],
       "attempts": []
@@ -992,36 +1090,42 @@
         "external_service"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/data-flow.md",
+          "docs/work-orders/WO-24-pre-signup-value-layer.md"
+        ]
       },
       "acceptance": [
         {
-          "id": "AC-1",
-          "text": "A recorded owner decision choosing one path before the first CV that is not the founder: the EU-resident model path (Mistral EU endpoint - blocked on the tier_not_allowed unlock) OR SCC + TIA + sub-processor disclosure accepted for the current provider.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-1",
+          "text": "A recorded owner decision choosing one path before the first CV that is not the founder: the EU-resident model path (Mistral EU endpoint - blocked on the tier_not_allowed unlock) OR SCC + TIA + sub-processor disclosure accepted for the current provider."
         },
         {
-          "id": "AC-2",
-          "text": "If Mistral EU: probe the tier unlock status and record the result; if SCC/TIA: the TIA document and privacy-notice wording exist in docs/.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-2",
+          "text": "If Mistral EU: probe the tier unlock status and record the result; if SCC/TIA: the TIA document and privacy-notice wording exist in docs/."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 10,
+        "size": "S",
         "wall_clock_min": 60
       },
       "owner_steps": [
         {
-          "text": "Make and record the residency decision (the stated trigger: before the first third-party CV enters the system).",
-          "done": false
+          "done": false,
+          "text": "Make and record the residency decision (the stated trigger: before the first third-party CV enters the system)."
         }
       ],
       "slices": [],
@@ -1044,98 +1148,111 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": true,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/api/v1/*.py",
+          "backend/app/services/ai_service.py",
+          "backend/app/services/cv_service.py",
+          "backend/app/core/config.py",
+          "backend/app/core/ratelimit.py",
+          "backend/tests/**",
+          "frontend/src/app/**",
+          "frontend/src/components/**",
+          "frontend/src/i18n/*.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "persistence-scrub test per WO-24 acceptance",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "Anonymous user gets a grounded report with no account; post-response persistence verified empty (DB + storage + logs scrubbed of CV text) - process-and-forget.",
-          "check": {
-            "type": "test",
-            "ref": "persistence-scrub test per WO-24 acceptance"
-          }
+          "text": "Anonymous user gets a grounded report with no account; post-response persistence verified empty (DB + storage + logs scrubbed of CV text) - process-and-forget."
         },
         {
+          "check": {
+            "ref": "zero-fabrication prompt + spot-audit test",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "No claim in any report absent from the user inputs; gaps stated as absence, never generated filler (honesty rule wired into the prompt, tested).",
-          "check": {
-            "type": "test",
-            "ref": "zero-fabrication prompt + spot-audit test"
-          }
+          "text": "No claim in any report absent from the user inputs; gaps stated as absence, never generated filler (honesty rule wired into the prompt, tested)."
         },
         {
-          "id": "AC-3",
-          "text": "SE + EN UI with the language toggle above the fold; results first, signup CTA after - no account wall, no email capture before results.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-3",
+          "text": "SE + EN UI with the language toggle above the fold; results first, signup CTA after - no account wall, no email capture before results."
         },
         {
+          "check": {
+            "ref": "abuse-simulation test",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "Per-IP rate limit + global daily cost cap + kill switch enforced server-side, tested by simulating abuse.",
-          "check": {
-            "type": "test",
-            "ref": "abuse-simulation test"
-          }
+          "text": "Per-IP rate limit + global daily cost cap + kill switch enforced server-side, tested by simulating abuse."
         },
         {
+          "check": {
+            "ref": "CV-carry-forward test",
+            "type": "test"
+          },
           "id": "AC-5",
-          "text": "Signup from the tool carries the parsed CV forward (no re-upload at onboarding).",
-          "check": {
-            "type": "test",
-            "ref": "CV-carry-forward test"
-          }
+          "text": "Signup from the tool carries the parsed CV forward (no re-upload at onboarding)."
         },
         {
-          "id": "AC-6",
-          "text": "LinkedIn v1 import prefills every field manual onboarding asks, from the user own export file (no fetching by us); v2 (URL fetch) stays marked blocked until the ToS/legal review passes.",
           "check": {
-            "type": "test",
-            "ref": "LinkedIn v1 prefill test"
-          }
+            "ref": "LinkedIn v1 prefill test",
+            "type": "test"
+          },
+          "id": "AC-6",
+          "text": "LinkedIn v1 import prefills every field manual onboarding asks, from the user own export file (no fetching by us); v2 (URL fetch) stays marked blocked until the ToS/legal review passes."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 90,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Decide whether to attempt the Mistral EU flip now or accept the SCC/TIA disclosure path (feeds gdpr-ai-residency-decision).",
-          "done": false
+          "done": false,
+          "text": "Decide whether to attempt the Mistral EU flip now or accept the SCC/TIA disclosure path (feeds gdpr-ai-residency-decision)."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Anonymous CV-koll page (SE+EN): upload/paste + optional ad produces a grounded report; process-and-forget; spend caps; kill switch",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3",
             "AC-4"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Anonymous CV-koll page (SE+EN): upload/paste + optional ad produces a grounded report; process-and-forget; spend caps; kill switch"
         },
         {
-          "id": "s2",
-          "text": "Signup carry-forward of the parsed CV",
-          "status": "todo",
           "acceptance_ids": [
             "AC-5"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Signup carry-forward of the parsed CV"
         },
         {
-          "id": "s3",
-          "text": "LinkedIn import v1 (user-supplied export/paste produces prefill); v2 stays blocked",
-          "status": "todo",
           "acceptance_ids": [
             "AC-6"
-          ]
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "LinkedIn import v1 (user-supplied export/paste produces prefill); v2 stays blocked"
         }
       ],
       "attempts": []
@@ -1153,76 +1270,87 @@
         "safety"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/api/v1/*.py",
+          "backend/app/services/role_page*.py",
+          "backend/tests/**",
+          "frontend/public/**",
+          "frontend/src/app/**",
+          "frontend/src/components/**",
+          "frontend/src/i18n/*.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "https://jobfinderos.com/llms.txt",
+            "type": "prod_probe"
+          },
           "id": "AC-1",
-          "text": "/llms.txt returns 200 at the domain root with the honest product inventory including what the product refuses to do.",
-          "check": {
-            "type": "prod_probe",
-            "ref": "https://jobfinderos.com/llms.txt"
-          }
+          "text": "/llms.txt returns 200 at the domain root with the honest product inventory including what the product refuses to do."
         },
         {
+          "check": {
+            "ref": "OKF spec validation of /okf/index.md + concept docs",
+            "type": "command"
+          },
           "id": "AC-2",
-          "text": "OKF index parses against the spec; concept docs cross-link.",
-          "check": {
-            "type": "command",
-            "ref": "OKF spec validation of /okf/index.md + concept docs"
-          }
+          "text": "OKF index parses against the spec; concept docs cross-link."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-3",
-          "text": "At least 20 per-role pages live, each showing provenance (N postings, pool query date) in SE and EN; every published stat reproducible by running the stated query.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "At least 20 per-role pages live, each showing provenance (N postings, pool query date) in SE and EN; every published stat reproducible by running the stated query."
         },
         {
+          "check": {
+            "ref": "delist-on-thin-data test",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "Delisting path verified by starving one title data in staging - pages degrade to removal, not stale lies; no fabricated social proof anywhere.",
-          "check": {
-            "type": "test",
-            "ref": "delist-on-thin-data test"
-          }
+          "text": "Delisting path verified by starving one title data in staging - pages degrade to removal, not stale lies; no fabricated social proof anywhere."
         },
         {
-          "id": "AC-5",
-          "text": "Sitemap submitted; pages linked from the landing footer/resources section, not the hero; no locale expansion beyond SE/EN.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-5",
+          "text": "Sitemap submitted; pages linked from the landing footer/resources section, not the hero; no locale expansion beyond SE/EN."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 80,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [],
       "slices": [
         {
-          "id": "s1",
-          "text": "/llms.txt + OKF bundle (honest inventory + concept docs)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "/llms.txt + OKF bundle (honest inventory + concept docs)"
         },
         {
-          "id": "s2",
-          "text": "Per-role pages generated from live pool queries with provenance + delisting + sitemap/linking",
-          "status": "todo",
           "acceptance_ids": [
             "AC-3",
             "AC-4",
             "AC-5"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Per-role pages generated from live pool queries with provenance + delisting + sitemap/linking"
         }
       ],
       "attempts": []
@@ -1240,43 +1368,49 @@
         "new_dependency"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/work-orders/WO-27-autofill-decision.md",
+          "docs/marketing/competitor-extension-teardown.md"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "ADR committed in docs/ naming the option (build / partner / defer), the rationale, and the revisit trigger; default recommendation is defer until WO-20 outcome data proves volume is the bottleneck.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "ADR committed in docs/ naming the option (build / partner / defer), the rationale, and the revisit trigger; default recommendation is defer until WO-20 outcome data proves volume is the bottleneck."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-2",
-          "text": "If defer: the trigger is concrete (for example: first 100 sent applications via manual flow, or 10 users asking for autofill in cancellation surveys).",
-          "check": {
-            "type": "manual"
-          }
+          "text": "If defer: the trigger is concrete (for example: first 100 sent applications via manual flow, or 10 users asking for autofill in cancellation surveys)."
         },
         {
-          "id": "AC-3",
-          "text": "If build/partner: a build WO written referencing this one, with the fill-never-submit rule stated verbatim and the no-page-content-beyond-the-active-form privacy constraint included.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-3",
+          "text": "If build/partner: a build WO written referencing this one, with the fill-never-submit rule stated verbatim and the no-page-content-beyond-the-active-form privacy constraint included."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 15,
+        "size": "S",
         "wall_clock_min": 120
       },
       "owner_steps": [
         {
-          "text": "Pick build / partner / defer and sign the ADR (owner decision - the WO is a decision, not a build).",
-          "done": false
+          "done": false,
+          "text": "Pick build / partner / defer and sign the ADR (owner decision - the WO is a decision, not a build)."
         }
       ],
       "slices": [],
@@ -1295,87 +1429,97 @@
         "safety"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "frontend/src/app/page.tsx",
+          "frontend/src/app/sv/page.tsx",
+          "frontend/src/components/landing/**",
+          "frontend/src/i18n/*.ts",
+          "frontend/src/**/*.test.ts",
+          "docs/research/landing-copy-teardown-2026-10-15.md"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "grep jakt/jagar/jagade in built out/sv.html",
+            "type": "command"
+          },
           "id": "AC-1",
-          "text": "Full-page copy pass landed in both languages in the same commits; Swedish authored natively (no hunt-metaphor literals): zero occurrences of jakt/jagar/jagade in the built /sv page; natural Swedish verified by the owner or a native reader.",
-          "check": {
-            "type": "command",
-            "ref": "grep jakt/jagar/jagade in built out/sv.html"
-          }
+          "text": "Full-page copy pass landed in both languages in the same commits; Swedish authored natively (no hunt-metaphor literals): zero occurrences of jakt/jagar/jagade in the built /sv page; natural Swedish verified by the owner or a native reader."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-2",
-          "text": "Motion pass visible on scroll (stats count-up, staggered reveals, section transitions) - GPU-friendly transforms/opacity only, verified dead under prefers-reduced-motion.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Motion pass visible on scroll (stats count-up, staggered reveals, section transitions) - GPU-friendly transforms/opacity only, verified dead under prefers-reduced-motion."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-3",
-          "text": "Claims sweep re-run on the final copy: every statement maps to product reality or is cut; no new interaction demos; real screenshots/components only; the Forbes slot stays null until a verified citation exists.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Claims sweep re-run on the final copy: every statement maps to product reality or is cut; no new interaction demos; real screenshots/components only; the Forbes slot stays null until a verified citation exists."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-4",
-          "text": "Feature-honesty rule holds: the landing shows only shipped behaviour, or planned behaviour labelled as coming with its WO open.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Feature-honesty rule holds: the landing shows only shipped behaviour, or planned behaviour labelled as coming with its WO open."
         },
         {
-          "id": "AC-5",
-          "text": "CI-exact locally (tsc clean, node --test green, static build + artifact checks) and deployed + verified on jobfinderos.com and /sv.",
           "check": {
-            "type": "prod_probe",
-            "ref": "jobfinderos.com + /sv post-deploy verification"
-          }
+            "ref": "jobfinderos.com + /sv post-deploy verification",
+            "type": "prod_probe"
+          },
+          "id": "AC-5",
+          "text": "CI-exact locally (tsc clean, node --test green, static build + artifact checks) and deployed + verified on jobfinderos.com and /sv."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 80,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Owner signs off on section copy after the rewrite pass (the hero direction is already decided and deployed, PR #126).",
-          "done": false
+          "done": false,
+          "text": "Owner signs off on section copy after the rewrite pass (the hero direction is already decided and deployed, PR #126)."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Section-copy pass, both languages (badge to footer, per WO-30 scope C)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-4"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Section-copy pass, both languages (badge to footer, per WO-30 scope C)"
         },
         {
-          "id": "s2",
-          "text": "Motion pass (scope D) under the perf + reduced-motion constraints",
-          "status": "todo",
           "acceptance_ids": [
             "AC-2"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Motion pass (scope D) under the perf + reduced-motion constraints"
         },
         {
-          "id": "s3",
-          "text": "Honesty sweep + deploy verification (scope E)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-3",
             "AC-5"
-          ]
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "Honesty sweep + deploy verification (scope E)"
         }
       ],
       "attempts": []
@@ -1395,87 +1539,96 @@
         "safety"
       ],
       "gates": {
-        "spec_approval": true,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "docs/research/persona-voice-2026-10.md",
+          "frontend/src/app/**",
+          "frontend/src/components/**",
+          "frontend/src/i18n/*.ts",
+          "frontend/src/**/*.test.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "docs/research/persona-voice-2026-10.md exists with per-persona objection clusters, verbatim quotes and sources (forums, app-store/Trustpilot reviews, beta-user words); a persona ships only with at least 3 real attributable quotes - failures recorded as killed, never shipped with filler.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "docs/research/persona-voice-2026-10.md exists with per-persona objection clusters, verbatim quotes and sources (forums, app-store/Trustpilot reviews, beta-user words); a persona ships only with at least 3 real attributable quotes - failures recorded as killed, never shipped with filler."
         },
         {
+          "check": {
+            "ref": "route/component tests + grep for duplicated section code",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "3 personas x 2 languages render from one parameterized route (/p/[persona] + /sv/p/[persona]) and one PersonaPage component composing the WO-28 shared sections - zero duplicated section code; slug-language decision documented.",
-          "check": {
-            "type": "test",
-            "ref": "route/component tests + grep for duplicated section code"
-          }
+          "text": "3 personas x 2 languages render from one parameterized route (/p/[persona] + /sv/p/[persona]) and one PersonaPage component composing the WO-28 shared sections - zero duplicated section code; slug-language decision documented."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-3",
-          "text": "Persona pain-point claims trace to quotes; product claims pass the same claims-audit standard as WO-28.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Persona pain-point claims trace to quotes; product claims pass the same claims-audit standard as WO-28."
         },
         {
+          "check": {
+            "ref": "i18n parity + scanner tests with new FILES entries",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "i18n discipline: dict-parity walker + i18n-scan.test.ts FILES cover the new route/component; language toggle above the fold on every persona page.",
-          "check": {
-            "type": "test",
-            "ref": "i18n parity + scanner tests with new FILES entries"
-          }
+          "text": "i18n discipline: dict-parity walker + i18n-scan.test.ts FILES cover the new route/component; language toggle above the fold on every persona page."
         },
         {
-          "id": "AC-5",
-          "text": "Entry points: footer/resources link from the main landing + Rusta och Matcha handoff URL pattern documented; signup CTA carries locale; static export, no per-persona backend, no persona detection.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-5",
+          "text": "Entry points: footer/resources link from the main landing + Rusta och Matcha handoff URL pattern documented; signup CTA carries locale; static export, no per-persona backend, no persona detection."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 90,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Approve the mined personas against the kill rule before the pages build (ungrounded personas are killed, not invented).",
-          "done": false
+          "done": false,
+          "text": "Approve the mined personas against the kill rule before the pages build (ungrounded personas are killed, not invented)."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Scope A - voice-of-customer research doc (the gate; kill rule enforced)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Scope A - voice-of-customer research doc (the gate; kill rule enforced)"
         },
         {
-          "id": "s2",
-          "text": "Scope B+C - personas confirmed/rejected against research; one route + one component composing the WO-28 sections",
-          "status": "todo",
           "acceptance_ids": [
             "AC-2",
             "AC-3",
             "AC-4"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Scope B+C - personas confirmed/rejected against research; one route + one component composing the WO-28 sections"
         },
         {
-          "id": "s3",
-          "text": "Scope D - entry points + handoff URL documentation",
-          "status": "todo",
           "acceptance_ids": [
             "AC-5"
-          ]
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "Scope D - entry points + handoff URL documentation"
         }
       ],
       "attempts": []
@@ -1493,124 +1646,73 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/work-orders/WO-25-migration-drift-guard.md",
+          ".github/workflows/migration-drift.yml"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "manual run of .github/workflows/migration-drift.yml from the Actions tab (expect OK ... at head)",
+            "type": "command"
+          },
           "id": "AC-1",
-          "text": "The drift check is armed: ops/sql/ci_revision_reader.sql run on Supabase, PROD_REVISION_READER_URL added as a GitHub Actions secret, and a manual run of the Migration drift workflow prints OK at head.",
-          "check": {
-            "type": "command",
-            "ref": "manual run of .github/workflows/migration-drift.yml from the Actions tab (expect OK ... at head)"
-          }
+          "text": "The drift check is ARMED — DONE, recorded 2026-11-11 in docs/work-orders/WO-25-migration-drift-guard.md (#158): the Migration drift workflow runs green on main (latest success 2026-11-11T08:55:38Z, on the #157 merge), which under the 2026-09-30 fail-closed fix proves PROD_REVISION_READER_URL is set and production's alembic_version is read at main's head."
         },
         {
+          "check": {
+            "ref": "Render boot logs, both services",
+            "type": "prod_probe"
+          },
           "id": "AC-2",
-          "text": "Boot log shows Deploy build: main@<sha> on BOTH jobfinderos-api and jobfinderos-hunt (fail-closed guard verified live).",
-          "check": {
-            "type": "prod_probe",
-            "ref": "Render boot logs, both services"
-          }
+          "text": "Boot log shows Deploy build: main@<sha> on BOTH jobfinderos-api and jobfinderos-hunt (fail-closed guard verified live)."
         },
         {
-          "id": "AC-3",
-          "text": "jobfinderos-api deploy branch confirmed set to main; SENTRY_DSN decision taken for both services.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-3",
+          "text": "jobfinderos-api deploy branch confirmed set to main; SENTRY_DSN decision taken for both services."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 10,
+        "size": "S",
         "wall_clock_min": 90
       },
       "owner_steps": [
         {
-          "text": "Confirm RENDER_GIT_BRANCH via the boot log on both services before merging any new migration (fail-closed means migrations are refused if the branch reads unknown).",
-          "done": false
+          "done": false,
+          "text": "Confirm RENDER_GIT_BRANCH via the boot log on both services before merging any new migration (fail-closed means migrations are refused if the branch reads unknown)."
         },
         {
-          "text": "Run ops/sql/ci_revision_reader.sql in the Supabase SQL editor (fresh password) and add PROD_REVISION_READER_URL as a GitHub Actions secret.",
-          "done": false
+          "done": true,
+          "text": "DONE (recorded 2026-11-11, #158): ci_revision_reader created and PROD_REVISION_READER_URL added — the drift workflow runs green on main. Re-run manually only if it ever lapses red.",
+          "done_at": "2026-11-11T09:29:14Z",
+          "done_by": "Anthony",
+          "evidence": "migration-drift.yml green on main (latest 2026-11-11T08:55:38Z on the #157 merge; under the 2026-09-30 NOT-ARMED fail-closed fix, green proves PROD_REVISION_READER_URL is set and prod alembic_version is read at head) — recorded in docs/work-orders/WO-25-migration-drift-guard.md via #158; this queue PR's merge is the tick (F-29)."
         },
         {
-          "text": "Set jobfinderos-api deploy branch to main if it is not (the 2026-09-28 follow-up).",
-          "done": false
+          "done": false,
+          "text": "Set jobfinderos-api deploy branch to main if it is not (the 2026-09-28 follow-up)."
         },
         {
-          "text": "Decide on SENTRY_DSN for both services - the 2026-09-28 outage paged nobody.",
-          "done": false
+          "done": false,
+          "text": "Decide on SENTRY_DSN for both services - the 2026-09-28 outage paged nobody."
         },
         {
-          "text": "Note: GitHub disables scheduled workflows after 60 days without repo activity - re-enable if the drift job lapses.",
-          "done": false
+          "done": false,
+          "text": "Note: GitHub disables scheduled workflows after 60 days without repo activity - re-enable if the drift job lapses."
         }
       ],
       "slices": [],
-      "attempts": []
-    },
-    {
-      "id": "mig-wo2-drop-token-version",
-      "status": "draft",
-      "title": "MIG-WO2 follow-up: drop the dead users.token_version column once Supabase Auth is stable in production",
-      "source": "docs/deploy/MIG-WO2-runbook.md#open-follow-ups-not-blockers",
-      "kind": "build",
-      "priority": "P3",
-      "depends_on": [],
-      "risk": [
-        "migration",
-        "deploy"
-      ],
-      "gates": {
-        "spec_approval": false,
-        "merge": "human",
-        "deploy": "human"
-      },
-      "acceptance": [
-        {
-          "id": "AC-1",
-          "text": "Migration drops users.token_version; upgrade/downgrade verified on sqlite + postgres legs (CI matrix).",
-          "check": {
-            "type": "test",
-            "ref": "migration round-trip test (WO-25-era pattern)"
-          }
-        },
-        {
-          "id": "AC-2",
-          "text": "No code reads token_version after the drop (grep-prove); suite green on both legs.",
-          "check": {
-            "type": "command",
-            "ref": "grep -rn token_version backend/app (expect zero hits) && CI backend jobs green"
-          }
-        }
-      ],
-      "budget": {
-        "size": "S",
-        "max_attempts": 2,
-        "max_turns": 25,
-        "wall_clock_min": 180
-      },
-      "owner_steps": [
-        {
-          "text": "Confirm MIG-WO2 is stable in production before approving the drop (rollback-safety column).",
-          "done": false
-        }
-      ],
-      "slices": [
-        {
-          "id": "s1",
-          "text": "Drop migration + test + grep proof",
-          "status": "todo",
-          "acceptance_ids": [
-            "AC-1",
-            "AC-2"
-          ]
-        }
-      ],
       "attempts": []
     },
     {
@@ -1626,56 +1728,64 @@
         "privacy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/services/gmail*.py",
+          "backend/app/services/composio_service.py",
+          "backend/tests/**",
+          "docs/work-orders/WO-20-outcome-layer.md"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "The first real scan against a connected Gmail (Settings, Sent page, scan - or a scheduled hunt for a connected user) classifies at least one real employer message through the live Composio read path.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "The first real scan against a connected Gmail (Settings, Sent page, scan - or a scheduled hunt for a connected user) classifies at least one real employer message through the live Composio read path."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-2",
-          "text": "The epoch after:/before: query forms (b:/e: cursors) are verified through the Composio tool wrapper, not just the injected FetchMessages contract; truncation consumes the oldest batch and the cursor marches forward.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "The epoch after:/before: query forms (b:/e: cursors) are verified through the Composio tool wrapper, not just the injected FetchMessages contract; truncation consumes the oldest batch and the cursor marches forward."
         },
         {
-          "id": "AC-3",
-          "text": "All scan failures degrade into gmail_scan_state.last_error and never fail the hunt (verified with the connection absent/revoked).",
           "check": {
-            "type": "test",
-            "ref": "degradation tests in test_wo20_outcomes.py"
-          }
+            "ref": "degradation tests in test_wo20_outcomes.py",
+            "type": "test"
+          },
+          "id": "AC-3",
+          "text": "All scan failures degrade into gmail_scan_state.last_error and never fail the hunt (verified with the connection absent/revoked)."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 2,
         "max_turns": 30,
-        "wall_clock_min": 180
+        "size": "S",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Connect (or confirm) a real Gmail entity in production Settings and run the first live scan.",
-          "done": false
+          "done": false,
+          "text": "Connect (or confirm) a real Gmail entity in production Settings and run the first live scan."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Live first-call verification; fix any adapter drift found, red-first",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Live first-call verification; fix any adapter drift found, red-first"
         }
       ],
       "attempts": []
@@ -1692,47 +1802,53 @@
         "safety"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "docs/work-orders/WO-23-blocked-draft-recovery.md",
+          "docs/work-orders/README.md"
+        ]
       },
       "acceptance": [
         {
-          "id": "AC-1",
-          "text": "A real blocked draft is driven end to end in production: the editor opens on the block, Check again re-runs the shared check_package, per-use keep-it confirmation resolves one use, and the last confirmation re-runs the full guard to ready.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-1",
+          "text": "A real blocked draft is driven end to end in production: the editor opens on the block, Check again re-runs the shared check_package, per-use keep-it confirmation resolves one use, and the last confirmation re-runs the full guard to ready."
         },
         {
-          "id": "AC-2",
-          "text": "The whole-sentence vouching path writes profiles.vouched_facts and the resolved draft sends once (fabrication_blocked never cleared).",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-2",
+          "text": "The whole-sentence vouching path writes profiles.vouched_facts and the resolved draft sends once (fabrication_blocked never cleared)."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 15,
+        "size": "S",
         "wall_clock_min": 120
       },
       "owner_steps": [
         {
-          "text": "Run the click-through on a production blocked draft (owner or a delegated session with the owner observing).",
-          "done": false
+          "done": false,
+          "text": "Run the click-through on a production blocked draft (owner or a delegated session with the owner observing)."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Live click-through; file any defect found as a follow-up task",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Live click-through; file any defect found as a follow-up task"
         }
       ],
       "attempts": []
@@ -1749,30 +1865,36 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/work-orders/WO-14-hunt-cadence-and-trial.md",
+          "render.yaml"
+        ]
       },
       "acceptance": [
         {
-          "id": "AC-1",
-          "text": "The jobfinderos-hunt cron schedule in the Render dashboard is 0 6,18 * * * (or a blueprint sync reapplied render.yaml); the next-hunt countdown in the UI tells the truth.",
           "check": {
-            "type": "prod_probe",
-            "ref": "Render cron job settings + pipeline /status honest next-run time"
-          }
+            "ref": "Render cron job settings + pipeline /status honest next-run time",
+            "type": "prod_probe"
+          },
+          "id": "AC-1",
+          "text": "The jobfinderos-hunt cron schedule in the Render dashboard is 0 6,18 * * * (or a blueprint sync reapplied render.yaml); the next-hunt countdown in the UI tells the truth."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 5,
+        "size": "S",
         "wall_clock_min": 30
       },
       "owner_steps": [
         {
-          "text": "In the Render dashboard set the jobfinderos-hunt schedule to 0 6,18 * * * (or trigger a blueprint sync).",
-          "done": false
+          "done": false,
+          "text": "In the Render dashboard set the jobfinderos-hunt schedule to 0 6,18 * * * (or trigger a blueprint sync)."
         }
       ],
       "slices": [],
@@ -1791,53 +1913,61 @@
         "external_service"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/deploy/WO-07-runbook.md",
+          "docs/data-flow.md",
+          "ops/backup.sh",
+          "ops/restore.sh"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "grep off-site /tmp/jobfinderos-backup.log after a run of ops/backup.sh",
+            "type": "command"
+          },
           "id": "AC-1",
-          "text": "A nightly run logs off-site OK with the file count at jfos-b2:jobfinderos-backups (the script verifies the destination count and exits non-zero on mismatch); the one-disk-only warning is gone.",
-          "check": {
-            "type": "command",
-            "ref": "grep off-site /tmp/jobfinderos-backup.log after a run of ops/backup.sh"
-          }
+          "text": "A nightly run logs off-site OK with the file count at jfos-b2:jobfinderos-backups (the script verifies the destination count and exits non-zero on mismatch); the one-disk-only warning is gone."
         },
         {
+          "check": {
+            "ref": "DATABASE_URL=... bash ops/restore.sh --db-only ~/backups/jobfinderos (throwaway target)",
+            "type": "command"
+          },
           "id": "AC-2",
-          "text": "One storage + database restore rehearsal completed against a THROWAWAY target (database restore verified: N tables, 0 mismatches); the drill is torn down afterwards.",
-          "check": {
-            "type": "command",
-            "ref": "DATABASE_URL=... bash ops/restore.sh --db-only ~/backups/jobfinderos (throwaway target)"
-          }
+          "text": "One storage + database restore rehearsal completed against a THROWAWAY target (database restore verified: N tables, 0 mismatches); the drill is torn down afterwards."
         },
         {
-          "id": "AC-3",
-          "text": "B2 bucket region confirmed (data-flow checklist: eu-central; move the bucket if US) and recorded in docs/data-flow.md.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-3",
+          "text": "B2 bucket region confirmed (data-flow checklist: eu-central; move the bucket if US) and recorded in docs/data-flow.md."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 10,
+        "size": "S",
         "wall_clock_min": 120
       },
       "owner_steps": [
         {
-          "text": "Install rclone; rclone config create jfos-b2 b2 with account/application keys; rclone mkdir jfos-b2:jobfinderos-backups.",
-          "done": false
+          "done": false,
+          "text": "Install rclone; rclone config create jfos-b2 b2 with account/application keys; rclone mkdir jfos-b2:jobfinderos-backups."
         },
         {
-          "text": "Fill OFFSITE_BACKUP_TARGET/OFFSITE_CMD in the installed ~/Library/LaunchAgents/com.jobfinderos.backup.plist and reload it.",
-          "done": false
+          "done": false,
+          "text": "Fill OFFSITE_BACKUP_TARGET/OFFSITE_CMD in the installed ~/Library/LaunchAgents/com.jobfinderos.backup.plist and reload it."
         },
         {
-          "text": "Run one restore rehearsal against a throwaway database/bucket, then tear the drill down (a drill left running is a stale PII copy).",
-          "done": false
+          "done": false,
+          "text": "Run one restore rehearsal against a throwaway database/bucket, then tear the drill down (a drill left running is a stale PII copy)."
         }
       ],
       "slices": [],
@@ -1856,41 +1986,48 @@
         "external_service"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/deploy/WO-07-runbook.md",
+          "ops/verify_deployment.sh",
+          "render.yaml"
+        ]
       },
       "acceptance": [
         {
-          "id": "AC-1",
-          "text": "Both secrets visible on the jobfinderos-api Environment page (sync:false values do not survive service recreation - re-check after any recreation).",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-1",
+          "text": "Both secrets visible on the jobfinderos-api Environment page (sync:false values do not survive service recreation - re-check after any recreation)."
         },
         {
-          "id": "AC-2",
-          "text": "ops/verify_deployment.sh passes 6/6 with PROBE_PASS set; APPLY_FROM_EMAIL confirmed as a Resend-VERIFIED sender via a real apply or the Resend sender list.",
           "check": {
-            "type": "command",
-            "ref": "PROBE_PASS=... bash ops/verify_deployment.sh"
-          }
+            "ref": "PROBE_PASS=... bash ops/verify_deployment.sh",
+            "type": "command"
+          },
+          "id": "AC-2",
+          "text": "ops/verify_deployment.sh passes 6/6 with PROBE_PASS set; APPLY_FROM_EMAIL confirmed as a Resend-VERIFIED sender via a real apply or the Resend sender list."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 5,
+        "size": "S",
         "wall_clock_min": 60
       },
       "owner_steps": [
         {
-          "text": "Check/set RESEND_API_KEY and APPLY_FROM_EMAIL in the Render dashboard (the repo cannot see dashboard-only secrets).",
-          "done": false
+          "done": false,
+          "text": "Check/set RESEND_API_KEY and APPLY_FROM_EMAIL in the Render dashboard (the repo cannot see dashboard-only secrets)."
         },
         {
-          "text": "Verify a real apply email leaves from the verified sender (the verifier can only prove the key is set).",
-          "done": false
+          "done": false,
+          "text": "Verify a real apply email leaves from the verified sender (the verifier can only prove the key is set)."
         }
       ],
       "slices": [],
@@ -1910,101 +2047,117 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/models/job.py",
+          "backend/app/services/matcher_service.py",
+          "backend/app/services/pipeline.py",
+          "backend/app/services/draft_service.py",
+          "backend/app/services/apply_service.py",
+          "backend/app/services/cv_service.py",
+          "backend/app/api/v1/*.py",
+          "backend/app/core/dedupe.py",
+          "backend/alembic/versions/*.py",
+          "backend/tests/**",
+          "frontend/src/lib/api.ts",
+          "frontend/src/i18n/*.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "creator-exemption + cross-user spend-leak tests (red-first)",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "REG3: job_postings gains created_by; the PIPE-16 scope gate exempts only the creator manual jobs - other users manual entries still never enter the AI window (the attempted-and-reverted exemption stays reverted until the column exists).",
-          "check": {
-            "type": "test",
-            "ref": "creator-exemption + cross-user spend-leak tests (red-first)"
-          }
+          "text": "REG3: job_postings gains created_by; the PIPE-16 scope gate exempts only the creator manual jobs - other users manual entries still never enter the AI window (the attempted-and-reverted exemption stays reverted until the column exists)."
         },
         {
+          "check": {
+            "ref": "scope-gate asymmetry test",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "REG2: the jobtech/radius carve-out no longer applies the reduced-radius predicate to all jobtech rows (remote/far jobtech rows respect the user scope).",
-          "check": {
-            "type": "test",
-            "ref": "scope-gate asymmetry test"
-          }
+          "text": "REG2: the jobtech/radius carve-out no longer applies the reduced-radius predicate to all jobtech rows (remote/far jobtech rows respect the user scope)."
         },
         {
+          "check": {
+            "ref": "attachment-pairing + stale-identity tests",
+            "type": "test"
+          },
           "id": "AC-3",
-          "text": "REG4/REG5: original-CV attachment pairs the draft snapshot bytes with the snapshot filename; a failed extraction on re-upload does not keep the previous CV identity fields unflagged (reply_to routing included).",
-          "check": {
-            "type": "test",
-            "ref": "attachment-pairing + stale-identity tests"
-          }
+          "text": "REG4/REG5: original-CV attachment pairs the draft snapshot bytes with the snapshot filename; a failed extraction on re-upload does not keep the previous CV identity fields unflagged (reply_to routing included)."
         },
         {
+          "check": {
+            "ref": "concurrent-retry + conflict-ordering tests",
+            "type": "test"
+          },
           "id": "AC-4",
-          "text": "REG6: retry_application uses the ready-to-sending atomic claim (two rapid retries cannot double-send); REG7: the hunt-conflict 409 surfaces as a clear message and the rate limit does not burn before the conflict check; REG8: the stranded-sending sweep cannot double-send after process death.",
-          "check": {
-            "type": "test",
-            "ref": "concurrent-retry + conflict-ordering tests"
-          }
+          "text": "REG6: retry_application uses the ready-to-sending atomic claim (two rapid retries cannot double-send); REG7: the hunt-conflict 409 surfaces as a clear message and the rate limit does not burn before the conflict check; REG8: the stranded-sending sweep cannot double-send after process death."
         },
         {
+          "check": {
+            "ref": "async-route test (existing harness)",
+            "type": "test"
+          },
           "id": "AC-5",
-          "text": "claim_hunt/release_hunt move into run_in_threadpool on the async hunt route (no event-loop blocking DB calls).",
-          "check": {
-            "type": "test",
-            "ref": "async-route test (existing harness)"
-          }
+          "text": "claim_hunt/release_hunt move into run_in_threadpool on the async hunt route (no event-loop blocking DB calls)."
         },
         {
-          "id": "AC-6",
-          "text": "A malformed tailor response auto-retries once before the draft lands failed (the AI-9 carry); the raise itself stays.",
           "check": {
-            "type": "test",
-            "ref": "tailor retry test (red-first)"
-          }
+            "ref": "tailor retry test (red-first)",
+            "type": "test"
+          },
+          "id": "AC-6",
+          "text": "A malformed tailor response auto-retries once before the draft lands failed (the AI-9 carry); the raise itself stays."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 90,
-        "wall_clock_min": 600
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [],
       "slices": [
         {
-          "id": "s1",
-          "text": "REG3 created_by column + creator-only scope exemption (REG2 with it)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "REG3 created_by column + creator-only scope exemption (REG2 with it)"
         },
         {
-          "id": "s2",
-          "text": "REG4/REG5 snapshot-identity fixes",
-          "status": "todo",
           "acceptance_ids": [
             "AC-3"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "REG4/REG5 snapshot-identity fixes"
         },
         {
-          "id": "s3",
-          "text": "REG6/REG7/REG8 send-path races",
-          "status": "todo",
           "acceptance_ids": [
             "AC-4"
-          ]
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "REG6/REG7/REG8 send-path races"
         },
         {
-          "id": "s4",
-          "text": "Threadpool claim/release + malformed-tailor retry",
-          "status": "todo",
           "acceptance_ids": [
             "AC-5",
             "AC-6"
-          ]
+          ],
+          "id": "s4",
+          "status": "todo",
+          "text": "Threadpool claim/release + malformed-tailor retry"
         }
       ],
       "attempts": []
@@ -2021,55 +2174,63 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "docs/i18n-full-platform.md",
+          "docs/PROJECT_INDEX.md",
+          "CLAUDE.md",
+          "README.md"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "The status tracker reflects shipped reality (phases 1-6 landed as PRs #120/#121); stale not-started rows corrected so sessions do not redo merged work.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "The status tracker reflects shipped reality (phases 1-6 landed as PRs #120/#121); stale not-started rows corrected so sessions do not redo merged work."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-2",
-          "text": "Owner decisions D1 (application language = ad language), D2 (verdicts in UI language), D3 (sv-SE date/number formatting) confirmed or rejected and recorded in the doc.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Owner decisions D1 (application language = ad language), D2 (verdicts in UI language), D3 (sv-SE date/number formatting) confirmed or rejected and recorded in the doc."
         },
         {
-          "id": "AC-3",
-          "text": "Phase-6 doc obligations closed: PROJECT_INDEX file map updated (dict namespaces, ui_language), README dual-language note, CLAUDE.md parity rule noted.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-3",
+          "text": "Phase-6 doc obligations closed: PROJECT_INDEX file map updated (dict namespaces, ui_language), README dual-language note, CLAUDE.md parity rule noted."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 15,
+        "size": "S",
         "wall_clock_min": 120
       },
       "owner_steps": [
         {
-          "text": "Confirm or reject D1/D2/D3 (they gate phase-3 semantics already partly shipped).",
-          "done": false
+          "done": false,
+          "text": "Confirm or reject D1/D2/D3 (they gate phase-3 semantics already partly shipped)."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Update tracker + record decisions + phase-6 doc updates",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Update tracker + record decisions + phase-6 doc updates"
         }
       ],
       "attempts": []
@@ -2087,65 +2248,79 @@
         "privacy"
       ],
       "gates": {
-        "spec_approval": true,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/api/v1/*.py",
+          "backend/app/core/config.py",
+          "backend/app/core/ratelimit.py",
+          "backend/app/models/*.py",
+          "backend/app/services/metrics*.py",
+          "backend/alembic/versions/*.py",
+          "backend/tests/**",
+          "frontend/src/app/login/page.tsx",
+          "frontend/src/app/page.tsx",
+          "frontend/src/i18n/*.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "signup-cap server-side test (abuse simulation)",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "A hard signup cap exists behind a waitlist counter (50 seats, then a queue), enforced server-side - a viral post cannot create unpayable AI spend; the cap copy is honest (I can afford 50 people right now).",
-          "check": {
-            "type": "test",
-            "ref": "signup-cap server-side test (abuse simulation)"
-          }
+          "text": "A hard signup cap exists behind a waitlist counter (50 seats, then a queue), enforced server-side - a viral post cannot create unpayable AI spend; the cap copy is honest (I can afford 50 people right now)."
         },
         {
+          "check": {
+            "ref": "metrics aggregation tests over seeded rows",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "PRD metrics instrumented and queryable: approval rate (target 15-40%), draft acceptance, time to first value - the launch teaches something.",
-          "check": {
-            "type": "test",
-            "ref": "metrics aggregation tests over seeded rows"
-          }
+          "text": "PRD metrics instrumented and queryable: approval rate (target 15-40%), draft acceptance, time to first value - the launch teaches something."
         },
         {
-          "id": "AC-3",
-          "text": "Cap and waitlist verified on production before any outreach link is posted.",
           "check": {
-            "type": "prod_probe",
-            "ref": "production signup flow at the cap boundary"
-          }
+            "ref": "production signup flow at the cap boundary",
+            "type": "prod_probe"
+          },
+          "id": "AC-3",
+          "text": "Cap and waitlist verified on production before any outreach link is posted."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 70,
-        "wall_clock_min": 480
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Set the cap number (default 50) and approve the waitlist copy before ship.",
-          "done": false
+          "done": false,
+          "text": "Set the cap number (default 50) and approve the waitlist copy before ship."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Server-side signup cap + waitlist surface (EN+SV)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-3"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Server-side signup cap + waitlist surface (EN+SV)"
         },
         {
-          "id": "s2",
-          "text": "PRD metrics instrumentation + query surface",
-          "status": "todo",
           "acceptance_ids": [
             "AC-2"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "PRD metrics instrumentation + query surface"
         }
       ],
       "attempts": []
@@ -2163,75 +2338,83 @@
         "safety"
       ],
       "gates": {
-        "spec_approval": true,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "frontend/src/app/**",
+          "frontend/src/components/**",
+          "frontend/src/i18n/*.ts",
+          "docs/marketing/competitive-positioning.md"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "Every figure re-verified at source on publication day; each claim linked and date-stamped; stale figures removed rather than padded (the docs warn these have a shelf life).",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Every figure re-verified at source on publication day; each claim linked and date-stamped; stale figures removed rather than padded (the docs warn these have a shelf life)."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-2",
-          "text": "Competing interest disclosed in the first paragraph; only what public review platforms/BBB records document; reviewer-reported behaviour, not concluded intent; AI-resume stats cited as claims with sources (Forbes preferred).",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Competing interest disclosed in the first paragraph; only what public review platforms/BBB records document; reviewer-reported behaviour, not concluded intent; AI-resume stats cited as claims with sources (Forbes preferred)."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-3",
-          "text": "No competitor name-with-score on our own product surfaces (the competitive-positioning rule holds); the EU comparative-advertising caution is noted for the legal hour.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "No competitor name-with-score on our own product surfaces (the competitive-positioning rule holds); the EU comparative-advertising caution is noted for the legal hour."
         },
         {
-          "id": "AC-4",
-          "text": "Page live on the domain and reachable; the owner has signed off on the final text before publish.",
           "check": {
-            "type": "prod_probe",
-            "ref": "published URL returns 200 with the dated comparison"
-          }
+            "ref": "published URL returns 200 with the dated comparison",
+            "type": "prod_probe"
+          },
+          "id": "AC-4",
+          "text": "Page live on the domain and reachable; the owner has signed off on the final text before publish."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 2,
         "max_turns": 60,
-        "wall_clock_min": 480
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Legal-hour question: confirm the comparative-advertising posture before publishing claims about named companies.",
-          "done": false
+          "done": false,
+          "text": "Legal-hour question: confirm the comparative-advertising posture before publishing claims about named companies."
         },
         {
-          "text": "Sign off the final page text before it goes live.",
-          "done": false
+          "done": false,
+          "text": "Sign off the final page text before it goes live."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "Re-verify all figures at source + draft the public page (disclosure, date-stamp, links)",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Re-verify all figures at source + draft the public page (disclosure, date-stamp, links)"
         },
         {
-          "id": "s2",
-          "text": "Publish + verify",
-          "status": "todo",
           "acceptance_ids": [
             "AC-4"
-          ]
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Publish + verify"
         }
       ],
       "attempts": []
@@ -2248,51 +2431,56 @@
         "external_service"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/marketing/fb-content/**"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "Every group has its rules checked and, where required, the admin DM sent BEFORE its first post; the calendar remaining posts go out per the weekly rhythm (max 1-2 posts/day across all groups, never identical text in two groups).",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Every group has its rules checked and, where required, the admin DM sent BEFORE its first post; the calendar remaining posts go out per the weekly rhythm (max 1-2 posts/day across all groups, never identical text in two groups)."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-2",
-          "text": "Every VERIFY-flagged item (LAS, kollektivavtal, a-kassa, UK notice/probation rules) re-checked at source in the posting month - no number or rule posted unverified.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Every VERIFY-flagged item (LAS, kollektivavtal, a-kassa, UK notice/probation rules) re-checked at source in the posting month - no number or rule posted unverified."
         },
         {
-          "id": "AC-3",
-          "text": "Every posted item logged in TRACKER.md (date, group, post, engagement, admin contacts) and every real comment question harvested into the BACKLOG.md fill-first queue.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-3",
+          "text": "Every posted item logged in TRACKER.md (date, group, post, engagement, admin contacts) and every real comment question harvested into the BACKLOG.md fill-first queue."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 1,
         "max_turns": 10,
+        "size": "M",
         "wall_clock_min": 120
       },
       "owner_steps": [
         {
-          "text": "Check rules + send admin DMs for the groups still marked unknown in TRACKER.md before their first post.",
-          "done": false
+          "done": false,
+          "text": "Check rules + send admin DMs for the groups still marked unknown in TRACKER.md before their first post."
         },
         {
-          "text": "Post the calendar remaining value posts (Anthony reviews and posts manually - nothing auto-posts).",
-          "done": false
+          "done": false,
+          "text": "Post the calendar remaining value posts (Anthony reviews and posts manually - nothing auto-posts)."
         },
         {
-          "text": "Log results in TRACKER.md and harvest comment questions into BACKLOG.md after each posting day.",
-          "done": false
+          "done": false,
+          "text": "Log results in TRACKER.md and harvest comment questions into BACKLOG.md after each posting day."
         }
       ],
       "slices": [],
@@ -2312,62 +2500,67 @@
         "external_service"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/marketing/launch-plan.md"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "Lexicon cohort demo done while the cohort is still gathered (it expires); target 20-40 beta users whose approval-rate numbers give the first read on whether the scoring bar is set right.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Lexicon cohort demo done while the cohort is still gathered (it expires); target 20-40 beta users whose approval-rate numbers give the first read on whether the scoring bar is set right."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-2",
-          "text": "Weekly public hunt log posting on LinkedIn (SE + EN) including the scorer misses - publishing the misses is what makes it credible.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Weekly public hunt log posting on LinkedIn (SE + EN) including the scorer misses - publishing the misses is what makes it credible."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-3",
-          "text": "Foo Cafe talk submitted (I read every one-star review of every AI job-application tool); union/local press pitches (Kollega, Ingenjoren, Sydsvenskan, Rapidus) sent - story first, product last.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Foo Cafe talk submitted (I read every one-star review of every AI job-application tool); union/local press pitches (Kollega, Ingenjoren, Sydsvenskan, Rapidus) sent - story first, product last."
         },
         {
-          "id": "AC-4",
-          "text": "UK Reddit participation follows the 90/10 + disclosure rules with several weeks of genuine participation before any own post; Swedish effort goes to Facebook groups via admins, not r/sweden.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-4",
+          "text": "UK Reddit participation follows the 90/10 + disclosure rules with several weeks of genuine participation before any own post; Swedish effort goes to Facebook groups via admins, not r/sweden."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 1,
         "max_turns": 10,
+        "size": "M",
         "wall_clock_min": 120
       },
       "owner_steps": [
         {
-          "text": "Book the cohort session / alumni channel slot and run the live demo.",
-          "done": false
+          "done": false,
+          "text": "Book the cohort session / alumni channel slot and run the live demo."
         },
         {
-          "text": "Start the weekly LinkedIn hunt log.",
-          "done": false
+          "done": false,
+          "text": "Start the weekly LinkedIn hunt log."
         },
         {
-          "text": "Submit the Foo Cafe talk; draft the press pitches.",
-          "done": false
+          "done": false,
+          "text": "Submit the Foo Cafe talk; draft the press pitches."
         },
         {
-          "text": "Begin UK Reddit participation from the personal account with affiliation disclosed.",
-          "done": false
+          "done": false,
+          "text": "Begin UK Reddit participation from the personal account with affiliation disclosed."
         }
       ],
       "slices": [],
@@ -2385,36 +2578,41 @@
         "privacy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/research/**"
+        ]
       },
       "acceptance": [
         {
-          "id": "AC-1",
-          "text": "The current published Arbetsforordningen/Arbetsformedlingen requirements for the aktivitetsrapport (format, fields, cadence, submission channel) verified at source and written up with links and a date.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-1",
+          "text": "The current published Arbetsforordningen/Arbetsformedlingen requirements for the aktivitetsrapport (format, fields, cadence, submission channel) verified at source and written up with links and a date."
         },
         {
-          "id": "AC-2",
-          "text": "A build/no-build recommendation recorded: what an export from the existing applications table would need, and the institutional-distribution angle (a-kassor/unions) assessed.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-2",
+          "text": "A build/no-build recommendation recorded: what an export from the existing applications table would need, and the institutional-distribution angle (a-kassor/unions) assessed."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 15,
-        "wall_clock_min": 180
+        "size": "S",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Owner reads the research and decides whether the export becomes a WO.",
-          "done": false
+          "done": false,
+          "text": "Owner reads the research and decides whether the export becomes a WO."
         }
       ],
       "slices": [],
@@ -2433,43 +2631,49 @@
         "privacy"
       ],
       "gates": {
-        "spec_approval": false,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/sources/fantastic-jobs-future-note.md",
+          "docs/research/**"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-1",
-          "text": "Trigger check written down first: UK user growth, or users reporting jobs we miss on career pages/LinkedIn, or ~50-100 paying users - do not buy before a trigger fires.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Trigger check written down first: UK user growth, or users reporting jobs we miss on career pages/LinkedIn, or ~50-100 paying users - do not buy before a trigger fires."
         },
         {
+          "check": {
+            "type": "manual"
+          },
           "id": "AC-2",
-          "text": "Scoped volume sized via the free count endpoints (/active-ats-count, /active-jb-count with our real Malmo/Lund + UK filters) and priced against the margin model; the credit traps (per-returned-job credits, union-scope ingestion, UK enterprise tier) addressed in the sizing.",
-          "check": {
-            "type": "manual"
-          }
+          "text": "Scoped volume sized via the free count endpoints (/active-ats-count, /active-jb-count with our real Malmo/Lund + UK filters) and priced against the margin model; the credit traps (per-returned-job credits, union-scope ingestion, UK enterprise tier) addressed in the sizing."
         },
         {
-          "id": "AC-3",
-          "text": "Brand-promise tension resolved consciously: ATS-feed-only vs ToS vetting vs amending the official-public-data line; the Phase-1 direct public ATS adapters option costed alongside.",
           "check": {
             "type": "manual"
-          }
+          },
+          "id": "AC-3",
+          "text": "Brand-promise tension resolved consciously: ATS-feed-only vs ToS vetting vs amending the official-public-data line; the Phase-1 direct public ATS adapters option costed alongside."
         }
       ],
       "budget": {
-        "size": "S",
         "max_attempts": 1,
         "max_turns": 20,
-        "wall_clock_min": 180
+        "size": "S",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Owner decides adopt/defer after the sizing lands.",
-          "done": false
+          "done": false,
+          "text": "Owner decides adopt/defer after the sizing lands."
         }
       ],
       "slices": [],
@@ -2490,62 +2694,352 @@
         "deploy"
       ],
       "gates": {
-        "spec_approval": true,
+        "deploy": "human",
         "merge": "human",
-        "deploy": "human"
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/api/v1/applications.py",
+          "backend/app/services/apply_service.py",
+          "backend/app/services/composio_service.py",
+          "backend/app/models/application.py",
+          "backend/app/schemas/application.py",
+          "backend/tests/**",
+          "frontend/src/app/app/page.tsx",
+          "frontend/src/i18n/*.ts"
+        ]
       },
       "acceptance": [
         {
+          "check": {
+            "ref": "submit-method gate test (TestOutboundIdentity pattern)",
+            "type": "test"
+          },
           "id": "AC-1",
-          "text": "A user with a connected Composio Gmail entity can submit an approved draft from their own address as a new application method; nothing sends without the existing approval gates (PRD rule 1).",
-          "check": {
-            "type": "test",
-            "ref": "submit-method gate test (TestOutboundIdentity pattern)"
-          }
+          "text": "A user with a connected Composio Gmail entity can submit an approved draft from their own address as a new application method; nothing sends without the existing approval gates (PRD rule 1)."
         },
         {
+          "check": {
+            "ref": "cross-tenant + degradation tests",
+            "type": "test"
+          },
           "id": "AC-2",
-          "text": "Two-tenant trap: user A Gmail connection can never send user B draft; disconnection degrades to the existing email/manual paths, never a silent failure.",
-          "check": {
-            "type": "test",
-            "ref": "cross-tenant + degradation tests"
-          }
+          "text": "Two-tenant trap: user A Gmail connection can never send user B draft; disconnection degrades to the existing email/manual paths, never a silent failure."
         },
         {
-          "id": "AC-3",
-          "text": "Reply coverage: replies already land in the user inbox via reply_to - the outcome layer scan path works unchanged for Gmail-sent mail (one integration test).",
           "check": {
-            "type": "test",
-            "ref": "outcome-scan integration test for the new method"
-          }
+            "ref": "outcome-scan integration test for the new method",
+            "type": "test"
+          },
+          "id": "AC-3",
+          "text": "Reply coverage: replies already land in the user inbox via reply_to - the outcome layer scan path works unchanged for Gmail-sent mail (one integration test)."
         }
       ],
       "budget": {
-        "size": "M",
         "max_attempts": 3,
         "max_turns": 70,
-        "wall_clock_min": 480
+        "size": "M",
+        "wall_clock_min": 150
       },
       "owner_steps": [
         {
-          "text": "Approve writing the dispatch path (tracked outside the queue in the CLAUDE.md open items; the Composio connection is proven in production 2026-08-31).",
-          "done": false
+          "done": false,
+          "text": "Approve writing the dispatch path (tracked outside the queue in the CLAUDE.md open items; the Composio connection is proven in production 2026-08-31)."
         }
       ],
       "slices": [
         {
-          "id": "s1",
-          "text": "New submit method via Composio Gmail send behind the approval gates + tenant/degradation tests",
-          "status": "todo",
           "acceptance_ids": [
             "AC-1",
             "AC-2",
             "AC-3"
-          ]
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "New submit method via Composio Gmail send behind the approval gates + tenant/degradation tests"
         }
       ],
       "attempts": []
+    },
+    {
+      "id": "wo31-d1b-mistral-eu-recalibration-flip",
+      "status": "draft",
+      "title": "MIG-WO5 / WO-31 D1(b): flip AI inference to the Mistral EU endpoint as its own recalibration work order",
+      "source": "docs/work-orders/WO-31-ai-capacity.md#provider-and-plan-decision-inputs-d1",
+      "kind": "build",
+      "priority": "P3",
+      "depends_on": [
+        "gdpr-ai-residency-decision"
+      ],
+      "risk": [
+        "privacy",
+        "external_service",
+        "deploy"
+      ],
+      "gates": {
+        "deploy": "human",
+        "merge": "human",
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/app/core/config.py",
+          "backend/app/services/ai_service.py",
+          "backend/scripts/rescore_backlog.py",
+          "backend/tests/test_calibration.py",
+          "docs/data-flow.md",
+          "docs/work-orders/WO-31-ai-capacity.md",
+          "frontend/src/components/PrivacyNotice.tsx",
+          "frontend/src/components/PrivacyView.tsx",
+          "frontend/src/i18n/*.ts",
+          "frontend/src/app/page.tsx"
+        ]
+      },
+      "acceptance": [
+        {
+          "check": {
+            "ref": "Render boot logs for jobfinderos-api and jobfinderos-hunt (endpoint host printed)",
+            "type": "prod_probe"
+          },
+          "id": "AC-1",
+          "text": "AI inference runs on the Mistral EU endpoint (api.eu.mistral.ai, GLM-5.2) on BOTH services; the tier_not_allowed unlock status is probed and the result recorded before the flip."
+        },
+        {
+          "check": {
+            "ref": "test_calibration prompt pin + rescore_backlog.py --prompt-version runbook",
+            "type": "test"
+          },
+          "id": "AC-2",
+          "text": "A new prompt version is minted, the scratchpad variance/SD is re-measured, and the backlog is re-scored with rescore_backlog.py --prompt-version; scores from the two providers are never mixed in one queue."
+        },
+        {
+          "check": {
+            "type": "manual"
+          },
+          "id": "AC-3",
+          "text": "Mistral DPA signed and the inference region confirmed in writing; docs/data-flow.md processor register updated (Mistral in, Z.ai retired) and the transfer-trap wording checked."
+        },
+        {
+          "check": {
+            "type": "manual"
+          },
+          "id": "AC-4",
+          "text": "Privacy notice section 5 beta note flipped and the EU-processing claim surfaced on the landing trust line only after data-flow checklist items 1, 2 and 5 hold."
+        }
+      ],
+      "budget": {
+        "max_attempts": 3,
+        "max_turns": 80,
+        "size": "M",
+        "wall_clock_min": 150
+      },
+      "owner_steps": [
+        {
+          "done": false,
+          "text": "Pick the trigger moment for the flip (beta ends / GDPR posture goes live) per WO-31 decision D1(b)."
+        },
+        {
+          "done": false,
+          "text": "Sign the Mistral DPA and obtain the written inference-region confirmation."
+        }
+      ],
+      "slices": [
+        {
+          "acceptance_ids": [
+            "AC-1"
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "Endpoint swap on both services + tier-unlock probe"
+        },
+        {
+          "acceptance_ids": [
+            "AC-2"
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "Recalibration: new prompt version, SD re-measurement, backlog re-score"
+        },
+        {
+          "acceptance_ids": [
+            "AC-3",
+            "AC-4"
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "DPA / data-flow register / privacy-notice closure"
+        }
+      ],
+      "attempts": []
+    },
+    {
+      "id": "i18n-phase3-ai-output-language",
+      "status": "draft",
+      "title": "i18n phases 3 + 5: AI output language (profiles.ui_language + SV prompts) and the client-side backend-error map",
+      "source": "docs/i18n-full-platform.md#phase-3--ai-output-language-1-day-d1d2-gate-parts",
+      "kind": "build",
+      "priority": "P3",
+      "depends_on": [
+        "i18n-plan-closeout"
+      ],
+      "risk": [
+        "migration",
+        "deploy"
+      ],
+      "gates": {
+        "deploy": "human",
+        "merge": "human",
+        "spec_approval": true
+      },
+      "scope": {
+        "paths": [
+          "backend/alembic/versions/*.py",
+          "backend/app/models/profile.py",
+          "backend/app/schemas/profile.py",
+          "backend/app/api/v1/profiles.py",
+          "backend/app/services/ai_service.py",
+          "backend/app/services/draft_service.py",
+          "backend/app/services/onboarding_service.py",
+          "backend/tests/**",
+          "frontend/src/lib/api.ts",
+          "frontend/src/components/OnboardingWizard.tsx",
+          "frontend/src/components/Sidebar.tsx",
+          "frontend/src/app/app/page.tsx",
+          "frontend/src/i18n/*.ts"
+        ]
+      },
+      "acceptance": [
+        {
+          "check": {
+            "ref": "migration round-trip (sqlite+postgres CI legs) + profile save/update tests",
+            "type": "test"
+          },
+          "id": "AC-1",
+          "text": "profiles.ui_language ('en' | 'sv', default 'en', nullable-safe) migration + model field lands; onboarding saves it from the wizard locale and PUT /profile/me updates it for future runs; upgrade/downgrade verified on both CI legs."
+        },
+        {
+          "check": {
+            "ref": "prompt-construction tests + one GLM-mocked round-trip per language",
+            "type": "test"
+          },
+          "id": "AC-2",
+          "text": "ai_service verdict and suggestion prompts render reasoning/have/missing/why-lines in ui_language (scores and tiers stay language-free); draft_service writes the tailored CV + cover letter per D1 (language of the job ad) and the fabrication-guard findings follow the draft language."
+        },
+        {
+          "check": {
+            "ref": "matcher_service diff proof + no-rescore assertion in tests",
+            "type": "test"
+          },
+          "id": "AC-3",
+          "text": "No logic change in matcher_service and no re-scoring of existing matches - stored reasoning stays as shipped (existing data is never re-translated)."
+        },
+        {
+          "check": {
+            "ref": "apiErrorMessage EN-to-SV map test with a forced 429",
+            "type": "test"
+          },
+          "id": "AC-4",
+          "text": "Phase 5: lib/api.ts apiErrorMessage maps the finite known backend messages (rate limits, beta gate, CV validation, draft/guard) EN-to-SV when locale is sv; unknown messages pass through raw, never blank; dict entries land under both languages."
+        },
+        {
+          "check": {
+            "ref": "jobfinderos.com production: SV account hunt + Swedish-ad approval",
+            "type": "prod_probe"
+          },
+          "id": "AC-5",
+          "text": "Post-deploy on production: an SV account runs a hunt and sees Swedish verdicts; approving a Swedish ad produces a Swedish cover letter."
+        }
+      ],
+      "budget": {
+        "max_attempts": 3,
+        "max_turns": 80,
+        "size": "M",
+        "wall_clock_min": 150
+      },
+      "owner_steps": [
+        {
+          "done": false,
+          "text": "Confirm D1/D2/D3 via i18n-plan-closeout before this merges - phase 3 semantics are gated on them."
+        }
+      ],
+      "slices": [
+        {
+          "acceptance_ids": [
+            "AC-1"
+          ],
+          "id": "s1",
+          "status": "todo",
+          "text": "ui_language migration + wizard/toggle plumbing (phase 3 backend)"
+        },
+        {
+          "acceptance_ids": [
+            "AC-2",
+            "AC-3",
+            "AC-5"
+          ],
+          "id": "s2",
+          "status": "todo",
+          "text": "ai_service/draft_service prompts per D1/D2 + prod verification"
+        },
+        {
+          "acceptance_ids": [
+            "AC-4"
+          ],
+          "id": "s3",
+          "status": "todo",
+          "text": "Phase 5 client-side backend-error string map"
+        }
+      ],
+      "attempts": []
+    },
+    {
+      "id": "feedback-email-residency-decision",
+      "status": "draft",
+      "title": "Decision: feedback-email residency - EU SMTP route or disclose the Resend (US) transfer in the privacy notice",
+      "source": "docs/data-flow.md#candidate-data-flow-end-to-end",
+      "kind": "decision",
+      "priority": "P3",
+      "depends_on": [],
+      "risk": [
+        "privacy"
+      ],
+      "gates": {
+        "deploy": "human",
+        "merge": "human",
+        "spec_approval": false
+      },
+      "scope": {
+        "paths": [
+          "docs/data-flow.md",
+          "frontend/src/components/PrivacyNotice.tsx",
+          "frontend/src/i18n/*.ts"
+        ]
+      },
+      "acceptance": [
+        {
+          "check": {
+            "type": "manual"
+          },
+          "id": "AC-1",
+          "text": "A recorded decision for the owner-feedback notification path: route owner notifications through an EU SMTP provider OR add the Resend (US) transfer to the privacy notice; the decision is recorded in docs/data-flow.md and the register row's status flips from 'verify/decide' to decided (the flow carries account email + feedback text, never CV content)."
+        }
+      ],
+      "budget": {
+        "max_attempts": 1,
+        "max_turns": 10,
+        "size": "S",
+        "wall_clock_min": 60
+      },
+      "owner_steps": [
+        {
+          "done": false,
+          "text": "Decide EU SMTP route vs privacy-notice disclosure for the Resend feedback notification and record it in docs/data-flow.md."
+        }
+      ],
+      "slices": [],
+      "attempts": []
     }
   ],
-  "updated_at": "2026-11-05T12:09:09Z"
+  "updated_at": "2026-11-11T16:58:30Z"
 }
