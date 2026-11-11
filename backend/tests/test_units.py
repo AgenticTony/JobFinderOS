@@ -5539,3 +5539,60 @@ class TestWO19EligibilityLexicon:
 
         line = work_rights_line("prefer_not_say", None)
         assert "Never assert" in line
+
+
+class TestLockMeetsRequirementFloors:
+    """requirements.txt floors must be met by requirements.lock — the file
+    production installs. Without this, a floor-only bump (the Dependabot
+    shape) goes green in CI, which installs the lock, while production
+    keeps running the older pin the floor claims to exclude."""
+
+    @staticmethod
+    def _check():
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parent.parent / "scripts" / "check_dev_lock.py"
+        spec = importlib.util.spec_from_file_location("check_dev_lock", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _problems(self, tmp_path, requirements, lock):
+        req = tmp_path / "requirements.txt"
+        req.write_text(requirements)
+        return self._check().unmet_floors(req, lock)
+
+    def test_floor_above_the_locked_pin_is_drift(self, tmp_path):
+        problems = self._problems(
+            tmp_path, "fastapi>=0.143.3\n", {"fastapi": "0.141.1"})
+        assert len(problems) == 1 and "fastapi" in problems[0], (
+            "a floor the lock does not meet passed — production would run "
+            f"0.141.1 under a requirements.txt that excludes it ({problems})")
+
+    def test_met_floor_and_name_normalisation_pass(self, tmp_path):
+        problems = self._problems(
+            tmp_path,
+            "# comment\npsycopg[binary]>=3.3.4  # driver\nPyJWT>=2.15.1\n"
+            "python_dotenv>=1.2.3\nsentry-sdk>=2.0\n",
+            {"psycopg": "3.3.6", "pyjwt": "2.15.1", "python-dotenv": "1.2.3",
+             "sentry-sdk": "2.40.0"})
+        assert problems == [], problems
+
+    def test_numeric_not_lexical_comparison(self, tmp_path):
+        assert self._problems(tmp_path, "x>=0.9\n", {"x": "0.10"}) == []
+        assert self._problems(tmp_path, "x>=0.10\n", {"x": "0.9"}) != []
+
+    def test_missing_pin_and_unsupported_specifier_fail_closed(self, tmp_path):
+        assert self._problems(tmp_path, "absent>=1.0\n", {}) != []
+        assert self._problems(tmp_path, "x~=1.0\n", {"x": "1.0"}) != [], (
+            "a specifier the check cannot evaluate must fail, not pass")
+        assert self._problems(tmp_path, "x>=1.0rc1\n", {"x": "1.0"}) != []
+
+    def test_the_real_files_agree(self):
+        from pathlib import Path
+
+        mod = self._check()
+        backend = Path(__file__).resolve().parent.parent
+        assert mod.unmet_floors(backend / "requirements.txt",
+                                mod.pins(backend / "requirements.lock")) == []
