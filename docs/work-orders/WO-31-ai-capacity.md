@@ -2,7 +2,8 @@
 
 > Priority: **P0** (phase A is beta-safe now; phase B is the post-beta launch prerequisite) · Depends on: PR #132 ✅
 > (in-process `AICallGate`, interactive 429 retry, zero-token 429 rows) ·
-> Status: **design + measurements only (2026-10-16); build waits for owner approval**
+> Status: **phase A step 1 EXECUTED 2026-10-16 (PR #135 — see execution record);
+> steps 2–5 and phase B open**
 > Origin: 2026-10-16 beta day, the first real multi-user load (3 signups).
 > Rationale owners: AI config → `ARCHITECTURE.md`/`CLAUDE.md` "AI setup";
 > residency → `MIGRATION.md` MIG-WO5; trial economics → WO-14 / WO-16.
@@ -554,7 +555,8 @@ reached which call (standard #2, TestOutboundIdentity pattern).
    extract and suggest enqueue, plus the queued UX in EN+SV, plus the
    fake client (L1). Tests: T2–T2e, T3. This is the owner's "never
    crash, queue it" requirement, and it ships first because beta users
-   hit it today.
+   hit it today. **EXECUTED 2026-10-16 — PR #135 (5f3e659), see the
+   execution record.**
 2. ai_usage observability columns + `SENTRY_DSN` + alerts (§4). We need
    to see before we change anything.
 3. Matching moves onto `ai_jobs`: the cron and the Hunt route become
@@ -606,3 +608,32 @@ reached which call (standard #2, TestOutboundIdentity pattern).
 
 All pages were retrieved 2026-10-16. Neither Z.ai nor Mistral publishes
 numeric API rate limits, which is why L3 exists.
+
+## Execution record — phase A step 1 (2026-10-16)
+
+**Shipped** via PR #135 (merge 5f3e659, 2026-10-16 21:15): the durable
+`ai_jobs` queue + single drainer in the API process for the interactive
+kinds (tailor, recheck, extract, suggest), the queued UX copy in EN+SV,
+and the L1 fake provider.
+
+- `02edaa5` feat(ai): durable ai_jobs queue + drainer (interactive kinds)
+- `5cd8891` test(ai): queue tests T2–T2d, T3 + fake provider; GDPR erase
+  of ai_jobs on account delete — on main as
+  `backend/tests/test_ai_queue.py` (TestLoadNeverFailsTheDraft = T2a,
+  TestRestartMidQueue = T2b, TestIdempotency = T2c,
+  TestExtractAndSuggestQueued = T2d, TestRecheckQueued,
+  TestOutboundIdentityQueued, TestPriority, TestDrainerThread;
+  retry-after → `next_attempt_at` = T3) and `backend/tests/fakes/fake_ai.py`
+- `903dc4d` feat(ui): queued/running copy for drafts, CV upload and
+  wizard suggestions (EN+SV)
+- Deploy unblocked after merge: `c355e3b` (#137) — ensure_rls locks only
+  tables that lack RLS; `23cb727` — no transaction stays open while the
+  app waits on slow work
+
+T2e (EN+SV parity of the queued strings) is enforced structurally: the
+strings landed in `frontend/src/i18n/console.ts` + `wizard.ts`, where
+the `sv: typeof en` type constraint makes a missing key a build failure
+(the i18n doc's standing rule); `903dc4d` itself landed no test files. **Not part of this
+record:** build-order steps 2–5 (observability columns, matching on
+ai_jobs / T1 / T7–T9 / T11 / L2 harness, admission, stage 1) and all of
+phase B — none of their tests or columns are on main.

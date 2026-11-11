@@ -1,5 +1,16 @@
 # Full-Platform Dual Language (EN/SV) — Execution Plan
 
+**Status (recorded 2026-11-11):** phases 1–2 and the privacy notice are
+SHIPPED — PR #120 (console, wizard, privacy; merged 2026-10-13) and
+PR #121 (landing/login toggle above the fold) — and deployed: WO-28's
+execution record verifies production on jobfinderos.com + /sv
+(2026-10-15). **Phase 3 (server-side language — D1–D3, the
+`profiles.ui_language` migration, SV prompts in ai_service/
+draft_service) is NOT built:** `ui_language` appears nowhere under
+`backend/` on main. The checkboxes below remain live state for phase 3
+and the closeout items that depend on it; the phase 1–2 boxes are
+satisfied by #120/#121 (tick on next touch — each names its file).
+
 **Created:** 2026-09-02 · **Owner decision:** the whole platform goes
 bilingual, not just the marketing surface.
 **Purpose of this doc:** the single source of truth for this effort.
