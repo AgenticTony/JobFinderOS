@@ -275,8 +275,8 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   stamp_alembic_head apply it — create_all-built schemas skip
   migrations). Trap test (Postgres-only): unscoped SELECT in a no-sub
   request session returns ZERO rows; listener removal leaks
-  (revert-checked). Landing is gated on the MIG-WO2 live cutover (RLS
-  keys on Supabase UUIDs).
+  (revert-checked). Landing was gated on the MIG-WO2 live cutover
+  (EXECUTED 2026-09-09; RLS keys on Supabase UUIDs).
 
 ## Production infrastructure
 
