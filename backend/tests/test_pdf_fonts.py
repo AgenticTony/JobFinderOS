@@ -28,6 +28,7 @@ import pathlib
 
 import pdfplumber
 import pytest
+from pypdf import PdfReader
 
 from app.services import pdf_service
 
@@ -44,6 +45,14 @@ SWEDISH = "åäö ÅÄÖ"
 def _extract(pdf_bytes: bytes) -> str:
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+
+def _extract_pypdf(pdf_bytes: bytes) -> str:
+    """WO-21: extract the way an ATS parser and the runtime check do —
+    pypdf, all pages. Assertions in this file run against BOTH readers so
+    a regression that only one of them sees cannot slip through."""
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
 # ---------- font-fallback logic (runs identically everywhere) ----------
@@ -110,6 +119,42 @@ def test_pdf_render_preserves_curly_typography():
         for ch in ("\u2014", "\u2019", "\u201c", "\u201d", "å", "ä", "ö"):
             assert ch in extracted, (render.__name__, ch, repr(extracted))
         assert "?" not in extracted, repr(extracted)
+        # WO-21: the same document must survive the ATS-side read — a
+        # minimum character count and a known phrase from the source text
+        # (em-dash included), extracted with pypdf and asserted, never
+        # merely warned.
+        via_pypdf = _extract_pypdf(render(CURLY + "\n" + SWEDISH, "Test Candidate"))
+        assert len(via_pypdf.strip()) >= 100, (render.__name__, repr(via_pypdf))
+        assert "truly \u2014 about the role" in via_pypdf, repr(via_pypdf)
+        assert SWEDISH in via_pypdf, repr(via_pypdf)
+
+
+def test_pdf_round_trip_non_ascii_name_extracts_cleanly():
+    """WO-21: the non-ascii applicant name survives the round trip.
+
+    The name is what an ATS matches the document against \u2014 a text
+    layer that mangles \u00c5/\u00e4/\u00fc turns "\u00c5sa M\u00fcll\u00e9r-Lindqvist"
+    into an unmatchable candidate. Minimum char count + a known phrase +
+    every part of the name, extracted with pypdf and asserted. Runs
+    wherever a TTF candidate exists (the same shape the curly-typography
+    round trip covers on this machine and on the ubuntu CI runner).
+    """
+    if pdf_service._resolve_unicode_font() is None:
+        pytest.skip("no unicode TTF candidate on this machine")
+    name = "Åsa Müllér-Lindqvist"
+    body = (
+        "Hej!\n"
+        "Jag söker den backendutvecklarroll som finns i Malmö — med åäö "
+        "och utländsk typografi (â, ü) i texten.\n"
+        "PROFESSIONELL SAMMANFATTNING\n"
+        "- Python och FastAPI i daglig produktion\n"
+    )
+    for render in (pdf_service.cover_letter_pdf, pdf_service.tailored_cv_pdf):
+        extracted = _extract_pypdf(render(body, name))
+        assert len(extracted.strip()) >= 100, (render.__name__, repr(extracted))
+        assert "backendutvecklarroll" in extracted, repr(extracted)
+        for part in name.split():
+            assert part in extracted, (render.__name__, part, repr(extracted))
 
 
 # ---------- code <-> image contract (guards the fix's wiring) ----------
