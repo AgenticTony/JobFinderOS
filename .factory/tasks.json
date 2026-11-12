@@ -812,7 +812,8 @@
       "risk": [
         "new_dependency",
         "safety",
-        "deploy"
+        "deploy",
+        "external_service"
       ],
       "gates": {
         "deploy": "human",
@@ -885,7 +886,13 @@
           "text": "pypdf dependency + test-time extraction assertions + runtime send-block"
         }
       ],
-      "attempts": []
+      "attempts": [],
+      "dependencies": [
+        {
+          "ecosystem": "pypi",
+          "name": "pypdf"
+        }
+      ]
     },
     {
       "id": "wo22-apply-link-recovery",
