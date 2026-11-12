@@ -136,11 +136,16 @@ def test_pdf_round_trip_non_ascii_name_extracts_cleanly():
     layer that mangles \u00c5/\u00e4/\u00fc turns "\u00c5sa M\u00fcll\u00e9r-Lindqvist"
     into an unmatchable candidate. Minimum char count + a known phrase +
     every part of the name, extracted with pypdf and asserted. Runs
-    wherever a TTF candidate exists (the same shape the curly-typography
-    round trip covers on this machine and on the ubuntu CI runner).
+    unconditionally — on the macOS host (Arial candidates) and the ubuntu
+    CI runner (DejaVu candidates) a TTF candidate always resolves, and a
+    machine where it does not is exactly the regression this assertion
+    must expose, never one it may silently wave through.
     """
-    if pdf_service._resolve_unicode_font() is None:
-        pytest.skip("no unicode TTF candidate on this machine")
+    assert pdf_service._resolve_unicode_font() is not None, (
+        "no unicode TTF candidate on this machine — the render below "
+        "would fall back to latin-1 and the extraction assertions "
+        "could not run"
+    )
     name = "Åsa Müllér-Lindqvist"
     body = (
         "Hej!\n"
