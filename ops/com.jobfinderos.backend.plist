@@ -6,7 +6,7 @@
     <string>com.jobfinderos.backend</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/anthonyforan/Desktop/JobFinderOS/backend/.venv/bin/python</string>
+        <string>/Users/anthonyforan/Developer/JobFinderOS/backend/.venv/bin/python</string>
         <string>-m</string>
         <string>uvicorn</string>
         <string>app.main:app</string>
@@ -16,7 +16,7 @@
         <string>8000</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/anthonyforan/Desktop/JobFinderOS/backend</string>
+    <string>/Users/anthonyforan/Developer/JobFinderOS/backend</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
