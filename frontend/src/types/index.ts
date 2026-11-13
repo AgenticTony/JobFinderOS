@@ -317,6 +317,8 @@ export interface ComposioAccount {
 export interface IntegrationsStatus {
   composio: {
     configured: boolean;
+    /** false = status UNKNOWN (provider unreachable), NOT "not connected" */
+    reachable?: boolean;
     accounts: ComposioAccount[];
   };
 }

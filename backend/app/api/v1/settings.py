@@ -20,12 +20,15 @@ class ComposioConnectRequest(BaseModel):
 
 @router.get("/integrations")
 async def integrations(user: User = Depends(get_authenticated_user)):
-    """Integration statuses for the Settings page (scoped to this user)."""
+    """Integration statuses for the Settings page (scoped to this user).
+    reachable=False means the status is UNKNOWN (API hiccup), NOT 'not
+    connected' — the frontend must say so (2026-10-30 audit, D2)."""
     accounts = await composio_service.list_connections(str(user.id))
     return {
         "composio": {
             "configured": composio_service.is_configured(),
-            "accounts": accounts,
+            "reachable": accounts is not None,
+            "accounts": accounts or [],
         }
     }
 

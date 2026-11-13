@@ -1091,13 +1091,23 @@ def _send_with_pdfs(
             profile.cv_file_path if profile else None
         )
         original_cv = read_cv_at_path(original_cv_path)
-        if original_cv:
-            attachments.append(
-                {
-                    "filename": (profile.cv_file_name if profile else None) or "CV.pdf",
-                    "content": base64.b64encode(original_cv).decode("utf-8"),
-                }
+        if original_cv is None:
+            # 2026-10-30 audit (D1): the user approved a send of THREE
+            # attachments. The old `if original_cv:` silently shipped
+            # two, marked the application 'sent', and left no trace —
+            # the user believes the employer has their original CV.
+            # Raising here lands in the except below: failed, retryable,
+            # nothing dispatched.
+            raise ValueError(
+                "Original CV file could not be read — nothing was sent. "
+                "Try again, or re-upload your CV first."
             )
+        attachments.append(
+            {
+                "filename": (profile.cv_file_name if profile else None) or "CV.pdf",
+                "content": base64.b64encode(original_cv).decode("utf-8"),
+            }
+        )
 
         resend.api_key = settings.RESEND_API_KEY
         from_email = (

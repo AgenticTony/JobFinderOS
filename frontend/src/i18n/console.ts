@@ -304,6 +304,9 @@ export const consoleEn = {
     notConfigured: "not configured",
     notAvailable:
       "Gmail connections aren't available on this deployment yet — check back soon.",
+    statusUnavailable:
+      "Couldn't reach the integration service — connection status is unknown right now.",
+    retry: "Try again",
     connected: "connected",
   },
   shared: {
@@ -724,6 +727,9 @@ export const consoleSv: ConsoleDict = {
     notConfigured: "inte konfigurerat",
     notAvailable:
       "Gmail-anslutningar finns inte i den här driftsättningen än — titta in snart igen.",
+    statusUnavailable:
+      "Kunde inte nå integrationstjänsten — anslutningsstatus är okänd just nu.",
+    retry: "Försök igen",
     connected: "ansluten",
   },
   shared: {

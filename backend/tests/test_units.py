@@ -306,6 +306,26 @@ class TestTailorRejectsEmptyPackage:
         assert out["cover_letter"] == "Dear Acme team"
         assert out["tailored_cv"].startswith("PROFESSIONAL SUMMARY")
 
+
+class TestExtractTruncation:
+    """2026-10-30 audit (D3): extract replies cap at the shared 2000
+    output tokens with NO finish_reason check — a long CV's structured
+    profile was cut mid-JSON, parsed to {}, and surfaced to the user as
+    the repeatable 're-upload your PDF' error that blamed a fine file.
+    Truncation must fail with its own honest cause (the tailor draft-39
+    rule); an unparseable-but-untruncated reply still flows to the
+    consumers, whose guards own that case."""
+
+    def test_truncated_extract_raises_with_the_real_cause(self, monkeypatch):
+        svc = _bare_service(monkeypatch, '{"full_name": "Anna Ander',
+                            finish_reason="length")
+        with pytest.raises(ValueError, match="cut off"):
+            svc.extract_profile(cv_text="a long cv")
+
+    def test_untruncated_unparseable_still_returns_for_consumer_guards(self, monkeypatch):
+        svc = _bare_service(monkeypatch, "not json", finish_reason="stop")
+        assert svc.extract_profile(cv_text="cv") == {}
+
     def test_draft_fails_closed_instead_of_ready_empty(self, db, monkeypatch):
         """End-to-end: the raise lands in create_draft_for_job's except —
         the draft row is 'failed' with the AI error on it (regenerable),

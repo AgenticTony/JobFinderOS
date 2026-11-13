@@ -85,6 +85,53 @@ class TestAuthGate:
         assert client.get("/health").status_code == 200
 
 
+class TestIntegrationStatusUnknownVsNone:
+    """2026-10-30 audit (D2): list_connections returns None when the
+    provider is unreachable. None is UNKNOWN — it must never read as
+    'not connected' (Settings would lie with an empty account list; the
+    scan would tell a connected user to connect Gmail)."""
+
+    def test_settings_marks_unknown_as_not_reachable(self, client, monkeypatch):
+        from app.services import composio_service
+
+        email = f"ci-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        monkeypatch.setattr(composio_service, "is_configured", lambda: True)
+
+        async def _unknown(uid):
+            return None
+
+        monkeypatch.setattr(composio_service, "list_connections", _unknown)
+        r = client.get("/api/v1/settings/integrations")
+        assert r.status_code == 200, r.text
+        body = r.json()["composio"]
+        assert body["configured"] is True
+        assert body["reachable"] is False, (
+            "an outage must be distinguishable from zero connected accounts"
+        )
+        assert body["accounts"] == []
+
+    def test_scan_during_outage_is_503_not_connect_first(self, client, monkeypatch):
+        from app.services import composio_service
+
+        email = f"cs-{uuid.uuid4().hex[:6]}@test.example"
+        _register(client, email)
+        _auth_client(client, email)
+        monkeypatch.setattr(composio_service, "is_configured", lambda: True)
+
+        async def _unknown(uid):
+            return None
+
+        monkeypatch.setattr(composio_service, "list_connections", _unknown)
+        r = client.post("/api/v1/outcomes/scan")
+        assert r.status_code == 503, (
+            f"unknown connection status returned {r.status_code} ({r.text}) — "
+            "must say temporarily unavailable, not 'connect your Gmail'"
+        )
+        assert "unavailable" in r.json()["detail"].lower()
+
+
 class TestTwoUserIsolation:
     """The review's takeover scenario, inverted: B uploads, A still sees A."""
 
@@ -978,7 +1025,7 @@ class TestOutboundEmailBoundary:
         db.flush()
         a_profile = Profile(user_id=a_uid, is_active=1, full_name="Alice Anderson",
                              email="alice@example.com", cv_text="ALICE CV TEXT",
-                             cv_file_name="alice-cv.pdf", cv_file_path=None)
+                             cv_file_name="alice-cv.pdf", cv_file_path="cvs/alice.pdf")
         db.add(a_profile)
         db.add(Profile(user_id=b_uid, is_active=1, full_name="Bob Brown",
                        email="bob@example.com", cv_text="BOB CV TEXT",
@@ -1003,9 +1050,11 @@ class TestOutboundEmailBoundary:
         monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)  # beta gate off in these path tests
         # Bob has a stored CV file; Alice does not. If the wrong profile is
         # resolved, Bob's bytes get attached — exactly the original P0.
+        # 2026-10-30 D1: the send now REQUIRES a readable original CV —
+        # Alice has one (path-keyed); any other path reads as missing.
         monkeypatch.setattr(
-            "app.services.storage.read_original_cv",
-            lambda profile: b"%PDF-BOB-ORIGINAL-CV" if profile and profile.full_name == "Bob Brown" else None,
+            "app.services.storage.read_cv_at_path",
+            lambda key: b"%PDF-ALICE-ORIGINAL" if key == "cvs/alice.pdf" else None,
         )
         sent = {}
 
@@ -2314,6 +2363,9 @@ class TestWO23BlockedDraftRecovery:
         monkeypatch.setattr(settings, "RESEND_API_KEY", "test-key")
         monkeypatch.setattr(settings, "APPLY_FROM_EMAIL", "apply@jobfinderos.test")
         monkeypatch.setattr(settings, "EMAIL_APPLY_ENABLED", True)
+        # 2026-10-30 D1: the send requires a readable original CV
+        monkeypatch.setattr(
+            "app.services.storage.read_cv_at_path", lambda key: b"%PDF-1.4 fake")
         sent = {}
         pdf_inputs = []
         real_pdf = pdf_service.cover_letter_pdf
@@ -3153,7 +3205,7 @@ class TestOutboundReplyTo:
         db.commit()
 
         _live_email_settings(monkeypatch)
-        monkeypatch.setattr("app.services.storage.read_original_cv", lambda p: None)
+        monkeypatch.setattr("app.services.storage.read_cv_at_path", lambda key: b"%PDF-1.4 fake")  # bytes, not None: a None read FAILS the send (2026-10-30 D1)
         sent = []
         _fake_resend(monkeypatch, sent)
 
@@ -3183,7 +3235,9 @@ class TestOutboundReplyTo:
         db.commit()
 
         _live_email_settings(monkeypatch)
-        monkeypatch.setattr("app.services.storage.read_original_cv", lambda p: None)
+        monkeypatch.setattr("app.services.storage.read_cv_at_path", lambda key: b"%PDF-1.4 fake")  # bytes, not None: a None read FAILS the send (2026-10-30 D1)
+        # the plain-email retry path reads via read_original_cv (profile)
+        monkeypatch.setattr("app.services.storage.read_original_cv", lambda p: b"%PDF-1.4 fake")
         sent = []
         _fake_resend(monkeypatch, sent)
 
@@ -3468,7 +3522,7 @@ class TestSendPathRateLimits:
         db.commit()
 
         _live_email_settings(monkeypatch)
-        monkeypatch.setattr("app.services.storage.read_original_cv", lambda p: None)
+        monkeypatch.setattr("app.services.storage.read_cv_at_path", lambda key: b"%PDF-1.4 fake")  # bytes, not None: a None read FAILS the send (2026-10-30 D1)
         sent = []
         _fake_resend(monkeypatch, sent)
 
