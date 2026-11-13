@@ -7,10 +7,10 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/anthonyforan/Desktop/JobFinderOS/ops/backup.sh</string>
+        <string>/Users/anthonyforan/Developer/JobFinderOS/ops/backup.sh</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/anthonyforan/Desktop/JobFinderOS</string>
+    <string>/Users/anthonyforan/Developer/JobFinderOS</string>
     <!-- OPS-2: without this dict, launchd exports NOTHING, so the nightly
          run always saw OFFSITE_BACKUP_TARGET unset and silently took the
          "backups exist on ONE disk only" branch. Values are deliberately

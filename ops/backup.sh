@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-PROJECT="/Users/anthonyforan/Desktop/JobFinderOS"
+PROJECT="/Users/anthonyforan/Developer/JobFinderOS"
 BACKUP_DIR="$HOME/backups/jobfinderos"
 KEEP_DAYS=30
 
