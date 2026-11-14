@@ -6,14 +6,25 @@ fpdf2 with unicode font fallback: macOS Arial Unicode, Linux DejaVu, else
 core-font latin-1 transliteration (Swedish å/ä/ö survive all paths).
 """
 
+import io
 import logging
 import os
 import re
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from fpdf import FPDF
+from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
+
+# WO-21: ATS parsers and employers' search tools read the text layer, not
+# the glyphs — so every outbound PDF is re-opened with pypdf and checked
+# before it leaves. The floor sits BELOW the smallest real document the
+# render can produce (the fixed "Curriculum Vitae" title alone extracts
+# 16 chars; the smallest test fixture with a body extracts 35+) and ABOVE
+# anything a structurally broken render produces (empty text layer -> 0,
+# title-only degenerate render -> 12-16).
+MIN_EXTRACTED_CHARS = 25
 
 FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",  # macOS
@@ -86,6 +97,59 @@ class _UnicodePDF(FPDF):
                 self.multi_cell(0, 6, self._clean(line), new_x="LMARGIN", new_y="NEXT")
 
 
+class PdfTextLayerError(Exception):
+    """WO-21: a rendered PDF's text layer failed verification.
+
+    A document the employer's parser cannot read is a FAILED send, not a
+    degraded one — the message is written to the application's user-facing
+    `error` column verbatim.
+    """
+
+
+def extract_text(pdf_bytes: bytes) -> str:
+    """Extract the text layer of a rendered PDF (all pages, pypdf)."""
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+
+def verify_text_layer(
+    pdf_bytes: bytes,
+    *,
+    min_chars: int = MIN_EXTRACTED_CHARS,
+    must_contain: Optional[str] = None,
+    label: str = "document",
+) -> str:
+    """Assert the PDF is machine-readable: a minimum character count and,
+    when given, a known phrase that must survive extraction. Raises
+    PdfTextLayerError — assert, never warn (WO-21 design point 2)."""
+    try:
+        text = extract_text(pdf_bytes)
+    except Exception as e:  # unreadable structure is a broken layer too
+        raise PdfTextLayerError(
+            f"The {label} could not be opened for text extraction ({e}) — "
+            "the application was NOT sent. Please re-open the draft and try "
+            "again; if this keeps happening, contact the operator."
+        ) from e
+    extracted = text.strip()
+    if len(extracted) < min_chars:
+        raise PdfTextLayerError(
+            f"The {label}'s text layer looks broken — text extraction "
+            f"returned {len(extracted)} characters (expected at least "
+            f"{min_chars}). ATS parsers and search tools read this layer, "
+            "so the application was NOT sent. Please re-open the draft and "
+            "try again; if this keeps happening, contact the operator."
+        )
+    if must_contain is not None and must_contain not in extracted:
+        raise PdfTextLayerError(
+            f"The {label}'s text layer lost part of its content during "
+            "rendering — the phrase a parser must be able to read did not "
+            "survive extraction, so the application was NOT sent. Please "
+            "re-open the draft and try again; if this keeps happening, "
+            "contact the operator."
+        )
+    return extracted
+
+
 def cover_letter_pdf(cover_letter: str, applicant_name: Optional[str]) -> bytes:
     """Render the cover letter as a one-page-ish PDF."""
     pdf = _UnicodePDF()
@@ -106,3 +170,25 @@ def tailored_cv_pdf(tailored_cv: str, applicant_name: Optional[str]) -> bytes:
         text=tailored_cv,
     )
     return bytes(pdf.output())
+
+
+def send_attachment_pdfs(
+    cover_letter: str, tailored_cv: str, applicant_name: Optional[str]
+) -> List[Tuple[str, bytes]]:
+    """WO-21: build BOTH tailored documents for the send path, verifying
+    each one's text layer.
+
+    This is the ONLY build entry the send path may use — every PDF it
+    attaches has already been through verify_text_layer here, so a broken
+    text layer raises PdfTextLayerError before anything is dispatched.
+    (tests/test_wo21_pdf_text_layer.py::test_ac_3 greps the send function
+    to keep it that way.)
+    """
+    letter = cover_letter_pdf(cover_letter, applicant_name)
+    verify_text_layer(letter, label="cover letter")
+    cv = tailored_cv_pdf(tailored_cv, applicant_name)
+    verify_text_layer(cv, label="tailored CV")
+    return [
+        (f"Cover Letter - {applicant_name or 'Applicant'}.pdf", letter),
+        (f"CV - {applicant_name or 'Applicant'} (tailored).pdf", cv),
+    ]
