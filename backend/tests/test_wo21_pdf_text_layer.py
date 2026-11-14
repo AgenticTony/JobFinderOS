@@ -7,25 +7,41 @@ with a broken or empty text layer — and ATS parsers and employers'
 search tools read the text layer, not the glyphs. Nothing asserted
 extractability, neither in the suite nor at runtime in the send path.
 
-The three tests here ARE the acceptance criteria:
+The three acceptance criteria, plus the regression tests the review round
+added:
 
 - test_ac_1  a deliberately broken render (the non-embedded, glyph-only
              core-font path the fontless slim image used to take) FAILS
              the extraction check — the test was proven red before the
-             check existed.
+             check existed. Including through the send path's OWN wiring:
+             the send passes the render's source text, and the
+             glyph-survival check fails the substitution without any
+             test-supplied phrase.
 - test_ac_2  every PDF round-trip the suite ships (cover letter + CV,
              ascii AND non-ascii applicant names) survives pypdf
              extraction with a minimum character count and a known
-             phrase intact.
+             phrase intact — compared whitespace-collapsed, because line
+             wrapping splits a source line wherever font metrics decide
+             (this went red under DejaVu on the ubuntu CI runner).
 - test_ac_3  the runtime check after each PDF build in the send path
              blocks the send with a user-facing error on the
              application's error column — and the send path structurally
              cannot skip it (grep-proved against the function source).
+- test_send_path_blocks_substitution_but_not_the_ascii_fallback
+             the fontless fallback blocks a letter it glyph-substitutes
+             and ships the ascii letter it renders faithfully.
+- test_floor_never_blocks_a_short_or_empty_draft
+             the character floor catches STRUCTURE (empty text layer),
+             never a short legitimate document.
+- test_download_endpoints_verify_text_layer
+             the manual-portal downloads are outbound documents too —
+             verified builders only, refused with the reason on failure.
 """
 
 import inspect
 import io
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -79,6 +95,15 @@ def _extract(pdf_bytes: bytes) -> str:
     return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
+def _normws(text: str) -> str:
+    """Collapse whitespace the way the runtime check does for phrase
+    containment: line wrapping splits a source line anywhere font metrics
+    decide, so containment must be compared wrap-insensitively (this bit
+    us once: the em-dash phrase wrapped mid-phrase under DejaVu metrics
+    on the ubuntu CI runner and the exact-substring assert went red)."""
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _graphics_only_pdf() -> bytes:
     """A visually-valid PDF whose text layer is empty — the degenerate
     shape a broken render path can ship: pages and glyphs-as-curves, no
@@ -112,6 +137,13 @@ def test_ac_1(monkeypatch):
 
     with pytest.raises(pdf_service.PdfTextLayerError) as excinfo:
         pdf_service.verify_text_layer(broken, must_contain=KNOWN_PHRASE, label="cover letter")
+    assert "cover letter" in str(excinfo.value).lower()
+
+    # The production wiring must catch this WITHOUT any test-supplied
+    # phrase: the send path passes the render's own source text, and the
+    # glyph-survival check fails the substitution on its own.
+    with pytest.raises(pdf_service.PdfTextLayerError) as excinfo:
+        pdf_service.send_attachment_pdfs(KNOWN_PHRASE, KNOWN_PHRASE, NON_ASCII_NAME)
     assert "cover letter" in str(excinfo.value).lower()
 
     # And the degenerate shape — a PDF with no text layer at all — fails
@@ -154,18 +186,25 @@ def test_ac_2():
     ):
         for applicant in ("Test Candidate", NON_ASCII_NAME):
             blob = render(ROUND_TRIP_BODY, applicant)
-            # Through the production check...
-            text = pdf_service.verify_text_layer(blob, label=title)
+            # Through the production check (the render's own source text
+            # is what production passes — this is the wiring, not a
+            # test-supplied phrase)...
+            text = pdf_service.verify_text_layer(
+                blob, source_text=f"{applicant}\n{ROUND_TRIP_BODY}", label=title
+            )
             # ...and independently with pypdf at the seam the ATS sees.
             extracted = _extract(blob)
+            hay = _normws(extracted)
             assert extracted.strip() == text
             assert len(extracted) >= ROUND_TRIP_MIN_CHARS, (
                 render.__name__, applicant, len(extracted), repr(extracted)
             )
-            assert KNOWN_PHRASE in extracted, (render.__name__, applicant)
-            assert title in extracted, (render.__name__, applicant)
+            # Whitespace-collapsed containment: wrapping splits the phrase
+            # across lines wherever the font's metrics decide to break.
+            assert _normws(KNOWN_PHRASE) in hay, (render.__name__, applicant)
+            assert title in hay, (render.__name__, applicant)
             for part in applicant.split():
-                assert part in extracted, (render.__name__, applicant, part)
+                assert part in hay, (render.__name__, applicant, part)
 
     # The ascii-name CV fixture (the classic ATS input) keeps its section
     # headers extractable — the structure an ATS parses, not just prose.
@@ -264,7 +303,7 @@ def test_ac_3(client, db, monkeypatch):
     # No raw builder call inside the send function: every tailored PDF it
     # attaches has already been through verify_text_layer inside the
     # wrapper — building unverified is not possible from here.
-    assert "cover_letter_pdf(" not in send_source.replace("send_attachment_pdfs(", ""), (
+    assert "cover_letter_pdf(" not in send_source, (
         "the send path calls a raw PDF builder — it can skip the check"
     )
     assert "tailored_cv_pdf(" not in send_source, (
@@ -272,8 +311,138 @@ def test_ac_3(client, db, monkeypatch):
     )
     assert "PdfTextLayerError" in send_source
     assert "application.error" in send_source
-    # And the wrapper itself verifies BOTH documents it returns.
+    # And the wrapper builds BOTH documents through the verified builders,
+    # each of which runs verify_text_layer on what it built.
     wrapper_source = inspect.getsource(pdf_service.send_attachment_pdfs)
-    assert wrapper_source.count("verify_text_layer(") == 2
-    assert "cover_letter_pdf(" in wrapper_source
-    assert "tailored_cv_pdf(" in wrapper_source
+    assert "verified_cover_letter_pdf(" in wrapper_source
+    assert "verified_tailored_cv_pdf(" in wrapper_source
+    for builder in (
+        pdf_service.verified_cover_letter_pdf,
+        pdf_service.verified_tailored_cv_pdf,
+    ):
+        builder_source = inspect.getsource(builder)
+        assert "verify_text_layer(" in builder_source, builder.__name__
+        assert "source_text=" in builder_source, (
+            f"{builder.__name__} verifies without the render's source "
+            "text — the glyph-substitution failure mode would slip through"
+        )
+
+
+ASCII_ONLY_LETTER = (
+    "Dear Hiring Manager,\n"
+    "\n"
+    "I am applying for the backend developer role at Acme. My five years "
+    "of backend experience make me a strong fit, and I am excited about "
+    "this role.\n"
+    "\n"
+    "Best regards,\n"
+)
+
+
+def test_send_path_blocks_substitution_but_not_the_ascii_fallback(monkeypatch):
+    """The fontless fallback is caught by CONTENT, not by existence.
+
+    With no unicode font at all (the fontless slim image), a letter whose
+    typography sits outside latin-1 is glyph-substituted into '?' — that
+    send must BLOCK. The very same fallback path rendering a pure-ascii
+    letter produces a perfectly readable document — that send must PASS.
+    The check separates the two by what survived extraction, not by
+    whether the fallback happened.
+    """
+    monkeypatch.setattr(pdf_service, "_resolve_unicode_font", lambda: None)
+    assert pdf_service._UnicodePDF().unicode_ok is False
+
+    # Curly typography in the fallback: blocked, with the lost characters
+    # named in the user-facing error.
+    with pytest.raises(pdf_service.PdfTextLayerError) as excinfo:
+        pdf_service.send_attachment_pdfs(KNOWN_PHRASE, ROUND_TRIP_BODY, NON_ASCII_NAME)
+    assert "cover letter" in str(excinfo.value).lower()
+    assert "U+2014" in str(excinfo.value)  # the em-dash it destroyed
+
+    # The same fallback, ascii-only content: the render is faithful, the
+    # attachments go out.
+    attachments = pdf_service.send_attachment_pdfs(
+        ASCII_ONLY_LETTER, ASCII_ONLY_LETTER, "Test Candidate"
+    )
+    assert [name for name, _ in attachments] == [
+        "Cover Letter - Test Candidate.pdf",
+        "CV - Test Candidate (tailored).pdf",
+    ]
+    extracted = _extract(attachments[0][1])
+    assert _normws(ASCII_ONLY_LETTER) in _normws(extracted)
+
+
+def test_floor_never_blocks_a_short_or_empty_draft():
+    """The character floor catches STRUCTURE (empty text layer -> 0), not
+    short documents: a title-only render — what an empty draft body
+    produces — has an intact text layer and must pass, so the runtime
+    error never tells a user with an empty draft that their text layer is
+    'broken'."""
+    for render, title in (
+        (pdf_service.cover_letter_pdf, "Cover Letter"),
+        (pdf_service.tailored_cv_pdf, "Curriculum Vitae"),
+    ):
+        # Empty body — the smallest legitimate render the send path sees.
+        extracted = pdf_service.verify_text_layer(render("", "A"), label=title.lower())
+        assert title in extracted
+    # And through the send path, exactly as production calls it: an empty
+    # draft still ships its title-only documents.
+    assert len(pdf_service.send_attachment_pdfs("", "", "A")) == 2
+
+    # The broken shape is still caught: zero extractable characters.
+    with pytest.raises(pdf_service.PdfTextLayerError) as excinfo:
+        pdf_service.verify_text_layer(_graphics_only_pdf(), label="cover letter")
+    message = str(excinfo.value)
+    assert "text extraction returned 0" in message
+    assert "NOT sent" in message
+
+
+def _seed_download_draft(db):
+    """A draft whose cover letter carries the em-dash — the manual-portal
+    download path's outbound content."""
+    import uuid
+
+    from app.models import ApplicationDraft, JobPosting
+    from tests.auth_helpers import get_or_create_user
+
+    uid = get_or_create_user(f"wo21-dl-{uuid.uuid4().hex[:6]}@test.example")
+    job = JobPosting(source="manual", source_id=uuid.uuid4().hex[:8],
+                     title="Dev", company="Acme",
+                     url=f"https://x/{uuid.uuid4().hex[:6]}", status="matched",
+                     description="A Python role.")
+    draft = ApplicationDraft(user_id=uid, job=job, status="ready",
+                             cover_letter=ROUND_TRIP_BODY,
+                             tailored_cv=ROUND_TRIP_BODY,
+                             changes_summary="[]")
+    db.add(draft)
+    db.commit()
+    return uid, draft.id
+
+
+def test_download_endpoints_verify_text_layer(client, db, monkeypatch):
+    """The manual-portal downloads are outbound documents too — the same
+    employer ATS reads them — so a broken text layer must be refused with
+    the reason, never served as a PDF (reviewer finding U-2)."""
+    from tests.auth_helpers import mint_token
+
+    uid, draft_id = _seed_download_draft(db)
+    headers = {"Authorization": f"Bearer {mint_token(uid, 'wo21-dl@test.example')}"}
+
+    for path in (
+        f"/api/v1/applications/draft/{draft_id}/download/cover-letter",
+        f"/api/v1/applications/draft/{draft_id}/download/cv",
+    ):
+        # Healthy render: served, and the em-dash phrase is readable.
+        resp = client.get(path, headers=headers)
+        assert resp.status_code == 200, (path, resp.status_code, resp.text)
+        assert resp.headers["content-type"] == "application/pdf"
+        extracted = _extract(resp.content)
+        assert _normws(KNOWN_PHRASE) in _normws(extracted), path
+
+        # Fontless render (the AC-1 failure class): refused with the
+        # verification reason, not served as a glyph-substituted PDF.
+        monkeypatch.setattr(pdf_service, "_resolve_unicode_font", lambda: None)
+        resp = client.get(path, headers=headers)
+        assert resp.status_code == 500, (path, resp.status_code, resp.text)
+        assert "text layer" in resp.json()["detail"].lower(), resp.text
+        monkeypatch.undo()

@@ -10,6 +10,7 @@ import io
 import logging
 import os
 import re
+import unicodedata
 from typing import List, Optional, Tuple
 
 from fpdf import FPDF
@@ -19,12 +20,16 @@ logger = logging.getLogger(__name__)
 
 # WO-21: ATS parsers and employers' search tools read the text layer, not
 # the glyphs — so every outbound PDF is re-opened with pypdf and checked
-# before it leaves. The floor sits BELOW the smallest real document the
-# render can produce (the fixed "Curriculum Vitae" title alone extracts
-# 16 chars; the smallest test fixture with a body extracts 35+) and ABOVE
-# anything a structurally broken render produces (empty text layer -> 0,
-# title-only degenerate render -> 12-16).
-MIN_EXTRACTED_CHARS = 25
+# before it leaves. The floor's ONLY job is to catch a structurally
+# broken render (empty text layer -> 0 extracted characters), so it sits
+# ABOVE anything broken produces and BELOW the smallest legitimate
+# render: a title-only document ("Cover Letter" + no body) extracts 12-16
+# characters, and a draft with no body yet is the user's content
+# decision, not a broken text layer — the floor must never be the thing
+# that reports "broken" for it. Character-level content loss is caught by
+# the glyph-survival check in verify_text_layer (source_text), which does
+# not depend on document length at all.
+MIN_EXTRACTED_CHARS = 10
 
 FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",  # macOS
@@ -112,16 +117,60 @@ def extract_text(pdf_bytes: bytes) -> str:
     return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
+def _normalize_ws(text: str) -> str:
+    """Collapse whitespace runs: line wrapping inserts breaks anywhere in
+    a paragraph (font metrics decide where), so a phrase that the source
+    holds on one line extracts split across two. Phrase containment is
+    compared whitespace-insensitively on both sides."""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+# The renderer strips these leading bullet glyphs (replaced by an
+# indented continuation), so their absence is layout, not a broken layer.
+_RENDER_STRIPPED_GLYPHS = {"•", "●"}
+# Categories layout legitimately normalises or drops without the reader
+# seeing different content: control, format (zero-width, bidi marks) and
+# space separators (NBSP may extract as a plain space).
+_INVISIBLE_CATEGORIES = ("Cc", "Cf", "Zs", "Zl", "Zp", "Cs")
+
+
+def _required_glyphs(source: str) -> List[str]:
+    """The visible non-ascii characters the text layer MUST preserve.
+
+    This is the substitution detector: the latin-1 fallback render turns
+    every character outside latin-1 into a literal '?' (the shipped-'?'
+    production incident), and a font missing a glyph draws .notdef — in
+    both cases the character silently vanishes from the extraction while
+    the document still LOOKS plausible. Requiring each visible non-ascii
+    source character to survive makes that failure mode a hard failure,
+    independent of document length."""
+    return sorted(
+        ch
+        for ch in set(source)
+        if ord(ch) > 127
+        and ch not in _RENDER_STRIPPED_GLYPHS
+        and unicodedata.category(ch) not in _INVISIBLE_CATEGORIES
+    )
+
+
+def _source_for_verification(text: str, applicant_name: Optional[str]) -> str:
+    """Everything the render was given to draw — the applicant name
+    (subtitle) and the body — as one string for the glyph-survival check."""
+    return "\n".join(part for part in (applicant_name, text) if part)
+
+
 def verify_text_layer(
     pdf_bytes: bytes,
     *,
     min_chars: int = MIN_EXTRACTED_CHARS,
     must_contain: Optional[str] = None,
+    source_text: Optional[str] = None,
     label: str = "document",
 ) -> str:
     """Assert the PDF is machine-readable: a minimum character count and,
-    when given, a known phrase that must survive extraction. Raises
-    PdfTextLayerError — assert, never warn (WO-21 design point 2)."""
+    when the render's source text is given, that every visible non-ascii
+    source character survived extraction (glyph substitution detector).
+    Raises PdfTextLayerError — assert, never warn (WO-21 design point 2)."""
     try:
         text = extract_text(pdf_bytes)
     except Exception as e:  # unreadable structure is a broken layer too
@@ -139,7 +188,19 @@ def verify_text_layer(
             "so the application was NOT sent. Please re-open the draft and "
             "try again; if this keeps happening, contact the operator."
         )
-    if must_contain is not None and must_contain not in extracted:
+    if source_text is not None:
+        missing = [ch for ch in _required_glyphs(source_text) if ch not in text]
+        if missing:
+            shown = ", ".join(f"U+{ord(ch):04X}" for ch in missing[:6])
+            raise PdfTextLayerError(
+                f"The {label}'s text layer lost characters during rendering "
+                f"— {shown} did not survive extraction, so an employer's "
+                "parser would read something the draft never said. The "
+                "application was NOT sent. Please re-open the draft, "
+                "replace those characters, and try again; if this keeps "
+                "happening, contact the operator."
+            )
+    if must_contain is not None and _normalize_ws(must_contain) not in _normalize_ws(text):
         raise PdfTextLayerError(
             f"The {label}'s text layer lost part of its content during "
             "rendering — the phrase a parser must be able to read did not "
@@ -172,6 +233,31 @@ def tailored_cv_pdf(tailored_cv: str, applicant_name: Optional[str]) -> bytes:
     return bytes(pdf.output())
 
 
+def verified_cover_letter_pdf(cover_letter: str, applicant_name: Optional[str]) -> bytes:
+    """Build AND verify: the cover-letter entry BOTH outbound paths use —
+    the email send and the manual-portal download (the same employer ATS
+    reads both). A broken text layer raises PdfTextLayerError instead of
+    leaving the service."""
+    blob = cover_letter_pdf(cover_letter, applicant_name)
+    verify_text_layer(
+        blob,
+        source_text=_source_for_verification(cover_letter, applicant_name),
+        label="cover letter",
+    )
+    return blob
+
+
+def verified_tailored_cv_pdf(tailored_cv: str, applicant_name: Optional[str]) -> bytes:
+    """Build AND verify the tailored CV (see verified_cover_letter_pdf)."""
+    blob = tailored_cv_pdf(tailored_cv, applicant_name)
+    verify_text_layer(
+        blob,
+        source_text=_source_for_verification(tailored_cv, applicant_name),
+        label="tailored CV",
+    )
+    return blob
+
+
 def send_attachment_pdfs(
     cover_letter: str, tailored_cv: str, applicant_name: Optional[str]
 ) -> List[Tuple[str, bytes]]:
@@ -184,10 +270,8 @@ def send_attachment_pdfs(
     (tests/test_wo21_pdf_text_layer.py::test_ac_3 greps the send function
     to keep it that way.)
     """
-    letter = cover_letter_pdf(cover_letter, applicant_name)
-    verify_text_layer(letter, label="cover letter")
-    cv = tailored_cv_pdf(tailored_cv, applicant_name)
-    verify_text_layer(cv, label="tailored CV")
+    letter = verified_cover_letter_pdf(cover_letter, applicant_name)
+    cv = verified_tailored_cv_pdf(tailored_cv, applicant_name)
     return [
         (f"Cover Letter - {applicant_name or 'Applicant'}.pdf", letter),
         (f"CV - {applicant_name or 'Applicant'} (tailored).pdf", cv),

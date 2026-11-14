@@ -55,6 +55,16 @@ def _extract_pypdf(pdf_bytes: bytes) -> str:
     return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
+def _normws(text: str) -> str:
+    """Collapse whitespace: line wrapping splits a source line anywhere
+    the font's metrics decide (the WO-21 phrase assertion went red on the
+    ubuntu runner exactly this way under DejaVu), so multi-word phrase
+    containment is compared wrap-insensitively."""
+    import re
+
+    return re.sub(r"\s+", " ", text).strip()
+
+
 # ---------- font-fallback logic (runs identically everywhere) ----------
 
 
@@ -125,8 +135,9 @@ def test_pdf_render_preserves_curly_typography():
         # merely warned.
         via_pypdf = _extract_pypdf(render(CURLY + "\n" + SWEDISH, "Test Candidate"))
         assert len(via_pypdf.strip()) >= 100, (render.__name__, repr(via_pypdf))
-        assert "truly \u2014 about the role" in via_pypdf, repr(via_pypdf)
-        assert SWEDISH in via_pypdf, repr(via_pypdf)
+        hay = _normws(via_pypdf)
+        assert "truly \u2014 about the role" in hay, repr(via_pypdf)
+        assert SWEDISH in hay, repr(via_pypdf)
 
 
 def test_pdf_round_trip_non_ascii_name_extracts_cleanly():
