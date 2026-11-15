@@ -20,7 +20,7 @@
 name: jobfinderos
 
 repo:
-  path: ~/Desktop/JobFinderOS
+  path: ~/Developer/JobFinderOS
   default_branch: main
   remote: https://github.com/AgenticTony/JobFinderOS.git
   merge_method: merge   # repo history is merge commits ("Merge pull request #138 ...")
