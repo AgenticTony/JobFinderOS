@@ -29,7 +29,6 @@ import pytest
 from app.core.database import engine
 from app.core.orm import Base
 from app.models import (
-    Application,
     ApplicationDraft,
     JobPosting,
     Profile,
@@ -161,8 +160,8 @@ def _submit(db, monkeypatch, user, profile, job, responses):
 def test_ac_1(db, monkeypatch):
     user, profile = _actor(db)
     dead = _job(db, url=DEAD_URL, application_url=None, application_email=None)
-    twin = _job(db, source="jobtech", url=TWIN_URL,
-                application_url=None, application_email=None)
+    _job(db, source="jobtech", url=TWIN_URL,
+         application_url=None, application_email=None)
 
     app, _ = _submit(db, monkeypatch, user, profile, dead,
                      {"jobviewtrack.example": 404})
@@ -188,9 +187,9 @@ def test_ac_1_prefers_the_twin_application_url(db, monkeypatch):
     precedence the original row's apply_url already uses."""
     user, profile = _actor(db)
     dead = _job(db, url=DEAD_URL, application_url=None, application_email=None)
-    twin = _job(db, source="jobtech", url="https://acme-employer.example/jobs/dev",
-                application_url="https://ats-employer.example/apply/123",
-                application_email=None)
+    _job(db, source="jobtech", url="https://acme-employer.example/jobs/dev",
+         application_url="https://ats-employer.example/apply/123",
+         application_email=None)
 
     app, calls = _submit(db, monkeypatch, user, profile, dead,
                          {"jobviewtrack.example": 404})
@@ -211,8 +210,8 @@ def test_ac_2(db, monkeypatch):
     user, profile = _actor(db)
     dead = _job(db, url=DEAD_URL, application_url=None, application_email=None)
     # same title + same company -> a true pool twin, but its link 410s too
-    twin = _job(db, source="jobtech", url=TWIN_URL,
-                application_url=None, application_email=None)
+    _job(db, source="jobtech", url=TWIN_URL,
+         application_url=None, application_email=None)
 
     app, _ = _submit(db, monkeypatch, user, profile, dead,
                      {"jobviewtrack.example": 404, "acme-employer.example": 410})
@@ -230,9 +229,9 @@ def test_ac_2(db, monkeypatch):
     user2, profile2 = _actor(db, label="wo22mail")
     dead2 = _job(db, title="Radiology Nurse", company="Care AB",
                  url=DEAD_URL, application_url=None, application_email=None)
-    email_only = _job(db, source="jobtech", title="Radiology Nurse",
-                      company="Care AB", url="",
-                      application_url=None, application_email="jobs@care.example")
+    _job(db, source="jobtech", title="Radiology Nurse",
+         company="Care AB", url="",
+         application_url=None, application_email="jobs@care.example")
     app2, _ = _submit(db, monkeypatch, user2, profile2, dead2,
                       {"jobviewtrack.example": 404})
     assert app2.apply_url == DEAD_URL
@@ -304,8 +303,8 @@ def test_ac_4(db, monkeypatch):
 def test_ac_5(db, monkeypatch):
     user, profile = _actor(db)
     dead = _job(db, url=DEAD_URL, application_url=None, application_email=None)
-    twin = _job(db, source="jobtech", url=TWIN_URL,
-                application_url=None, application_email=None)
+    _job(db, source="jobtech", url=TWIN_URL,
+         application_url=None, application_email=None)
 
     app, _ = _submit(db, monkeypatch, user, profile, dead,
                      {"jobviewtrack.example": 404})
