@@ -1069,11 +1069,11 @@ def _send_with_pdfs(
         applicant = profile.full_name if profile else None
         attachments = []
         os.makedirs(DRAFT_DIR, exist_ok=True)
-        for filename, blob in (
-            (f"Cover Letter - {applicant or 'Applicant'}.pdf",
-             pdf_service.cover_letter_pdf(draft.cover_letter or "", applicant)),
-            (f"CV - {applicant or 'Applicant'} (tailored).pdf",
-             pdf_service.tailored_cv_pdf(draft.tailored_cv or "", applicant)),
+        # WO-21: the ONLY build entry into the send — each document is
+        # text-layer-verified inside the wrapper, and a broken one raises
+        # PdfTextLayerError (handled below) BEFORE anything is dispatched.
+        for filename, blob in pdf_service.send_attachment_pdfs(
+            draft.cover_letter or "", draft.tailored_cv or "", applicant
         ):
             attachments.append(
                 {"filename": filename, "content": base64.b64encode(blob).decode("utf-8")}
@@ -1119,6 +1119,14 @@ def _send_with_pdfs(
         application.status = "sent"
         application.sent_at = utc_now()
         logger.info("Tailored application sent to %s (id=%s)", application.target_email, email.get("id"))
+    except pdf_service.PdfTextLayerError as e:
+        # WO-21: a document the employer's ATS parser cannot read is a
+        # FAILED send, not a degraded one — block before dispatch with
+        # the user-facing reason on the application row.
+        application.status = "failed"
+        application.error = str(e)
+        logger.error("PDF text-layer verification failed — send blocked: %s", e)
+        return
     except Exception as e:  # noqa: BLE001
         application.status = "failed"
         application.error = f"Email send failed: {e}"
