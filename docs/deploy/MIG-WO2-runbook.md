@@ -1,10 +1,14 @@
 # MIG-WO2 cutover runbook — fastapi-users → Supabase Auth
 
-> Status: code complete on `mig/wo2-supabase-auth` (backend, frontend,
-> cutover script, tests green). This runbook is the live-cutover
-> checklist — the steps that touch the Supabase dashboard, the live
-> database, and the deploys. Work through it top to bottom; the
-> order matters.
+> Status: **EXECUTED 2026-09-09** — live cutover complete. Evidence:
+> CLAUDE.md "Open items" records the executed cutover (4 accounts
+> remapped, verified zero orphans; both Render services deployed;
+> frontend deployed with the anon key; SMTP via Resend proven with a
+> delivered reset email; browser login verified end-to-end with all
+> data intact; `ops/verify_deployment.sh` 6/6), and MIGRATION.md's
+> status list marks MIG-WO2 EXECUTED 2026-09-09 / MIG-WO3 live since
+> the same cutover deploy. The checklist below is the historical
+> walkthrough, ticked as executed.
 
 ## What changed (context for the steps)
 
@@ -112,17 +116,17 @@ transaction, sub-second).
 
 ## Verification (do these before calling it done)
 
-- [ ] Signup on the Pages URL delivers a confirmation email (custom
+- [x] Signup on the Pages URL delivers a confirmation email (custom
       SMTP) and the link lands signed-in on `/app`
-- [ ] Forgot-password delivers the reset email; the link opens
+- [x] Forgot-password delivers the reset email; the link opens
       `/reset-password` and sets a new password
-- [ ] An old fastapi-users password (pre-cutover) FAILS — hashes were
+- [x] An old fastapi-users password (pre-cutover) FAILS — hashes were
       never migrated; only the Supabase passwords work
-- [ ] Sign-in → console → existing matches/drafts/applications all
+- [x] Sign-in → console → existing matches/drafts/applications all
       present (the FK remap preserved them)
-- [ ] `DELETE /api/v1/account/delete` (Settings → delete account on a
+- [x] `DELETE /api/v1/account/delete` (Settings → delete account on a
       THROWAWAY account) removes the Supabase identity too
-- [ ] Hunt pulse counts unchanged (funnel reads the remapped rows)
+- [x] Hunt pulse counts unchanged (funnel reads the remapped rows)
 
 ## Rollback
 

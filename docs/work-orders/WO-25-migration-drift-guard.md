@@ -250,3 +250,18 @@ exit codes per flag value, and the workflow's flag expression pinned.
 `ops/sql/ci_revision_reader.sql` and adds the secret, the "Migration
 drift" workflow is RED on main, on the schedule and on same-repo PRs.
 That red is the truthful state — the check cannot see production.
+
+## Owner arm — EXECUTED (recorded 2026-11-11)
+
+The "Migration drift" workflow is GREEN on main — `gh run list
+--workflow migration-drift.yml --branch main` reports `success`
+(latest 2026-11-11T08:55:38Z, on the #157 merge; the two before it
+green as well). Under the 2026-09-30 fix a missing
+`PROD_REVISION_READER_URL` fails the run "NOT ARMED", so a green
+conclusion means the reader credential exists and production's
+`alembic_version` was read and found at main's head. The "honestly red"
+state above is resolved.
+
+Still open (no repo-side record — owner to confirm or close):
+RENDER_GIT_BRANCH boot-log check on both services ("Deploy build:
+main@<sha>"), `jobfinderos-api` deploy branch = main, SENTRY_DSN.
