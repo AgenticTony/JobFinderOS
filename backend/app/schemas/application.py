@@ -1,5 +1,6 @@
 """Application + draft schemas for JobFinderOS."""
 
+import json
 from datetime import datetime
 from typing import List, Optional
 
@@ -117,6 +118,12 @@ class ApplicationResponse(BaseModel):
     outcome_note: Optional[str] = None
     resolved_at: Optional[datetime] = None
     follow_up_of_id: Optional[int] = None
+    # WO-22 apply-time link recovery: when the scraped apply link was
+    # dead at hand-off and a live pool twin was handed off instead, this
+    # is the substitution record + the user-facing note —
+    # {"dead_url", "twin_url", "source", "recovered_at", "note"}.
+    # None = the row was never substituted.
+    link_recovery: Optional[dict] = None
     created_at: datetime
     # EGRESS 2026-09-11: the Sent page used to join job titles
     # client-side by WALKING the whole /jobs/ pool 500 rows at a time
@@ -147,6 +154,11 @@ class ApplicationResponse(BaseModel):
             outcome_note=getattr(a, "outcome_note", None),
             resolved_at=getattr(a, "resolved_at", None),
             follow_up_of_id=getattr(a, "follow_up_of_id", None),
+            link_recovery=(
+                json.loads(a.link_recovery)
+                if getattr(a, "link_recovery", None)
+                else None
+            ),
             created_at=a.created_at,
             job=JobResponse.from_orm_job(a.job).model_dump() if a.job else None,
         )

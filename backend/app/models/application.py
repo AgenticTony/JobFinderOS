@@ -57,6 +57,13 @@ class Application(Base):
     sent_at = Column(DateTime, nullable=True)
     error = Column(Text, nullable=True)
 
+    # WO-22 apply-time link recovery — the audit trail ON THE ROW itself
+    # (no separate log table): JSON {"dead_url", "twin_url", "source",
+    # "recovered_at", "note"}. Set ONLY when a dead apply link was
+    # swapped for a live pool twin at hand-off; NULL otherwise, so the
+    # no-twin path writes nothing.
+    link_recovery = Column(Text, nullable=True)
+
     # WO-20 outcome layer — what the EMPLOYER did. A second lifecycle
     # parallel to send-side `status` above; outcome writes never touch
     # `status` (tested). Vocabulary + Final/Open partition live in
