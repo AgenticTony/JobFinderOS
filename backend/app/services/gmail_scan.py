@@ -306,6 +306,14 @@ def run_outcome_maintenance(db) -> dict:
                 connections = asyncio.run(
                     composio_service.list_connections(str(uid))
                 )
+                if connections is None:
+                    # Unknown ≠ not connected (2026-10-30 audit, D2):
+                    # an API hiccup must not read as "user has no Gmail".
+                    # Skip this cycle for this user, visibly in the log.
+                    logger.warning(
+                        "gmail scan skipped: connection status unknown for %s", uid
+                    )
+                    continue
                 if not any(c.get("app_name") == "gmail" for c in connections):
                     continue
                 asyncio.run(

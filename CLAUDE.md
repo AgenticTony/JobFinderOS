@@ -175,7 +175,8 @@ matches are never re-opened; undecided ones flip for a strictly better copy.
   — raw newlines inside JSON strings (`_parse_json` now uses
   `strict=False`) and long-CV packages cut at the shared 2000-token cap
   (tailor calls now pass `settings.TAILOR_MAX_TOKENS=20000`, owner
-  decision; match/judge/extract/suggest stay at 2000). A
+  decision; extract passes `settings.EXTRACT_MAX_TOKENS=8000`, owner
+  decision 2026-11-11; match/judge/suggest stay at 2000). A
   `finish_reason=length` reply fails on the first attempt instead of
   three identical re-asks.
 - **WO-31 A1 (2026-10-16): interactive AI work is a durable queue.**

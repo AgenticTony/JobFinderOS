@@ -123,13 +123,22 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
 
         attachments = []
         original_cv = read_original_cv(profile)
-        if original_cv:
-            attachments.append(
-                {
-                    "filename": profile.cv_file_name or "CV.pdf",
-                    "content": base64.b64encode(original_cv).decode("utf-8"),
-                }
+        if original_cv is None:
+            # 2026-10-30 audit (D1): this email's whole payload IS the
+            # original CV. The old `if original_cv:` dispatched an
+            # attachment-less application email, marked it 'sent', and
+            # left no trace. Raising lands in the except below: failed,
+            # retryable, nothing dispatched.
+            raise ValueError(
+                "Original CV file could not be read — nothing was sent. "
+                "Try again, or re-upload your CV first."
             )
+        attachments.append(
+            {
+                "filename": profile.cv_file_name or "CV.pdf",
+                "content": base64.b64encode(original_cv).decode("utf-8"),
+            }
+        )
 
         params: dict = {
             "from": from_email,

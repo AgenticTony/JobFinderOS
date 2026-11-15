@@ -45,6 +45,7 @@ export { apiErrorMessage };
 // The old jfos-token localStorage JWT is dead — getSessionToken is the
 // only token source.
 import { getSessionToken, supabase } from '@/lib/supabase';
+import { pollAiJob } from '@/lib/aiJobPoll';
 
 export { getSessionToken };
 
@@ -247,8 +248,6 @@ export const getAiJob = async (jobId: number): Promise<AiJob> => {
   return response.data;
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 // Poll a queued job until it finishes. onProgress sees every queued /
 // running state so the UI can show honest copy. Provider load never
 // ends this — only done or a non-load failure does.
@@ -259,21 +258,10 @@ export const waitForAiJob = async (
   // A component that unmounts stops its poll; the job itself keeps
   // running server-side and its result still lands.
   isCancelled?: () => boolean
-): Promise<AiJob> => {
-  let current = job;
-  while (current.status === 'queued' || current.status === 'running') {
-    if (isCancelled?.()) return current;
-    onProgress?.(current);
-    await sleep(intervalMs);
-    if (isCancelled?.()) return current;
-    try {
-      current = await getAiJob(current.id);
-    } catch {
-      // transient (cold start, network): keep waiting on the same job
-    }
-  }
-  return current;
-};
+): Promise<AiJob> =>
+  // Throws only after a minute with no successful poll (job pruned,
+  // persistent 5xx); callers surface it. See lib/aiJobPoll.ts.
+  pollAiJob(job, (j) => getAiJob(j.id), { intervalMs, onProgress, isCancelled });
 
 export const suggestQueries = async (
   country: string,

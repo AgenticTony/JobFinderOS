@@ -73,10 +73,19 @@ export default function CvUpload({ onUploaded, onExtracted, label, hasExistingCv
 
   const followExtraction = async (job: AiJob) => {
     setReading(job);
-    const finished = await waitForAiJob(job, setReading, 2000, () => unmounted.current);
-    if (unmounted.current) return;
-    setReading(null);
-    if (finished.status === 'failed' && finished.error) setError(finished.error);
+    try {
+      const finished = await waitForAiJob(job, setReading, 2000, () => unmounted.current);
+      if (unmounted.current) return;
+      setReading(null);
+      if (finished.status === 'failed' && finished.error) setError(finished.error);
+    } catch (err) {
+      // waitForAiJob throws when the poll can never succeed (2026-10-30
+      // audit) — invoked as void, this MUST catch or it's an unhandled
+      // rejection and the reading line spins forever.
+      setReading(null);
+      setError(apiErrorMessage(err));
+      return;
+    }
     await onExtracted?.();
   };
 

@@ -28,6 +28,10 @@ export const wizardEn = {
       GB: "Reed.co.uk — every sector",
     } as Record<string, string>,
   },
+  geo: {
+    loadFailed: "Couldn't load countries and regions.",
+    retry: "Try again",
+  },
   rights: {
     title: "Do you need visa sponsorship to work here?",
     body: "Postings that require citizenship or security clearance are hidden for sponsorship seekers; everything else is shown with an eligibility note. You can change this anytime in Profile.",
@@ -134,6 +138,10 @@ export const wizardSv: WizardDict = {
       SE: "Platsbanken — varje offentlig annons",
       GB: "Reed.co.uk — alla sektorer",
     },
+  },
+  geo: {
+    loadFailed: "Kunde inte hämta länder och regioner.",
+    retry: "Försök igen",
   },
   rights: {
     title: "Behöver du visumsponsring för att arbeta här?",

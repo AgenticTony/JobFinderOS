@@ -87,9 +87,12 @@ def _jsonable(obj: Any) -> Any:
     return obj
 
 
-async def list_connections(user_id: str) -> List[Dict[str, Any]]:
-    """This user's connected accounts, or [] when unconfigured/unreachable
-    (integration status must never 500 the Settings page)."""
+async def list_connections(user_id: str) -> Optional[List[Dict[str, Any]]]:
+    """This user's connected accounts. [] = definitively none (also when
+    the integration is not configured — a true statement). None =
+    UNKNOWN: the API call failed. Callers must not read None as "not
+    connected" (2026-10-30 audit, D2 — an outage is not a disconnection;
+    display must never claim more than the truth)."""
     if not is_configured():
         return []
     try:
@@ -116,7 +119,7 @@ async def list_connections(user_id: str) -> List[Dict[str, Any]]:
         return out
     except Exception as e:  # noqa: BLE001 — status page degrades, never 500s
         logger.error("Composio list_connections failed: %s", e)
-        return []
+        return None
 
 
 async def initiate_connection(
