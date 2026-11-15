@@ -17,6 +17,7 @@ never pair old-tailored documents with a brand-new CV.
 """
 
 import hashlib
+import json
 import logging
 from typing import List, Optional
 
@@ -820,22 +821,24 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
     return draft
 
 
-def _probe_apply_portal(apply_url: Optional[str]) -> Optional[str]:
-    """One HEAD request against the hand-off URL (6s, redirects followed).
+def _probe_apply_link(apply_url: Optional[str]) -> tuple:
+    """One HEAD request against a URL (6s, redirects followed) — the
+    shared engine for the hand-off warning AND the WO-22 twin re-probe.
 
-    Warn, never block: a transient hiccup must not stop a manual apply
-    the user can still complete. Only a DEFINITE HTTP >= 400 warns — 405
-    aside (HEAD unsupported, but the server answered, so it is alive).
-    401/403 get their own message: they refused the CHECK's client, not
-    the user — bank, insurer and recruiter domains routinely 403
+    Returns (warning, dead_code): `warning` is the user-facing message or
+    None (alive, 405, or probe noise); `dead_code` is the HTTP status ONLY
+    when the outcome is the expiry class — a DEFINITE failure. 401/403 get
+    their own message and are NOT death: they refused the CHECK's client,
+    not the user — bank, insurer and recruiter domains routinely 403
     non-browser clients while serving browsers the same page (verified
     externally, ai-job-search's 09-web-research: Barclays et al.), so
     reporting them as expiry is exactly the false alarm this probe
-    promises never to raise. Timeouts and connection errors stay
-    silent: 'unknown' is not 'dead', and probe noise must never cry
-    wolf."""
+    promises never to raise, and triggering link recovery on them would
+    swap a working link for a twin on the strength of a bot-block.
+    Timeouts and connection errors stay silent: 'unknown' is not 'dead',
+    and probe noise must never cry wolf."""
     if not apply_url:
-        return None
+        return None, None
     try:
         import httpx
 
@@ -845,15 +848,75 @@ def _probe_apply_portal(apply_url: Optional[str]) -> Optional[str]:
                 f"Apply portal blocked our automated check (HTTP "
                 f"{response.status_code}) — many employer and recruiter "
                 "sites block bots while serving browsers normally. The link "
-                "will likely open fine; check the page if it does not."
+                "will likely open fine; check the page if it does not.",
+                None,
             )
         if response.status_code != 405 and response.status_code >= 400:
             return (
                 f"Apply portal returned HTTP {response.status_code} at hand-off — "
-                "this posting may have expired. Check the page loads before applying."
+                "this posting may have expired. Check the page loads before applying.",
+                response.status_code,
             )
     except Exception:  # noqa: BLE001 — a probe failure is context, never a submit failure
+        return None, None
+    return None, None
+
+
+def _probe_apply_portal(apply_url: Optional[str]) -> Optional[str]:
+    """The hand-off warning for one URL — the user-facing half of
+    _probe_apply_link (see it for the 401/403/timeout semantics)."""
+    warning, _ = _probe_apply_link(apply_url)
+    return warning
+
+
+def _twin_apply_link(twin: JobPosting) -> Optional[str]:
+    """The twin's probeable HTTP link: its direct apply route
+    (application_url) when it has one, else its posting URL. A twin with
+    only an application_email has NO HTTP link — it cannot be probed and
+    is never used for recovery (WO-22)."""
+    return (twin.application_url or twin.url or "").strip() or None
+
+
+def _find_live_twin(db: Session, job: JobPosting) -> Optional[JobPosting]:
+    """WO-22 slice s1: the cheap, local version of the reference flow's
+    web search — on a DEFINITELY dead apply link, look in OUR OWN pool
+    for the same job's live copy before declaring the posting expired.
+
+    Same machinery as the WO-18 collapse, in the same order:
+    title_bucket pre-filter -> likely_same_job confirmation (the exact
+    fuzzy gate, including ad-text identity for sister-brand re-posts)
+    -> collapse_preference ranking (not degraded, direct apply route,
+    higher-ranked source, direct employer, fuller text). Candidates are
+    RE-PROBED in preference order and the first one whose own link is
+    not DEFINITELY dead wins — a twin whose link is also dead is not a
+    recovery, and 401/403/timeout outcomes leave it trusted (the same
+    not-death semantics the original link's probe applies)."""
+    from app.core.dedupe import collapse_preference, likely_same_job, title_bucket
+
+    bucket = title_bucket(job.title)
+    if not bucket:
         return None
+    candidates: List[JobPosting] = []
+    for twin in db.query(JobPosting).filter(JobPosting.id != job.id).all():
+        if title_bucket(twin.title) != bucket or not _twin_apply_link(twin):
+            continue
+        if not likely_same_job(
+            title_a=job.title, company_a=job.company, location_a=job.location,
+            title_b=twin.title, company_b=twin.company, location_b=twin.location,
+            desc_a=job.description, desc_b=twin.description,
+        ):
+            continue
+        candidates.append(twin)
+    candidates.sort(key=lambda twin: collapse_preference(
+        source=twin.source, company=twin.company, url=twin.url,
+        application_url=twin.application_url,
+        application_email=twin.application_email,
+        description=twin.description,
+    ))
+    for twin in candidates:
+        _, dead_code = _probe_apply_link(_twin_apply_link(twin))
+        if dead_code is None:
+            return twin
     return None
 
 
@@ -995,10 +1058,39 @@ def submit_draft(
             # under a 'sent' label). The warning rides the application
             # row: the Applications card renders `error` right beside
             # the "Open posting" link. It never blocks the hand-off.
-            warning = _probe_apply_portal(apply_url)
+            warning, dead_code = _probe_apply_link(apply_url)
             if warning:
-                logger.warning("Browser hand-off %s: %s", apply_url, warning)
-                application.error = warning
+                # WO-22: a DEFINITE expiry-class failure is a RECOVERY
+                # problem, not a warning — look in our own pool for the
+                # same job's live copy and hand off THAT link. 401/403/
+                # timeout outcomes carry a warning (or nothing) but are
+                # never death, so dead_code is None for them and the
+                # lookup never fires.
+                twin = _find_live_twin(db, job) if dead_code is not None else None
+                if twin is not None:
+                    twin_link = _twin_apply_link(twin)
+                    note = (
+                        "The scraped apply link was dead (HTTP "
+                        f"{dead_code}) — opened the original posting from "
+                        f"{twin.source} instead."
+                    )
+                    application.apply_url = twin_link
+                    application.error = note
+                    application.link_recovery = json.dumps({
+                        "dead_url": apply_url,
+                        "twin_url": twin_link,
+                        "source": twin.source,
+                        "recovered_at": utc_now().isoformat(),
+                        "note": note,
+                    })
+                    logger.warning(
+                        "Browser hand-off %s dead (HTTP %s) — substituted "
+                        "pool twin %s from %s",
+                        apply_url, dead_code, twin_link, twin.source,
+                    )
+                else:
+                    logger.warning("Browser hand-off %s: %s", apply_url, warning)
+                    application.error = warning
     except Exception:
         # _send_with_pdfs swallows its own failures onto the application
         # row; anything raised PAST it must not strand the 'sending'
@@ -1069,11 +1161,11 @@ def _send_with_pdfs(
         applicant = profile.full_name if profile else None
         attachments = []
         os.makedirs(DRAFT_DIR, exist_ok=True)
-        for filename, blob in (
-            (f"Cover Letter - {applicant or 'Applicant'}.pdf",
-             pdf_service.cover_letter_pdf(draft.cover_letter or "", applicant)),
-            (f"CV - {applicant or 'Applicant'} (tailored).pdf",
-             pdf_service.tailored_cv_pdf(draft.tailored_cv or "", applicant)),
+        # WO-21: the ONLY build entry into the send — each document is
+        # text-layer-verified inside the wrapper, and a broken one raises
+        # PdfTextLayerError (handled below) BEFORE anything is dispatched.
+        for filename, blob in pdf_service.send_attachment_pdfs(
+            draft.cover_letter or "", draft.tailored_cv or "", applicant
         ):
             attachments.append(
                 {"filename": filename, "content": base64.b64encode(blob).decode("utf-8")}
@@ -1129,6 +1221,14 @@ def _send_with_pdfs(
         application.status = "sent"
         application.sent_at = utc_now()
         logger.info("Tailored application sent to %s (id=%s)", application.target_email, email.get("id"))
+    except pdf_service.PdfTextLayerError as e:
+        # WO-21: a document the employer's ATS parser cannot read is a
+        # FAILED send, not a degraded one — block before dispatch with
+        # the user-facing reason on the application row.
+        application.status = "failed"
+        application.error = str(e)
+        logger.error("PDF text-layer verification failed — send blocked: %s", e)
+        return
     except Exception as e:  # noqa: BLE001
         application.status = "failed"
         application.error = f"Email send failed: {e}"
