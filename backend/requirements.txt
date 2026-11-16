@@ -12,7 +12,7 @@ python-multipart>=0.0.32
 resend>=2.49.1
 APScheduler>=3.11.3
 python-dotenv>=1.2.3
-fpdf2>=2.7.9
+fpdf2>=2.9.0
 
 # MIG-WO2: auth verifies Supabase JWTs (ES256 via JWKS) — no auth
 # framework; migrations, storage as before
