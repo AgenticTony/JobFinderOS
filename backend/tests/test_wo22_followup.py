@@ -284,9 +284,18 @@ def test_ac_2(db):
         ("500", 500, expiry_warning(500), True),
         ("502", 502, expiry_warning(502), True),
         ("503", 503, expiry_warning(503), True),
-        # transient throttling / request timeout — warned, NOT death
-        ("408", 408, expiry_warning(408), False),
-        ("429", 429, expiry_warning(429), False),
+        # transient throttling / request timeout — their own copy (not
+        # the expiry text), NOT death
+        ("408", 408, (
+            "Apply portal returned HTTP 408 at hand-off — the portal "
+            "timed out. The link most likely still works; try opening "
+            "it again."
+        ), False),
+        ("429", 429, (
+            "Apply portal returned HTTP 429 at hand-off — the portal "
+            "asked us to slow down. The link most likely still works; "
+            "try opening it again in a minute."
+        ), False),
         # bot-block class — unchanged (not death)
         ("401", 401, BOT_BLOCK_401, False),
         ("403", 403, BOT_BLOCK_403, False),

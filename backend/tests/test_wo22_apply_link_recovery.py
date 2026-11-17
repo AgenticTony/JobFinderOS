@@ -41,7 +41,8 @@ DEAD_URL = "https://jobviewtrack.example/dead-apply"
 TWIN_URL = "https://acme-employer.example/careers/integration-developer"
 
 # Today's warning text, verbatim from the probe (the AC-4 contract:
-# byte-identical). 401/403 have their own text; every other >= 400
+# byte-identical). 401/403 have their own text; 408 and 429 get their
+# own transient copy (not the expiry text); every other >= 400
 # (405 aside) is the expiry class.
 BOT_BLOCK_401 = (
     "Apply portal blocked our automated check (HTTP 401) — many employer "
