@@ -222,10 +222,12 @@ def test_ac_2(db, monkeypatch):
     )
     assert app.link_recovery is None, "no substitution -> no audit entry"
 
-    # An email-only twin carries no HTTP link, so it cannot be probed —
-    # it is never handed off and never recorded as a recovery. A
-    # different title keeps this scenario's pool isolated from the twin
-    # the first half of this test created.
+    # Owner decision 2026-11-17 (reversing this file's s1 rule): an
+    # email-only twin IS a recovery path. It has no HTTP link, so it is
+    # not probed and there is no link to substitute — the original link
+    # stays and the recovery is recorded as the twin's email + source.
+    # A different title keeps this scenario's pool isolated from the
+    # twin the first half of this test created.
     user2, profile2 = _actor(db, label="wo22mail")
     dead2 = _job(db, title="Radiology Nurse", company="Care AB",
                  url=DEAD_URL, application_url=None, application_email=None)
@@ -234,9 +236,17 @@ def test_ac_2(db, monkeypatch):
          application_url=None, application_email="jobs@care.example")
     app2, _ = _submit(db, monkeypatch, user2, profile2, dead2,
                       {"jobviewtrack.example": 404})
-    assert app2.apply_url == DEAD_URL
-    assert app2.error == expiry_warning(404)
-    assert app2.link_recovery is None
+    assert app2.apply_url == DEAD_URL, (
+        "an email-only twin has no HTTP link to substitute — keep the original"
+    )
+    recovery2 = json.loads(app2.link_recovery)
+    assert recovery2["twin_email"] == "jobs@care.example"
+    assert recovery2["source"] == "jobtech"
+    assert recovery2["dead_url"] == DEAD_URL
+    assert "dead" in (app2.error or "").lower(), app2.error
+    assert "jobtech" in app2.error and "jobs@care.example" in app2.error, (
+        f"the note must name the twin's source and application email: {app2.error!r}"
+    )
 
 
 # ---------------------------------------------------------------------

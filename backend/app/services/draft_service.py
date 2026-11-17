@@ -827,16 +827,20 @@ def _probe_apply_link(apply_url: Optional[str]) -> tuple:
 
     Returns (warning, dead_code): `warning` is the user-facing message or
     None (alive, 405, or probe noise); `dead_code` is the HTTP status ONLY
-    when the outcome is the expiry class — a DEFINITE failure. 401/403 get
-    their own message and are NOT death: they refused the CHECK's client,
-    not the user — bank, insurer and recruiter domains routinely 403
-    non-browser clients while serving browsers the same page (verified
-    externally, ai-job-search's 09-web-research: Barclays et al.), so
-    reporting them as expiry is exactly the false alarm this probe
-    promises never to raise, and triggering link recovery on them would
-    swap a working link for a twin on the strength of a bot-block.
-    Timeouts and connection errors stay silent: 'unknown' is not 'dead',
-    and probe noise must never cry wolf."""
+    when the outcome is the expiry class — a DEFINITE failure: 404, 410,
+    or any 5xx. 401/403 get their own message and are NOT death: they
+    refused the CHECK's client, not the user — bank, insurer and
+    recruiter domains routinely 403 non-browser clients while serving
+    browsers the same page (verified externally, ai-job-search's
+    09-web-research: Barclays et al.), so reporting them as expiry is
+    exactly the false alarm this probe promises never to raise, and
+    triggering link recovery on them would swap a working link for a
+    twin on the strength of a bot-block. The same discipline covers the
+    TRANSIENT 4xx — 408 (request timeout) and 429 (rate limited) mean
+    'try again', not 'gone': the warning still shows (the check DID
+    fail), but no twin lookup fires and the link stays. Timeouts and
+    connection errors stay silent: 'unknown' is not 'dead', and probe
+    noise must never cry wolf."""
     if not apply_url:
         return None, None
     try:
@@ -852,29 +856,44 @@ def _probe_apply_link(apply_url: Optional[str]) -> tuple:
                 None,
             )
         if response.status_code != 405 and response.status_code >= 400:
+            dead_code = (
+                response.status_code
+                if (
+                    response.status_code in (404, 410)
+                    or response.status_code >= 500
+                )
+                else None
+            )
             return (
                 f"Apply portal returned HTTP {response.status_code} at hand-off — "
                 "this posting may have expired. Check the page loads before applying.",
-                response.status_code,
+                dead_code,
             )
     except Exception:  # noqa: BLE001 — a probe failure is context, never a submit failure
         return None, None
     return None, None
 
 
-def _probe_apply_portal(apply_url: Optional[str]) -> Optional[str]:
-    """The hand-off warning for one URL — the user-facing half of
-    _probe_apply_link (see it for the 401/403/timeout semantics)."""
-    warning, _ = _probe_apply_link(apply_url)
-    return warning
-
-
 def _twin_apply_link(twin: JobPosting) -> Optional[str]:
     """The twin's probeable HTTP link: its direct apply route
-    (application_url) when it has one, else its posting URL. A twin with
-    only an application_email has NO HTTP link — it cannot be probed and
-    is never used for recovery (WO-22)."""
-    return (twin.application_url or twin.url or "").strip() or None
+    (application_url) when it has one, else its posting URL — unless that
+    URL is link-degraded (an aggregator interstitial, not the employer's
+    page), in which case the twin has no HTTP link here. A twin left with
+    only an application_email has NO HTTP link: it cannot be probed, and
+    it is handed off as an email path, never as a URL substitution
+    (owner decision 2026-11-17, reversing the s1 rule)."""
+    if (twin.application_url or "").strip():
+        return twin.application_url.strip()
+    url = (twin.url or "").strip()
+    if not url:
+        return None
+    from app.core.dedupe import is_link_degraded
+
+    # the degraded check is about the URL itself — an application_email
+    # on the row does not make an aggregator interstitial a real page
+    if is_link_degraded(url=url, application_url=None, application_email=None):
+        return None
+    return url
 
 
 def _find_live_twin(db: Session, job: JobPosting) -> Optional[JobPosting]:
@@ -883,23 +902,41 @@ def _find_live_twin(db: Session, job: JobPosting) -> Optional[JobPosting]:
     for the same job's live copy before declaring the posting expired.
 
     Same machinery as the WO-18 collapse, in the same order:
-    title_bucket pre-filter -> likely_same_job confirmation (the exact
-    fuzzy gate, including ad-text identity for sister-brand re-posts)
+    title_bucket pre-filter (an (id, title) pass — full rows load only
+    for the survivors) -> likely_same_job confirmation (the exact fuzzy
+    gate, including ad-text identity for sister-brand re-posts)
     -> collapse_preference ranking (not degraded, direct apply route,
-    higher-ranked source, direct employer, fuller text). Candidates are
-    RE-PROBED in preference order and the first one whose own link is
-    not DEFINITELY dead wins — a twin whose link is also dead is not a
-    recovery, and 401/403/timeout outcomes leave it trusted (the same
-    not-death semantics the original link's probe applies)."""
+    higher-ranked source, direct employer, fuller text). Twins with an
+    HTTP link are RE-PROBED in preference order and the first one whose
+    own link is not DEFINITELY dead wins — a twin whose link is also
+    dead is not a recovery, and 401/403/timeout outcomes leave it
+    trusted (the same not-death semantics the original link's probe
+    applies). An email-only twin (no application_url, url missing or
+    link-degraded) is a recovery path too (owner decision 2026-11-17):
+    it has no HTTP link to probe, and it ranks below every twin whose
+    HTTP link passed the re-probe."""
     from app.core.dedupe import collapse_preference, likely_same_job, title_bucket
 
     bucket = title_bucket(job.title)
     if not bucket:
         return None
+    # Phase 1 — the title_bucket pre-filter reads (id, title) only. The
+    # bucket test never needs descriptions, and pulling the FULL rows
+    # (descriptions included) of every posting in the pool is the scan's
+    # whole cost; only the survivors earn a full load.
+    same_bucket_ids = [
+        row.id
+        for row in db.query(JobPosting.id, JobPosting.title)
+        .filter(JobPosting.id != job.id)
+        .all()
+        if title_bucket(row.title) == bucket
+    ]
+    if not same_bucket_ids:
+        return None
+    # Phase 2 — full JobPosting rows (descriptions included) for the
+    # pre-filter survivors only.
     candidates: List[JobPosting] = []
-    for twin in db.query(JobPosting).filter(JobPosting.id != job.id).all():
-        if title_bucket(twin.title) != bucket or not _twin_apply_link(twin):
-            continue
+    for twin in db.query(JobPosting).filter(JobPosting.id.in_(same_bucket_ids)):
         if not likely_same_job(
             title_a=job.title, company_a=job.company, location_a=job.location,
             title_b=twin.title, company_b=twin.company, location_b=twin.location,
@@ -913,9 +950,19 @@ def _find_live_twin(db: Session, job: JobPosting) -> Optional[JobPosting]:
         application_email=twin.application_email,
         description=twin.description,
     ))
+    # HTTP twins first: re-probed in preference order, first one whose
+    # own link is not DEFINITELY dead wins.
     for twin in candidates:
-        _, dead_code = _probe_apply_link(_twin_apply_link(twin))
+        link = _twin_apply_link(twin)
+        if link is None:
+            continue
+        _, dead_code = _probe_apply_link(link)
         if dead_code is None:
+            return twin
+    # Email-only twins rank below every HTTP twin that survived the
+    # re-probe: no link to probe, first in preference order wins.
+    for twin in candidates:
+        if twin.application_email and _twin_apply_link(twin) is None:
             return twin
     return None
 
@@ -1069,25 +1116,52 @@ def submit_draft(
                 twin = _find_live_twin(db, job) if dead_code is not None else None
                 if twin is not None:
                     twin_link = _twin_apply_link(twin)
-                    note = (
-                        "The scraped apply link was dead (HTTP "
-                        f"{dead_code}) — opened the original posting from "
-                        f"{twin.source} instead."
-                    )
-                    application.apply_url = twin_link
-                    application.error = note
-                    application.link_recovery = json.dumps({
-                        "dead_url": apply_url,
-                        "twin_url": twin_link,
-                        "source": twin.source,
-                        "recovered_at": utc_now().isoformat(),
-                        "note": note,
-                    })
-                    logger.warning(
-                        "Browser hand-off %s dead (HTTP %s) — substituted "
-                        "pool twin %s from %s",
-                        apply_url, dead_code, twin_link, twin.source,
-                    )
+                    if twin_link:
+                        note = (
+                            "The scraped apply link was dead (HTTP "
+                            f"{dead_code}) — opened the original posting from "
+                            f"{twin.source} instead."
+                        )
+                        application.apply_url = twin_link
+                        application.error = note
+                        application.link_recovery = json.dumps({
+                            "dead_url": apply_url,
+                            "twin_url": twin_link,
+                            "source": twin.source,
+                            "recovered_at": utc_now().isoformat(),
+                            "note": note,
+                        })
+                        logger.warning(
+                            "Browser hand-off %s dead (HTTP %s) — substituted "
+                            "pool twin %s from %s",
+                            apply_url, dead_code, twin_link, twin.source,
+                        )
+                    else:
+                        # Email-only twin (owner decision 2026-11-17): the
+                        # recovery path is the twin's application email —
+                        # there is no HTTP link to substitute, so the
+                        # original link stays and the row says where to
+                        # apply instead.
+                        twin_email = twin.application_email.strip()
+                        note = (
+                            "The scraped apply link was dead (HTTP "
+                            f"{dead_code}) — the original posting from "
+                            f"{twin.source} takes applications by email: "
+                            f"{twin_email}."
+                        )
+                        application.error = note
+                        application.link_recovery = json.dumps({
+                            "dead_url": apply_url,
+                            "twin_email": twin_email,
+                            "source": twin.source,
+                            "recovered_at": utc_now().isoformat(),
+                            "note": note,
+                        })
+                        logger.warning(
+                            "Browser hand-off %s dead (HTTP %s) — email-only "
+                            "pool twin from %s offered (apply to %s)",
+                            apply_url, dead_code, twin.source, twin_email,
+                        )
                 else:
                     logger.warning("Browser hand-off %s: %s", apply_url, warning)
                     application.error = warning
