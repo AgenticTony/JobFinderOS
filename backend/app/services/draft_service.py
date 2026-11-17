@@ -855,6 +855,22 @@ def _probe_apply_link(apply_url: Optional[str]) -> tuple:
                 "will likely open fine; check the page if it does not.",
                 None,
             )
+        if response.status_code in (408, 429):
+            # The transient 4xx get their own copy (WO-22 follow-up 2):
+            # 'try again', not 'expired' — an honest warning for a
+            # status the portal may not repeat on the next attempt.
+            transient_tail = (
+                "the portal timed out. The link most likely still "
+                "works; try opening it again."
+                if response.status_code == 408
+                else "the portal asked us to slow down. The link most "
+                "likely still works; try opening it again in a minute."
+            )
+            return (
+                f"Apply portal returned HTTP {response.status_code} "
+                f"at hand-off — {transient_tail}",
+                None,
+            )
         if response.status_code != 405 and response.status_code >= 400:
             dead_code = (
                 response.status_code
@@ -894,6 +910,35 @@ def _twin_apply_link(twin: JobPosting) -> Optional[str]:
     if is_link_degraded(url=url, application_url=None, application_email=None):
         return None
     return url
+
+
+def _link_recovery_record(
+    dead_url: str,
+    code: int,
+    source: str,
+    twin_key: str,
+    twin_value: str,
+    note_tail: str,
+) -> tuple:
+    """The ONE builder for a WO-22 link-recovery hand-off: the note
+    shown on the application row and the audit record stored beside it.
+
+    `note_tail` is the note text AFTER the shared prefix, already
+    formatted by the caller — it is appended verbatim, with no
+    formatting of its own. Returns (note, record_json); record_json is
+    json.dumps of the dict with keys in this order: dead_url, the twin
+    key ('twin_url' or 'twin_email'), source, recovered_at, note. Both
+    twin branches of submit_draft build their hand-off through this, so
+    the two paths cannot drift apart."""
+    note = f"The scraped apply link was dead (HTTP {code}) — " + note_tail
+    record_json = json.dumps({
+        "dead_url": dead_url,
+        twin_key: twin_value,
+        "source": source,
+        "recovered_at": utc_now().isoformat(),
+        "note": note,
+    })
+    return note, record_json
 
 
 def _find_live_twin(db: Session, job: JobPosting) -> Optional[JobPosting]:
@@ -960,9 +1005,13 @@ def _find_live_twin(db: Session, job: JobPosting) -> Optional[JobPosting]:
         if dead_code is None:
             return twin
     # Email-only twins rank below every HTTP twin that survived the
-    # re-probe: no link to probe, first in preference order wins.
+    # re-probe: no link to probe, first in preference order wins. A
+    # BLANK email (empty or whitespace-only after strip) is not an
+    # email path at all (WO-22 follow-up 2) — such a twin is ignored
+    # here, so it is never handed off and never recorded.
     for twin in candidates:
-        if twin.application_email and _twin_apply_link(twin) is None:
+        if (twin.application_email or "").strip() and \
+                _twin_apply_link(twin) is None:
             return twin
     return None
 
@@ -1117,20 +1166,18 @@ def submit_draft(
                 if twin is not None:
                     twin_link = _twin_apply_link(twin)
                     if twin_link:
-                        note = (
-                            "The scraped apply link was dead (HTTP "
-                            f"{dead_code}) — opened the original posting from "
-                            f"{twin.source} instead."
+                        note, record_json = _link_recovery_record(
+                            apply_url,
+                            dead_code,
+                            twin.source,
+                            "twin_url",
+                            twin_link,
+                            "opened the original posting from "
+                            f"{twin.source} instead.",
                         )
                         application.apply_url = twin_link
                         application.error = note
-                        application.link_recovery = json.dumps({
-                            "dead_url": apply_url,
-                            "twin_url": twin_link,
-                            "source": twin.source,
-                            "recovered_at": utc_now().isoformat(),
-                            "note": note,
-                        })
+                        application.link_recovery = record_json
                         logger.warning(
                             "Browser hand-off %s dead (HTTP %s) — substituted "
                             "pool twin %s from %s",
@@ -1143,20 +1190,18 @@ def submit_draft(
                         # original link stays and the row says where to
                         # apply instead.
                         twin_email = twin.application_email.strip()
-                        note = (
-                            "The scraped apply link was dead (HTTP "
-                            f"{dead_code}) — the original posting from "
-                            f"{twin.source} takes applications by email: "
-                            f"{twin_email}."
+                        note, record_json = _link_recovery_record(
+                            apply_url,
+                            dead_code,
+                            twin.source,
+                            "twin_email",
+                            twin_email,
+                            f"the original posting from {twin.source} "
+                            "takes applications by email: "
+                            f"{twin_email}.",
                         )
                         application.error = note
-                        application.link_recovery = json.dumps({
-                            "dead_url": apply_url,
-                            "twin_email": twin_email,
-                            "source": twin.source,
-                            "recovered_at": utc_now().isoformat(),
-                            "note": note,
-                        })
+                        application.link_recovery = record_json
                         logger.warning(
                             "Browser hand-off %s dead (HTTP %s) — email-only "
                             "pool twin from %s offered (apply to %s)",
