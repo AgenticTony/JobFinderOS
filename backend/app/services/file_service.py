@@ -10,6 +10,16 @@ import pdfplumber
 
 logger = logging.getLogger(__name__)
 
+# J-2: the one user-facing message for a CV whose text cannot be
+# extracted (a scan, an image-only export, a corrupt body). Whatever the
+# reader raised is server-side knowledge — the user gets what happened
+# and what to upload instead, and is never told to retry the same file
+# (a retry cannot make a scan readable).
+PDF_TEXT_UNREADABLE_MESSAGE = (
+    "We could not read the text of this file — it may be a scan or an "
+    "image-only document. Please upload a text-based PDF or a DOCX instead."
+)
+
 
 class FileService:
     """Service for handling file operations."""
@@ -45,8 +55,16 @@ class FileService:
             return full_text
 
         except Exception as e:
-            logger.error("PDF text extraction failed: %s", e)
-            raise ValueError(f"Failed to extract text from PDF: {str(e)}")
+            # J-2 (and the docstring sibling's rationale): the reader's
+            # own words — pdfminer syntax errors, empty-layer scans — are
+            # server-side knowledge, logged with the traceback; the 400
+            # the upload path maps this to carries the fixed message
+            # with what to do instead.
+            logger.error(
+                "PDF text extraction failed (%s): %s",
+                type(e).__name__, e, exc_info=True,
+            )
+            raise ValueError(PDF_TEXT_UNREADABLE_MESSAGE)
 
     @staticmethod
     def validate_size(file_content: bytes, max_size_mb: int = 5) -> None:

@@ -171,7 +171,22 @@ async def scan(
             asyncio.run, scan_replies(db, user.id, gmail_fetch_messages)
         )
     except composio_service.ComposioError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        # J-2: the vendor's response body and this exception's text are
+        # server-side knowledge — logged with the traceback. The user is
+        # told the mail service did not answer and to try again shortly
+        # (retrying IS the right advice here: the failure is the mail
+        # service, not the request and not their mailbox connection).
+        logger.error(
+            "Reply scan failed — Composio error (%s): %s",
+            type(e).__name__, e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "We could not reach your mailbox right now. "
+                "Please try again in a little while."
+            ),
+        )
     swept = await run_in_threadpool(propose_no_response_sweep, db, user_id=user.id)
     summary["sweep_proposals"] = swept
     return summary
