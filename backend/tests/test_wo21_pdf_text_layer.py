@@ -18,7 +18,7 @@ added:
              glyph-survival check fails the substitution without any
              test-supplied phrase.
 - test_ac_2  every PDF round-trip the suite ships (cover letter + CV,
-             ascii AND non-ascii applicant names) survives pypdf
+             ascii AND non-ascii applicant names) survives reader
              extraction with a minimum character count and a known
              phrase intact — compared whitespace-collapsed, because line
              wrapping splits a source line wherever font metrics decide
@@ -39,18 +39,16 @@ added:
 """
 
 import inspect
-import io
 import os
-import re
 
 import pytest
 from fastapi.testclient import TestClient
 from fpdf import FPDF
-from pypdf import PdfReader
 
 from app.core.database import SessionLocal, engine
 from app.main import app
 from app.services import draft_service, pdf_service
+from app.services.pdf_service import extract_text, normalize_ws
 
 # Built by concatenation so no single credential-shaped literal sits in
 # the source (secret scanners flag fixed test passwords; the value is a
@@ -88,20 +86,14 @@ KNOWN_PHRASE = (
 )
 NON_ASCII_NAME = "Åsa Müllér-Lindqvist"
 
-
-def _extract(pdf_bytes: bytes) -> str:
-    """Extract exactly the way the runtime check does (pypdf, all pages)."""
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    return "\n".join((page.extract_text() or "") for page in reader.pages)
-
-
-def _normws(text: str) -> str:
-    """Collapse whitespace the way the runtime check does for phrase
-    containment: line wrapping splits a source line anywhere font metrics
-    decide, so containment must be compared wrap-insensitively (this bit
-    us once: the em-dash phrase wrapped mid-phrase under DejaVu metrics
-    on the ubuntu CI runner and the exact-substring assert went red)."""
-    return re.sub(r"\s+", " ", text).strip()
+# J-1: extraction and whitespace-collapsing come from pdf_service — the
+# one home for each helper — so this suite observes the SAME reader the
+# runtime check uses instead of re-implementing it. (Containment stays
+# wrap-insensitive for the reason the old local helper's docstring
+# recorded: line wrapping splits a source line anywhere font metrics
+# decide — under DejaVu metrics on the ubuntu CI runner the em-dash
+# phrase once wrapped mid-phrase and the exact-substring assert went
+# red.)
 
 
 def _graphics_only_pdf() -> bytes:
@@ -129,7 +121,7 @@ def test_ac_1(monkeypatch):
     assert pdf_service._UnicodePDF().unicode_ok is False
 
     broken = pdf_service.cover_letter_pdf(KNOWN_PHRASE, NON_ASCII_NAME)
-    extracted = _extract(broken)
+    extracted = extract_text(broken)
     # Fixture sanity — the render really is broken the way production was:
     assert KNOWN_PHRASE not in extracted, repr(extracted)
     assert "?" in extracted, repr(extracted)
@@ -174,7 +166,7 @@ ROUND_TRIP_MIN_CHARS = 200
 
 
 def test_ac_2():
-    """AC-2: every PDF round-trip survives pypdf extraction.
+    """AC-2: every PDF round-trip survives reader extraction.
 
     Cover letter AND tailored CV paths, ascii AND non-ascii applicant
     names: a minimum extracted-character count AND the known phrase (and
@@ -192,23 +184,23 @@ def test_ac_2():
             text = pdf_service.verify_text_layer(
                 blob, source_text=f"{applicant}\n{ROUND_TRIP_BODY}", label=title
             )
-            # ...and independently with pypdf at the seam the ATS sees.
-            extracted = _extract(blob)
-            hay = _normws(extracted)
+            # ...and independently at the seam the ATS sees.
+            extracted = extract_text(blob)
+            hay = normalize_ws(extracted)
             assert extracted.strip() == text
             assert len(extracted) >= ROUND_TRIP_MIN_CHARS, (
                 render.__name__, applicant, len(extracted), repr(extracted)
             )
             # Whitespace-collapsed containment: wrapping splits the phrase
             # across lines wherever the font's metrics decide to break.
-            assert _normws(KNOWN_PHRASE) in hay, (render.__name__, applicant)
+            assert normalize_ws(KNOWN_PHRASE) in hay, (render.__name__, applicant)
             assert title in hay, (render.__name__, applicant)
             for part in applicant.split():
                 assert part in hay, (render.__name__, applicant, part)
 
     # The ascii-name CV fixture (the classic ATS input) keeps its section
     # headers extractable — the structure an ATS parses, not just prose.
-    extracted = _extract(pdf_service.tailored_cv_pdf(ROUND_TRIP_BODY, "Test Candidate"))
+    extracted = extract_text(pdf_service.tailored_cv_pdf(ROUND_TRIP_BODY, "Test Candidate"))
     assert "PROFESSIONAL SUMMARY" in extracted, repr(extracted)
 
 
@@ -368,8 +360,8 @@ def test_send_path_blocks_substitution_but_not_the_ascii_fallback(monkeypatch):
         "Cover Letter - Test Candidate.pdf",
         "CV - Test Candidate (tailored).pdf",
     ]
-    extracted = _extract(attachments[0][1])
-    assert _normws(ASCII_ONLY_LETTER) in _normws(extracted)
+    extracted = extract_text(attachments[0][1])
+    assert normalize_ws(ASCII_ONLY_LETTER) in normalize_ws(extracted)
 
 
 def test_floor_never_blocks_a_short_or_empty_draft():
@@ -436,8 +428,8 @@ def test_download_endpoints_verify_text_layer(client, db, monkeypatch):
         resp = client.get(path, headers=headers)
         assert resp.status_code == 200, (path, resp.status_code, resp.text)
         assert resp.headers["content-type"] == "application/pdf"
-        extracted = _extract(resp.content)
-        assert _normws(KNOWN_PHRASE) in _normws(extracted), path
+        extracted = extract_text(resp.content)
+        assert normalize_ws(KNOWN_PHRASE) in normalize_ws(extracted), path
 
         # Fontless render (the AC-1 failure class): refused with the
         # verification reason, not served as a glyph-substituted PDF.
