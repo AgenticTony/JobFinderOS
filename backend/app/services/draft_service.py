@@ -237,6 +237,31 @@ class EmailApplyDisabledError(DraftError):
     the DraftError handler maps this to 400 with the beta message."""
 
 
+class OriginalCvUnreadableError(Exception):
+    """The stored original CV could not be read at dispatch time (the
+    2026-10-30 D1 audit branch): nothing was sent, nothing was lost.
+
+    J-2: raised by BOTH send paths (draft_service._send_with_pdfs and
+    apply_service._send_email_application) so the one handler each of
+    them has can give this failure its own user-facing advice (re-upload
+    first, then retry). The exception's own text is server-side only.
+    """
+
+
+# J-2: the user-facing send-failure messages — fixed strings, because
+# the SDK's exception text (the only thing that varied before) is
+# server-side knowledge, never copy for the application's error column.
+# Both messages say the one fact that matters first: nothing was sent.
+SEND_FAILED_MESSAGE = (
+    "Something went wrong while sending, so the email was not sent. "
+    "You can retry it from this application."
+)
+CV_UNREADABLE_MESSAGE = (
+    "We could not read your original CV file, so the email was not sent. "
+    "Please re-upload your CV, then retry it from this application."
+)
+
+
 def get_draft(db: Session, draft_id: int) -> Optional[ApplicationDraft]:
     return db.query(ApplicationDraft).filter(ApplicationDraft.id == draft_id).first()
 
@@ -1308,10 +1333,11 @@ def _send_with_pdfs(
             # two, marked the application 'sent', and left no trace —
             # the user believes the employer has their original CV.
             # Raising here lands in the except below: failed, retryable,
-            # nothing dispatched.
-            raise ValueError(
-                "Original CV file could not be read — nothing was sent. "
-                "Try again, or re-upload your CV first."
+            # nothing dispatched. J-2: the typed exception carries its
+            # own advice branch (re-upload) — the raised text itself is
+            # server-side only.
+            raise OriginalCvUnreadableError(
+                "Original CV file could not be read — nothing was sent"
             )
         attachments.append(
             {
@@ -1348,7 +1374,23 @@ def _send_with_pdfs(
         application.error = str(e)
         logger.error("PDF text-layer verification failed — send blocked: %s", e)
         return
-    except Exception as e:  # noqa: BLE001
+    except OriginalCvUnreadableError as e:
+        # J-2: the send never left — the message says what to do first
+        # (re-upload), because a plain retry would fail the same way.
         application.status = "failed"
-        application.error = f"Email send failed: {e}"
-        logger.error("Tailored application send failed: %s", e)
+        application.error = CV_UNREADABLE_MESSAGE
+        logger.error(
+            "Tailored application send aborted — original CV unreadable "
+            "(%s): %s", type(e).__name__, e, exc_info=True,
+        )
+        return
+    except Exception as e:  # noqa: BLE001
+        # J-2: a dispatch failure the user can only wait out and retry.
+        # The SDK's exception text and type are server-side knowledge —
+        # logged with the traceback, never copied into the error column.
+        application.status = "failed"
+        application.error = SEND_FAILED_MESSAGE
+        logger.error(
+            "Tailored application send failed (%s): %s",
+            type(e).__name__, e, exc_info=True,
+        )

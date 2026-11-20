@@ -20,6 +20,15 @@ from app.core.config import settings
 from app.core.timeutil import utc_now
 from app.models import Application, JobPosting
 
+# J-2: the send-failure exception and the two user-facing messages have
+# ONE home (draft_service, the primary send path) — this module's retry
+# paths raise/honour the same literals so the two flows cannot drift.
+from app.services.draft_service import (
+    CV_UNREADABLE_MESSAGE,
+    SEND_FAILED_MESSAGE,
+    OriginalCvUnreadableError,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -128,10 +137,11 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
             # original CV. The old `if original_cv:` dispatched an
             # attachment-less application email, marked it 'sent', and
             # left no trace. Raising lands in the except below: failed,
-            # retryable, nothing dispatched.
-            raise ValueError(
-                "Original CV file could not be read — nothing was sent. "
-                "Try again, or re-upload your CV first."
+            # retryable, nothing dispatched. J-2: the typed exception
+            # carries its own advice branch (re-upload) — the raised
+            # text itself is server-side only.
+            raise OriginalCvUnreadableError(
+                "Original CV file could not be read — nothing was sent"
             )
         attachments.append(
             {
@@ -157,7 +167,22 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
         application.status = "sent"
         application.sent_at = utc_now()
         logger.info("Application email sent to %s (id=%s)", application.target_email, email.get("id"))
-    except Exception as e:  # noqa: BLE001
+    except OriginalCvUnreadableError as e:
+        # J-2: the send never left — the message says what to do first
+        # (re-upload), because a plain retry would fail the same way.
         application.status = "failed"
-        application.error = f"Email send failed: {e}"
-        logger.error("Application email failed: %s", e)
+        application.error = CV_UNREADABLE_MESSAGE
+        logger.error(
+            "Application email aborted — original CV unreadable (%s): %s",
+            type(e).__name__, e, exc_info=True,
+        )
+    except Exception as e:  # noqa: BLE001
+        # J-2: a dispatch failure the user can only wait out and retry.
+        # The SDK's exception text and type are server-side knowledge —
+        # logged with the traceback, never copied into the error column.
+        application.status = "failed"
+        application.error = SEND_FAILED_MESSAGE
+        logger.error(
+            "Application email failed (%s): %s",
+            type(e).__name__, e, exc_info=True,
+        )
