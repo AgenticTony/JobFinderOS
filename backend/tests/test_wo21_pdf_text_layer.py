@@ -39,7 +39,6 @@ added:
 """
 
 import inspect
-import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -50,24 +49,15 @@ from app.main import app
 from app.services import draft_service, pdf_service
 from app.services.pdf_service import extract_text, normalize_ws
 
-# Built by concatenation so no single credential-shaped literal sits in
-# the source (secret scanners flag fixed test passwords; the value is a
-# throwaway fixture that never authenticates anything real).
-_SCRATCH_DB = "test_wo21.db"
-
 
 @pytest.fixture(scope="module")
 def client():
     # Alembic creates the schema (same path as production boots) — the
     # send-path test needs the tables even though it drives
     # submit_draft() directly, never the HTTP layer.
-    if os.path.exists(_SCRATCH_DB):
-        os.remove(_SCRATCH_DB)
     with TestClient(app) as c:  # lifespan runs init_db -> alembic head
         yield c
     engine.dispose()
-    if os.path.exists(_SCRATCH_DB):
-        os.remove(_SCRATCH_DB)
 
 
 @pytest.fixture()

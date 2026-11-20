@@ -17,7 +17,10 @@ test_ac_1  every blocked-check message begins with exactly one of the
            download never does. verify_text_layer(context=...) builds
            the message once; the real download endpoints return it as
            the HTTP 500 detail and the real send flow lands it on
-           application.error, unchanged.
+           application.error, unchanged. J-3 pins the advice half of
+           the wording J-3 deliberately changed: only 'unreadable PDF'
+           advises retrying; the three content classes end with their
+           own draft-pointing advice and never say 'try again'.
 test_ac_2  when the reader raises, its exception text reaches NEITHER
            user-facing surface — the original exception (message, with
            traceback) is logged server-side on both paths.
@@ -25,12 +28,14 @@ test_ac_3  one extraction helper and one whitespace-collapse helper:
            pdf_service.extract_text / pdf_service.normalize_ws, imported
            — not re-implemented — by the two PDF suites, and actually
            exposed by pdf_service under those public names (the private
-           _normalize_ws is gone, its own callers updated).
+           _normalize_ws is gone, its own callers updated). J-3: every
+           source check in it is made with ast over the parsed source,
+           so a comment, docstring or string literal can neither satisfy
+           nor break it.
 """
 
 import ast
 import logging
-import os
 import pathlib
 import uuid
 
@@ -47,11 +52,6 @@ from app.services.draft_service import submit_draft
 from app.services.pdf_service import extract_text
 from tests.auth_helpers import get_or_create_user, mint_token
 
-# Built by concatenation so no single credential-shaped literal sits in
-# the source (the value is a throwaway fixture that authenticates a
-# mirror row in the throwaway test database, nothing real).
-_SCRATCH_DB = "test_j1.db"
-
 # The four class markers and the two document names, verbatim from the
 # approved contract — the wording is the contract, not this module's
 # opinion. A blocked-check message begins with exactly one marker.
@@ -63,6 +63,17 @@ MARKERS = (
 )
 DOCUMENTS = ("cover letter", "tailored CV")
 NOT_SENT = "the application was NOT sent."
+
+# J-3: the advice half of each message — the wording J-3 deliberately
+# changed per class. Only the unreadable class advises retrying (the
+# contract's exact sentence); each content class ends with its own
+# advice, which lives in the draft, and never says "try again".
+RETRY_ADVICE = "try again; if this keeps happening, contact the operator"
+CONTENT_CLASS_ADVICE = {
+    "text layer too short": "check the draft's content.",
+    "characters lost": "replace those characters in the draft.",
+    "required phrase lost": "check the draft's formatting.",
+}
 
 # A body every render path draws faithfully (pure ascii: survives the
 # unicode font AND the latin-1 core-font fallback alike).
@@ -82,13 +93,9 @@ GARBAGE_PDF = b"this is not a pdf; the reader must raise on it"
 def client():
     # Alembic creates the schema (same path as production boots) — the
     # endpoint and send-flow tests need the tables.
-    if os.path.exists(_SCRATCH_DB):
-        os.remove(_SCRATCH_DB)
     with TestClient(app) as c:  # lifespan runs init_db -> alembic head
         yield c
     engine.dispose()
-    if os.path.exists(_SCRATCH_DB):
-        os.remove(_SCRATCH_DB)
 
 
 @pytest.fixture()
@@ -235,10 +242,12 @@ def test_ac_1(client, db, monkeypatch):
     """AC-1: a blocked PDF check says what failed, per surface.
 
     Part 1 drives all four failure classes through verify_text_layer in
-    both contexts and for both document names. Parts 2 and 3 prove the
-    real surfaces pass that message through untouched: each download
-    endpoint returns it as the HTTP 500 detail, and the real send flow
-    lands it on application.error — equal to what the seam built.
+    both contexts and for both document names — shape first (J-1's own
+    rules), then the advice half of the wording J-3 deliberately
+    changed. Parts 2 and 3 prove the real surfaces pass that message
+    through untouched: each download endpoint returns it as the HTTP 500
+    detail, and the real send flow lands it on application.error —
+    equal to what the seam built.
     """
     # --- Part 1: four classes x two contexts x two documents, at the seam ---
     for marker, blob, kwargs in _forced_classes():
@@ -246,6 +255,21 @@ def test_ac_1(client, db, monkeypatch):
             for document in DOCUMENTS:
                 message = _message_for(blob, context=context, label=document, **kwargs)
                 assert message.startswith(marker), (marker, context, document, message)
+                # J-3: the advice half — only the unreadable class may
+                # offer a retry; a content class ends with its own
+                # draft-pointing advice instead.
+                if marker == "unreadable PDF":
+                    assert RETRY_ADVICE in message, (marker, context, document, message)
+                else:
+                    assert "try again" not in message.lower(), (
+                        marker,
+                        context,
+                        document,
+                        message,
+                    )
+                    assert message.rstrip().lower().endswith(
+                        CONTENT_CLASS_ADVICE[marker]
+                    ), (marker, context, document, message)
                 _assert_message_shape(message, context, document)
 
     # --- Part 2: through each real download endpoint, detail == message ---
@@ -345,9 +369,200 @@ def test_ac_2(client, db, monkeypatch, caplog):
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 PDF_SUITES = ("test_pdf_fonts.py", "test_wo21_pdf_text_layer.py")
-# The single import line both PDF suites must use — one extraction
-# helper and one whitespace-collapse helper, from their one home.
-_HELPER_IMPORT = "from app.services.pdf_service import extract_text, normalize_ws"
+PDF_SERVICE = "pdf_service"  # _read_source's key for the service's own source
+
+
+def _read_source(name: str) -> str:
+    """The ONE seam every AC-3 source check reads through.
+
+    J-3's test_ac_2 monkeypatches this to run the whole check against a
+    doctored source — comments that name everything a substring check
+    would look for, or a structural violation wearing them — which is
+    exactly the experiment that decides whether these checks are
+    structural or textual.
+    """
+    if name == PDF_SERVICE:
+        return pathlib.Path(pdf_service.__file__).read_text()
+    return (TESTS_DIR / name).read_text()
+
+
+# --- the checks: ast over the parsed source, nothing else (J-3) ---
+# A comment, docstring or string literal is invisible to every function
+# below, because none of them ever looks at the source's text.
+
+
+def _imports_module(tree: ast.Module, module: str) -> bool:
+    """"import module" or "from module import ...", anywhere in the file."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(
+                alias.name == module or alias.name.startswith(module + ".")
+                for alias in node.names
+            ):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if base == module or base.startswith(module + "."):
+                return True
+    return False
+
+
+def _imports_names_from(tree: ast.Module, module: str, names) -> bool:
+    """Every given name is imported from exactly that module."""
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "") == module:
+            imported.update(alias.name for alias in node.names)
+    return set(names) <= imported
+
+
+def _name_uses(tree, name: str) -> list:
+    """Every reference to the identifier. A comment or string literal is
+    not a reference, so it cannot appear here."""
+    return [
+        node for node in ast.walk(tree) if isinstance(node, ast.Name) and node.id == name
+    ]
+
+
+def _uses_outside_function(tree, name: str, function: str) -> bool:
+    """The identifier is referenced anywhere other than inside the named
+    function (that function's own nested functions count as inside)."""
+    inside = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function:
+            inside.update(id(use) for use in _name_uses(node, name))
+    return any(id(use) not in inside for use in _name_uses(tree, name))
+
+
+def _calls_name(tree, name: str) -> bool:
+    """The identifier is CALLED somewhere in the file."""
+    return any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+        for node in ast.walk(tree)
+    )
+
+
+# The characters a regex can be built from and still be nothing but a
+# run of whitespace characters — the pattern half of a collapse.
+_WS_RUN_CHARS = set("\\stnrvf \t\n\r\x0b\x0c[]+*?{}|(),-^0123456789")
+
+
+def _collapsing_functions(tree) -> list:
+    """Functions that re-implement pdf_service.normalize_ws: collapsing a
+    whitespace run into single spaces, whether via re.sub or split/join."""
+    found = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            is_sub = isinstance(node.func, ast.Attribute) and (
+                node.func.attr == "sub"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "re"
+            )
+            plain_sub = isinstance(node.func, ast.Name) and node.func.id == "sub"
+            args = node.args
+            if (is_sub or plain_sub) and args:
+                pattern, replacement = args[0], args[1] if len(args) > 1 else None
+                if (
+                    isinstance(pattern, ast.Constant)
+                    and isinstance(pattern.value, str)
+                    and pattern.value
+                    and not (set(pattern.value) - _WS_RUN_CHARS)
+                    and isinstance(replacement, ast.Constant)
+                    and replacement.value == " "
+                ):
+                    found.append(fn.name)
+                    break
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "join"
+                and isinstance(node.func.value, ast.Constant)
+                and node.func.value.value == " "
+                and args
+                and isinstance(args[0], ast.Call)
+                and isinstance(args[0].func, ast.Attribute)
+                and args[0].func.attr == "split"
+            ):
+                found.append(fn.name)
+                break
+    return found
+
+
+def _module_string_bindings(tree) -> dict:
+    """Module-level `NAME = "literal"` assignments, so an assertion made
+    over a named constant is recognised as one made over its literal."""
+    bound = {}
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound[target.id] = node.value.value
+    return bound
+
+
+def _asserts_contains(tree, literal_matches) -> bool:
+    """An ASSERTION (`assert needle in haystack`) whose NEEDLE is a
+    string literal — or a module-level name bound to one — that the
+    given predicate recognises."""
+    bound = _module_string_bindings(tree)
+    for statement in ast.walk(tree):
+        if not isinstance(statement, ast.Assert):
+            continue
+        for node in ast.walk(statement.test):
+            if not (
+                isinstance(node, ast.Compare)
+                and len(node.ops) == 1
+                and isinstance(node.ops[0], ast.In)
+            ):
+                continue
+            needle = node.left
+            if isinstance(needle, ast.Constant) and isinstance(needle.value, str):
+                if literal_matches(needle.value):
+                    return True
+            else:
+                value = bound.get(needle.id) if isinstance(needle, ast.Name) else None
+                if value is not None and literal_matches(value):
+                    return True
+    return False
+
+
+def _has_length_floor(tree, minimum: int) -> bool:
+    """A `len(...) >= minimum` comparison — an extracted-character floor."""
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Compare)
+            and any(isinstance(op, ast.GtE) for op in node.ops)
+        ):
+            continue
+        if not any(
+            isinstance(c, ast.Constant) and c.value == minimum for c in node.comparators
+        ):
+            continue
+        if any(
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "len"
+            for call in ast.walk(node.left)
+        ):
+            return True
+    return False
+
+
+def _module_functions(tree) -> set:
+    """The module-level function names — where a helper must be defined
+    to be the importable, public one."""
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
 
 
 def test_ac_3():
@@ -359,64 +574,91 @@ def test_ac_3():
     from _normalize_ws), imported by the two PDF suites":
 
     the suites — they may IMPORT the helpers, never re-implement them
-    (no PdfReader, no pypdf import, no local whitespace-collapsing
-    re.sub), while the second, independent reader (test_pdf_fonts'
-    pdfplumber _extract) and the ATS-side assertions (the >=100-character
-    floor, the known phrase, Swedish-character survival) survive over
-    pdf_service.extract_text;
+    (no pypdf import, no PdfReader use, no local whitespace-collapsing
+    function), while the second, independent reader (test_pdf_fonts'
+    pdfplumber _extract) and the ATS-side assertions (the >= 100
+    character floor, the known phrase, Swedish-character survival)
+    survive over pdf_service.extract_text;
 
-    the service — it exposes both helpers under those public names, the
-    pre-rename private _normalize_ws is gone (its own callers updated),
-    the pypdf reader is constructed in exactly one place, and the
-    exposed helpers do the real work (they extract and collapse). This
-    half is what goes red first: before the rename, the collapse helper
-    was still the module-private _normalize_ws while extract_text
-    already existed, so a check of the suites alone proved nothing.
+    the service — the pypdf reader is used in exactly one place, inside
+    extract_text, and nowhere else in the module.
+
+    J-3: every source check above is made with ast over the parsed
+    source — one assert per check, each walking the tree through the
+    helpers above, none of them reading the source's text — so a
+    comment, docstring or string literal can neither satisfy nor break
+    it. tests/test_j3_pdf_messages.py::test_ac_2 proves both directions
+    by running THIS test against doctored sources.
     """
+    # --- the suites: import the shared helpers, never re-implement them ---
     for name in PDF_SUITES:
-        source = (TESTS_DIR / name).read_text()
-
-        # Neither file uses PdfReader or imports pypdf — the one reader
-        # lives in pdf_service.extract_text (checked as a substring, so
-        # even a comment or docstring mention counts as a use).
-        assert "PdfReader" not in source, f"{name} uses PdfReader"
-        assert "pypdf" not in source, f"{name} imports or mentions pypdf"
-
-        # Neither file defines a function that collapses whitespace with
-        # re.sub — that helper is pdf_service.normalize_ws now.
-        tree = ast.parse(source)
-        local_collapsers = [
-            node.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and "re.sub" in (ast.get_source_segment(source, node) or "")
-        ]
-        assert not local_collapsers, f"{name} re-implements the helper: {local_collapsers}"
+        tree = ast.parse(_read_source(name))
 
         # Both helpers come from pdf_service, the one home for each.
-        assert _HELPER_IMPORT in source, f"{name} does not import the shared helpers"
+        assert _imports_names_from(
+            tree, "app.services.pdf_service", ("extract_text", "normalize_ws")
+        ), (
+            f"{name} does not import extract_text and normalize_ws from "
+            "app.services.pdf_service — the shared helpers have one home"
+        )
 
-    # The second, independent reader survives: _extract over pdfplumber.
-    fonts_source = (TESTS_DIR / "test_pdf_fonts.py").read_text()
-    fonts_tree = ast.parse(fonts_source)
+        # Neither file imports pypdf — the one pypdf reader is the
+        # service's. (A file that never imports it cannot construct it.)
+        assert not _imports_module(tree, "pypdf"), (
+            f"{name} imports pypdf — the one pypdf reader is pdf_service.extract_text"
+        )
+
+        # Neither file references PdfReader: not a call, not a
+        # construction, not an alias handed to something that would.
+        assert not _name_uses(tree, "PdfReader"), (
+            f"{name} uses PdfReader — the one pypdf reader is pdf_service.extract_text"
+        )
+
+        # Neither file defines a function that collapses whitespace —
+        # that helper is pdf_service.normalize_ws now.
+        collapsers = _collapsing_functions(tree)
+        assert not collapsers, f"{name} re-implements the whitespace-collapse helper: {collapsers}"
+
+    # --- test_pdf_fonts.py: the second reader, the ATS-side assertions ---
+    fonts_tree = ast.parse(_read_source("test_pdf_fonts.py"))
     extract_fns = [
         node
         for node in fonts_tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "_extract"
     ]
     assert extract_fns, "test_pdf_fonts.py no longer defines _extract"
-    assert "pdfplumber" in ast.get_source_segment(
-        fonts_source, extract_fns[0]
-    ), "_extract is no longer the pdfplumber reader"
-
-    # And the ATS-side assertions survive, over pdf_service.extract_text:
-    # the >=100-character floor, the known phrase, Swedish survival.
-    assert "extract_text(" in fonts_source, "assertions no longer run over the service reader"
-    assert ">= 100" in fonts_source, "the character-floor assertion is gone"
-    assert "truly" in fonts_source and "about the role" in fonts_source, (
-        "the known-phrase assertion is gone"
+    assert _name_uses(extract_fns[0], "pdfplumber"), "_extract is no longer the pdfplumber reader"
+    assert _calls_name(fonts_tree, "extract_text"), (
+        "test_pdf_fonts.py no longer calls extract_text — the ATS-side "
+        "assertions no longer run over the service reader"
     )
-    assert "SWEDISH" in fonts_source, "the Swedish-character assertion is gone"
+    assert _has_length_floor(fonts_tree, 100), "the >= 100 extracted-character floor is gone"
+    assert _asserts_contains(
+        fonts_tree, lambda s: "truly" in s and "about the role" in s
+    ), "the known-phrase assertion is gone"
+    assert _asserts_contains(
+        fonts_tree, lambda s: any(ch in s for ch in "åäöÅÄÖ")
+    ), "the Swedish-character assertion is gone"
+
+    # --- the service: the pypdf reader lives only in extract_text ---
+    service_tree = ast.parse(_read_source(PDF_SERVICE))
+    assert _name_uses(service_tree, "PdfReader"), (
+        "pdf_service no longer uses PdfReader anywhere — extract_text "
+        "does not read with pypdf"
+    )
+    assert not _uses_outside_function(service_tree, "PdfReader", "extract_text"), (
+        "PdfReader is used or constructed outside extract_text — the "
+        "one pypdf reader is pdf_service.extract_text"
+    )
+    service_functions = _module_functions(service_tree)
+    assert {"extract_text", "normalize_ws"} <= service_functions, (
+        "pdf_service no longer defines extract_text and normalize_ws at "
+        "module level — the helpers' one home"
+    )
+    assert not any(
+        isinstance(node, ast.FunctionDef) and node.name == "_normalize_ws"
+        for node in ast.walk(service_tree)
+    ), "the private _normalize_ws survived its rename to normalize_ws"
 
     # --- The service half: the helpers' one home is pdf_service itself ---
     assert callable(getattr(pdf_service, "extract_text", None)), (
@@ -429,12 +671,6 @@ def test_ac_3():
     assert not hasattr(pdf_service, "_normalize_ws"), (
         "the private _normalize_ws survived its rename to normalize_ws — "
         "pdf_service's own callers were not updated"
-    )
-    # One extraction helper: the pypdf reader is constructed in exactly
-    # one place, so every read in the service funnels through it.
-    service_source = pathlib.Path(pdf_service.__file__).read_text()
-    assert service_source.count("PdfReader(") == 1, (
-        "PdfReader is constructed outside the one extraction helper"
     )
     # The exposed names are the genuine helpers, not renamed stubs:
     # collapse a whitespace run to single spaces, and read a rendered
