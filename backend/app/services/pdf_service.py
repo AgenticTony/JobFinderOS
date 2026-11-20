@@ -125,31 +125,50 @@ CLASS_CHARS_LOST = "characters lost"
 CLASS_PHRASE_LOST = "required phrase lost"
 
 
-# The exact literal the send-context message must carry (contract AC-1).
-NOT_SENT_OUTCOME = (
-    "the application was NOT sent. Please re-open the draft and try "
-    "again; if this keeps happening, contact the operator."
-)
+# The exact literal the send-context message must carry (J-1 contract).
+NOT_SENT_OUTCOME = "the application was NOT sent."
+
+# J-3: every class ends with its own what-to-do advice. Only the
+# unreadable class advises retrying — a retry can fix a transient read,
+# but it cannot restore characters a render lost or text a draft never
+# had, so the three content classes each say what to CHANGE instead and
+# never say 'try again'.
+RETRY_ADVICE = "Please try again; if this keeps happening, contact the operator."
+REPLACE_CHARACTERS_ADVICE = "Please replace those characters in the draft."
+CHECK_CONTENT_ADVICE = "Please check the draft's content."
+CHECK_FORMATTING_ADVICE = "Please check the draft's formatting."
+
+# The only surfaces a blocked-check message exists for (J-3: anything
+# else is a caller bug, refused loudly by every entry point that takes
+# a context instead of being silently answered with send wording).
+_CONTEXTS = ("send", "download")
 
 
-def _blocked_pdf_message(marker: str, label: str, context: str, reason: str) -> str:
+def _checked_context(context: str) -> str:
+    if context not in _CONTEXTS:
+        raise ValueError(f"context must be one of {_CONTEXTS}, got {context!r}")
+    return context
+
+
+def _blocked_pdf_message(
+    marker: str, label: str, context: str, reason: str, advice: str
+) -> str:
     """The one builder of user-facing blocked-check messages.
 
     `context` picks the surface's outcome sentence: the send path blocks
     an application (and must say so, exactly, so the user knows nothing
     was dispatched); the manual-portal download path refuses a file and
-    must never claim a send was blocked. Any context other than
-    "download" gets the send wording — the default keeps today's
-    no-context callers on it.
+    must never claim a send was blocked. `advice` is the class's own
+    what-to-do sentence (J-3) — only the unreadable class may tell the
+    user to try again.
     """
-    if context == "download":
-        outcome = (
-            "the download was stopped — please try again; if this keeps "
-            "happening, contact the operator."
-        )
-    else:
+    if context == "send":
         outcome = NOT_SENT_OUTCOME
-    return f"{marker} — {label}: {reason} {outcome}"
+    elif context == "download":
+        outcome = "the download was stopped."
+    else:
+        raise ValueError(f"context must be one of {_CONTEXTS}, got {context!r}")
+    return f"{marker} — {label}: {reason} {outcome} {advice}"
 
 
 def extract_text(pdf_bytes: bytes) -> str:
@@ -219,9 +238,11 @@ def verify_text_layer(
 
     `context` ('send', the default, or 'download') picks which surface's
     outcome the blocked-check message carries — see
-    _blocked_pdf_message. The message is built here and nowhere else:
-    callers pass it through verbatim (application.error / HTTP detail).
+    _blocked_pdf_message; any other context is refused with ValueError.
+    The message is built here and nowhere else: callers pass it through
+    verbatim (application.error / HTTP detail).
     """
+    _checked_context(context)
     try:
         text = extract_text(pdf_bytes)
     except Exception as e:  # unreadable structure is a broken layer too
@@ -242,7 +263,9 @@ def verify_text_layer(
                 CLASS_UNREADABLE,
                 label,
                 context,
-                "its PDF structure could not be opened for text extraction",
+                "its PDF structure could not be opened for text "
+                "extraction.",
+                RETRY_ADVICE,
             )
         ) from e
     extracted = text.strip()
@@ -252,24 +275,28 @@ def verify_text_layer(
                 CLASS_TOO_SHORT,
                 label,
                 context,
-                f"text extraction returned {len(extracted)} characters, "
-                f"fewer than the {min_chars} a machine-readable document "
-                "carries — ATS parsers and search tools read this layer",
+                f"text extraction returned {len(extracted)} characters — "
+                "the document has too little readable text.",
+                CHECK_CONTENT_ADVICE,
             )
         )
     if source_text is not None:
         missing = [ch for ch in _required_glyphs(source_text) if ch not in text]
         if missing:
-            shown = ", ".join(f"U+{ord(ch):04X}" for ch in missing[:6])
+            # J-3: name each lost character literally followed by its
+            # code point — the user can find '—' in their draft, but not
+            # 'U+2014'. Up to six, then the overflow count.
+            shown = ", ".join(f"{ch} (U+{ord(ch):04X})" for ch in missing[:6])
+            if len(missing) > 6:
+                shown += f", and {len(missing) - 6} more"
             raise PdfTextLayerError(
                 _blocked_pdf_message(
                     CLASS_CHARS_LOST,
                     label,
                     context,
-                    f"its text layer lost characters during rendering "
-                    f"({shown} did not survive extraction), so an "
-                    "employer's parser would read something the draft "
-                    "never said",
+                    "its text layer lost these characters during "
+                    f"rendering: {shown}.",
+                    REPLACE_CHARACTERS_ADVICE,
                 )
             )
     if must_contain is not None and normalize_ws(must_contain) not in normalize_ws(text):
@@ -278,8 +305,9 @@ def verify_text_layer(
                 CLASS_PHRASE_LOST,
                 label,
                 context,
-                "a phrase the source document contains did not survive "
-                "extraction, so a parser could not read part of it",
+                "part of the text did not survive in the document's "
+                "text layer.",
+                CHECK_FORMATTING_ADVICE,
             )
         )
     return extracted
@@ -314,7 +342,9 @@ def verified_cover_letter_pdf(
     the email send and the manual-portal download (the same employer ATS
     reads both). A broken text layer raises PdfTextLayerError instead of
     leaving the service; `context` picks the blocked-check message's
-    outcome wording for the surface doing the building."""
+    outcome wording for the surface doing the building ('send' or
+    'download' — anything else is refused with ValueError, J-3)."""
+    _checked_context(context)
     blob = cover_letter_pdf(cover_letter, applicant_name)
     verify_text_layer(
         blob,
@@ -329,6 +359,7 @@ def verified_tailored_cv_pdf(
     tailored_cv: str, applicant_name: Optional[str], *, context: str = "send"
 ) -> bytes:
     """Build AND verify the tailored CV (see verified_cover_letter_pdf)."""
+    _checked_context(context)
     blob = tailored_cv_pdf(tailored_cv, applicant_name)
     verify_text_layer(
         blob,
