@@ -3,7 +3,7 @@
 
 import axios from 'axios';
 import { consoleLocale } from '@/i18n/locale';
-import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import type {
   AiJob,
   Application,
@@ -46,6 +46,7 @@ export { apiErrorMessage };
 // only token source.
 import { getSessionToken, supabase } from '@/lib/supabase';
 import { pollAiJob } from '@/lib/aiJobPoll';
+import { downloadErrorMessage } from './pdfDownload';
 
 export { getSessionToken };
 
@@ -412,7 +413,18 @@ export const submitDraft = async (
 //   2. The anchor carries `download`, so the file saves with a real name
 //      (Content-Disposition when the server sends one, else the fallback).
 async function downloadPdfBlob(path: string, fallbackFilename: string): Promise<void> {
-  const response = await api.get<Blob>(path, { responseType: 'blob' });
+  let response: AxiosResponse<Blob>;
+  try {
+    response = await api.get<Blob>(path, { responseType: 'blob' });
+  } catch (err) {
+    // J-5: the body of a failed blob download is a Blob, so apiErrorMessage's
+    // response.data.detail lookup saw nothing and the user was shown axios's
+    // "Request failed with status code 500" instead of the backend's message.
+    // pdfDownload.ts reads the body and returns the backend's `detail` word
+    // for word (a fixed sentence when there is none to read); the rethrown
+    // Error carries it, so apiErrorMessage surfaces exactly that message.
+    throw new Error(await downloadErrorMessage(err));
+  }
   const disposition = response.headers?.['content-disposition'];
   const match =
     typeof disposition === 'string' ? /filename="?([^";]+)"?/i.exec(disposition) : null;

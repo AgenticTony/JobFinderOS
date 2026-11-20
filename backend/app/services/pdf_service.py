@@ -137,6 +137,12 @@ RETRY_ADVICE = "Please try again; if this keeps happening, contact the operator.
 REPLACE_CHARACTERS_ADVICE = "Please replace those characters in the draft."
 CHECK_CONTENT_ADVICE = "Please check the draft's content."
 CHECK_FORMATTING_ADVICE = "Please check the draft's formatting."
+# J-5: the advice the profile name gets. The render draws the applicant's
+# name as the document subtitle, so a character lost from the name is not
+# in the draft at all — telling the user to "replace those characters in
+# the draft" sends them hunting through a document that does not contain
+# the character. The name is edited in the profile.
+CHECK_NAME_ADVICE = "Please check your name in your profile."
 
 # The only surfaces a blocked-check message exists for (J-3: anything
 # else is a caller bug, refused loudly by every entry point that takes
@@ -222,19 +228,98 @@ def _source_for_verification(text: str, applicant_name: Optional[str]) -> str:
     return "\n".join(part for part in (applicant_name, text) if part)
 
 
+# J-5: the two places a lost character can be the user's to fix. The name
+# group is the render's subtitle (the profile name); the draft group is
+# everything else, including a name character the draft ALSO carries.
+NAME_GROUP_LABEL = "from your profile name: "
+DRAFT_GROUP_LABEL = "from the draft: "
+
+
+def _lost_character_groups(
+    text: str, applicant_name: Optional[str], extracted: str
+) -> Tuple[List[str], List[str]]:
+    """Split the characters the render lost into the two groups the
+    user can act on (J-5): those lost only from the applicant's name —
+    the profile name the render draws as the subtitle — and not present
+    in the draft text, and every other lost character (the draft's own,
+    including a name character the draft also carries)."""
+    name_glyphs = set(_required_glyphs(applicant_name or ""))
+    draft_chars = set(text)
+    name_group: List[str] = []
+    draft_group: List[str] = []
+    for ch in _required_glyphs(_source_for_verification(text, applicant_name)):
+        if ch in extracted:
+            continue
+        if ch in name_glyphs and ch not in draft_chars:
+            name_group.append(ch)
+        else:
+            draft_group.append(ch)
+    return name_group, draft_group
+
+
+def _named_characters(chars: List[str]) -> str:
+    """J-3's listing, unchanged: each character literally followed by its
+    code point in parentheses, up to six, then the overflow count."""
+    shown = ", ".join(f"{ch} (U+{ord(ch):04X})" for ch in chars[:6])
+    if len(chars) > 6:
+        shown += f", and {len(chars) - 6} more"
+    return shown
+
+
+def _chars_lost_reason(
+    text: str, applicant_name: Optional[str], extracted: str
+) -> Optional[Tuple[str, str]]:
+    """The 'characters lost' reason and its advice, pointing each group of
+    lost characters at the place the user can fix it (J-5) — or None when
+    nothing was lost.
+
+    With no name group the reason and advice are exactly J-3's. With one,
+    the characters are listed by group, name group first, and the advice
+    covers each group present, name group first."""
+    name_group, draft_group = _lost_character_groups(text, applicant_name, extracted)
+    if not name_group and not draft_group:
+        return None
+    if not name_group:
+        return (
+            "its text layer lost these characters during "
+            f"rendering: {_named_characters(draft_group)}.",
+            REPLACE_CHARACTERS_ADVICE,
+        )
+    groups = [f"{NAME_GROUP_LABEL}{_named_characters(name_group)}"]
+    advice = [CHECK_NAME_ADVICE]
+    if draft_group:
+        groups.append(f"{DRAFT_GROUP_LABEL}{_named_characters(draft_group)}")
+        advice.append(REPLACE_CHARACTERS_ADVICE)
+    return (
+        "its text layer lost these characters during "
+        f"rendering: {'; '.join(groups)}.",
+        " ".join(advice),
+    )
+
+
 def verify_text_layer(
     pdf_bytes: bytes,
     *,
     min_chars: int = MIN_EXTRACTED_CHARS,
     must_contain: Optional[str] = None,
     source_text: Optional[str] = None,
+    applicant_name: Optional[str] = None,
     label: str = "document",
     context: str = "send",
 ) -> str:
     """Assert the PDF is machine-readable: a minimum character count and,
-    when the render's source text is given, that every visible non-ascii
-    source character survived extraction (glyph substitution detector).
-    Raises PdfTextLayerError — assert, never warn (WO-21 design point 2).
+    when the render's source is given (draft text and/or applicant name),
+    that every visible non-ascii source character survived extraction
+    (glyph substitution detector). Raises PdfTextLayerError — assert,
+    never warn (WO-21 design point 2).
+
+    `source_text` is the render's draft/body text; `applicant_name`, when
+    given, is the profile name the render draws as the subtitle. Both are
+    checked together (every visible non-ascii character in either must
+    survive), and J-5 splits what was lost by where the user fixes it: a
+    character lost only from the name and not present in the draft text
+    is reported 'from your profile name: ' with the profile advice, every
+    other lost character as J-3 reported it.
 
     `context` ('send', the default, or 'download') picks which surface's
     outcome the blocked-check message carries — see
@@ -280,24 +365,17 @@ def verify_text_layer(
                 CHECK_CONTENT_ADVICE,
             )
         )
-    if source_text is not None:
-        missing = [ch for ch in _required_glyphs(source_text) if ch not in text]
-        if missing:
-            # J-3: name each lost character literally followed by its
-            # code point — the user can find '—' in their draft, but not
-            # 'U+2014'. Up to six, then the overflow count.
-            shown = ", ".join(f"{ch} (U+{ord(ch):04X})" for ch in missing[:6])
-            if len(missing) > 6:
-                shown += f", and {len(missing) - 6} more"
+    if source_text is not None or applicant_name is not None:
+        # J-3: name each lost character literally followed by its code
+        # point — the user can find '—' in their draft, but not 'U+2014'.
+        # Up to six per group, then that group's overflow count. J-5:
+        # report the name's characters against the profile, where the
+        # name is actually edited.
+        chars_lost = _chars_lost_reason(source_text or "", applicant_name, text)
+        if chars_lost is not None:
+            reason, advice = chars_lost
             raise PdfTextLayerError(
-                _blocked_pdf_message(
-                    CLASS_CHARS_LOST,
-                    label,
-                    context,
-                    "its text layer lost these characters during "
-                    f"rendering: {shown}.",
-                    REPLACE_CHARACTERS_ADVICE,
-                )
+                _blocked_pdf_message(CLASS_CHARS_LOST, label, context, reason, advice)
             )
     if must_contain is not None and normalize_ws(must_contain) not in normalize_ws(text):
         raise PdfTextLayerError(
@@ -348,7 +426,8 @@ def verified_cover_letter_pdf(
     blob = cover_letter_pdf(cover_letter, applicant_name)
     verify_text_layer(
         blob,
-        source_text=_source_for_verification(cover_letter, applicant_name),
+        source_text=cover_letter,
+        applicant_name=applicant_name,
         label="cover letter",
         context=context,
     )
@@ -363,7 +442,8 @@ def verified_tailored_cv_pdf(
     blob = tailored_cv_pdf(tailored_cv, applicant_name)
     verify_text_layer(
         blob,
-        source_text=_source_for_verification(tailored_cv, applicant_name),
+        source_text=tailored_cv,
+        applicant_name=applicant_name,
         label="tailored CV",
         context=context,
     )
