@@ -254,18 +254,26 @@ class TestLoadNeverFailsTheDraft:
         clock.advance(1.5)
         assert drainer.drain_once() == ["done"]
 
-    def test_non_load_failure_still_fails_with_an_action(self, client, monkeypatch):
+    def test_non_load_failure_still_fails_with_an_action(self, client, monkeypatch, caplog):
         """'failed' stays for non-load causes — malformed output after the
-        format re-asks — with a Try-again message."""
+        format re-asks — with the shared Try-again message; the CAUSE is
+        asserted in the server log (J-4), not the user-facing string."""
+        import logging
+
+        from app.services import draft_service
+
         uid, job_id, h = _user(client)
         fake = FakeAI()
         _wire(monkeypatch, fake)
         monkeypatch.setattr(fake, "_answer", lambda kind, prompt: "not json at all")
-        client.post(f"/api/v1/applications/draft/{job_id}", headers=h)
-        assert AIDrainer(clock=Clock()).drain_once() == ["failed"]
+        with caplog.at_level(logging.ERROR):
+            client.post(f"/api/v1/applications/draft/{job_id}", headers=h)
+            assert AIDrainer(clock=Clock()).drain_once() == ["failed"]
         d = _draft(uid, job_id)[0]
         assert d.status == "failed", "malformed output is a non-load failure"
-        assert "Malformed tailoring response" in (d.error or ""), d.error
+        assert d.error == draft_service.TAILORING_FAILED_MESSAGE, d.error
+        assert "Malformed tailoring response" in caplog.text, (
+            "the cause must stay diagnosable server-side")
         assert _jobs(uid, "tailor")[0].status == "failed"
 
     def test_fabrication_block_is_a_finished_job_not_a_failure(self, client, monkeypatch):
