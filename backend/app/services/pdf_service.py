@@ -108,7 +108,48 @@ class PdfTextLayerError(Exception):
     A document the employer's parser cannot read is a FAILED send, not a
     degraded one — the message is written to the application's user-facing
     `error` column verbatim.
+
+    J-1: the message is built HERE, once, and names the failure class and
+    the document for the surface it blocks. Library internals (reader
+    exception text) never appear in it — they go to the server log.
     """
+
+
+# J-1: every blocked-check message begins with exactly one class marker
+# (followed by the document name), so a user — or a test — can tell WHICH
+# failure fired without parsing prose. The four are the contract's
+# literals; nothing downstream may strip or rewrite them.
+CLASS_UNREADABLE = "unreadable PDF"
+CLASS_TOO_SHORT = "text layer too short"
+CLASS_CHARS_LOST = "characters lost"
+CLASS_PHRASE_LOST = "required phrase lost"
+
+
+# The exact literal the send-context message must carry (contract AC-1).
+NOT_SENT_OUTCOME = (
+    "the application was NOT sent. Please re-open the draft and try "
+    "again; if this keeps happening, contact the operator."
+)
+
+
+def _blocked_pdf_message(marker: str, label: str, context: str, reason: str) -> str:
+    """The one builder of user-facing blocked-check messages.
+
+    `context` picks the surface's outcome sentence: the send path blocks
+    an application (and must say so, exactly, so the user knows nothing
+    was dispatched); the manual-portal download path refuses a file and
+    must never claim a send was blocked. Any context other than
+    "download" gets the send wording — the default keeps today's
+    no-context callers on it.
+    """
+    if context == "download":
+        outcome = (
+            "the download was stopped — please try again; if this keeps "
+            "happening, contact the operator."
+        )
+    else:
+        outcome = NOT_SENT_OUTCOME
+    return f"{marker} — {label}: {reason} {outcome}"
 
 
 def extract_text(pdf_bytes: bytes) -> str:
@@ -117,11 +158,14 @@ def extract_text(pdf_bytes: bytes) -> str:
     return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
-def _normalize_ws(text: str) -> str:
+def normalize_ws(text: str) -> str:
     """Collapse whitespace runs: line wrapping inserts breaks anywhere in
     a paragraph (font metrics decide where), so a phrase that the source
     holds on one line extracts split across two. Phrase containment is
-    compared whitespace-insensitively on both sides."""
+    compared whitespace-insensitively on both sides.
+
+    J-1: THE whitespace-collapse helper (renamed from _normalize_ws) —
+    the suite imports it from here instead of re-implementing it."""
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -166,47 +210,77 @@ def verify_text_layer(
     must_contain: Optional[str] = None,
     source_text: Optional[str] = None,
     label: str = "document",
+    context: str = "send",
 ) -> str:
     """Assert the PDF is machine-readable: a minimum character count and,
     when the render's source text is given, that every visible non-ascii
     source character survived extraction (glyph substitution detector).
-    Raises PdfTextLayerError — assert, never warn (WO-21 design point 2)."""
+    Raises PdfTextLayerError — assert, never warn (WO-21 design point 2).
+
+    `context` ('send', the default, or 'download') picks which surface's
+    outcome the blocked-check message carries — see
+    _blocked_pdf_message. The message is built here and nowhere else:
+    callers pass it through verbatim (application.error / HTTP detail).
+    """
     try:
         text = extract_text(pdf_bytes)
     except Exception as e:  # unreadable structure is a broken layer too
+        # J-1: the ORIGINAL exception (message, with traceback) is
+        # server-side knowledge — the operator debugs from the log; the
+        # user-facing message below names the class and the document and
+        # carries none of the library's text. Both outbound surfaces
+        # (send, download) funnel through here, so both get this record.
+        logger.error(
+            "pypdf text extraction failed on the %s (%s context): %s",
+            label,
+            context,
+            e,
+            exc_info=True,
+        )
         raise PdfTextLayerError(
-            f"The {label} could not be opened for text extraction ({e}) — "
-            "the application was NOT sent. Please re-open the draft and try "
-            "again; if this keeps happening, contact the operator."
+            _blocked_pdf_message(
+                CLASS_UNREADABLE,
+                label,
+                context,
+                "its PDF structure could not be opened for text extraction",
+            )
         ) from e
     extracted = text.strip()
     if len(extracted) < min_chars:
         raise PdfTextLayerError(
-            f"The {label}'s text layer looks broken — text extraction "
-            f"returned {len(extracted)} characters (expected at least "
-            f"{min_chars}). ATS parsers and search tools read this layer, "
-            "so the application was NOT sent. Please re-open the draft and "
-            "try again; if this keeps happening, contact the operator."
+            _blocked_pdf_message(
+                CLASS_TOO_SHORT,
+                label,
+                context,
+                f"text extraction returned {len(extracted)} characters, "
+                f"fewer than the {min_chars} a machine-readable document "
+                "carries — ATS parsers and search tools read this layer",
+            )
         )
     if source_text is not None:
         missing = [ch for ch in _required_glyphs(source_text) if ch not in text]
         if missing:
             shown = ", ".join(f"U+{ord(ch):04X}" for ch in missing[:6])
             raise PdfTextLayerError(
-                f"The {label}'s text layer lost characters during rendering "
-                f"— {shown} did not survive extraction, so an employer's "
-                "parser would read something the draft never said. The "
-                "application was NOT sent. Please re-open the draft, "
-                "replace those characters, and try again; if this keeps "
-                "happening, contact the operator."
+                _blocked_pdf_message(
+                    CLASS_CHARS_LOST,
+                    label,
+                    context,
+                    f"its text layer lost characters during rendering "
+                    f"({shown} did not survive extraction), so an "
+                    "employer's parser would read something the draft "
+                    "never said",
+                )
             )
-    if must_contain is not None and _normalize_ws(must_contain) not in _normalize_ws(text):
+    if must_contain is not None and normalize_ws(must_contain) not in normalize_ws(text):
         raise PdfTextLayerError(
-            f"The {label}'s text layer lost part of its content during "
-            "rendering — the phrase a parser must be able to read did not "
-            "survive extraction, so the application was NOT sent. Please "
-            "re-open the draft and try again; if this keeps happening, "
-            "contact the operator."
+            _blocked_pdf_message(
+                CLASS_PHRASE_LOST,
+                label,
+                context,
+                "a phrase the source document contains did not survive "
+                "extraction, so a parser could not read part of it",
+            )
         )
     return extracted
 
@@ -233,27 +307,34 @@ def tailored_cv_pdf(tailored_cv: str, applicant_name: Optional[str]) -> bytes:
     return bytes(pdf.output())
 
 
-def verified_cover_letter_pdf(cover_letter: str, applicant_name: Optional[str]) -> bytes:
+def verified_cover_letter_pdf(
+    cover_letter: str, applicant_name: Optional[str], *, context: str = "send"
+) -> bytes:
     """Build AND verify: the cover-letter entry BOTH outbound paths use —
     the email send and the manual-portal download (the same employer ATS
     reads both). A broken text layer raises PdfTextLayerError instead of
-    leaving the service."""
+    leaving the service; `context` picks the blocked-check message's
+    outcome wording for the surface doing the building."""
     blob = cover_letter_pdf(cover_letter, applicant_name)
     verify_text_layer(
         blob,
         source_text=_source_for_verification(cover_letter, applicant_name),
         label="cover letter",
+        context=context,
     )
     return blob
 
 
-def verified_tailored_cv_pdf(tailored_cv: str, applicant_name: Optional[str]) -> bytes:
+def verified_tailored_cv_pdf(
+    tailored_cv: str, applicant_name: Optional[str], *, context: str = "send"
+) -> bytes:
     """Build AND verify the tailored CV (see verified_cover_letter_pdf)."""
     blob = tailored_cv_pdf(tailored_cv, applicant_name)
     verify_text_layer(
         blob,
         source_text=_source_for_verification(tailored_cv, applicant_name),
         label="tailored CV",
+        context=context,
     )
     return blob
 

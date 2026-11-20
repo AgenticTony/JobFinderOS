@@ -172,9 +172,11 @@ async def download_cover_letter(
     # WO-21: a manual-portal download is an outbound document — the same
     # employer ATS reads it — so it goes out through the verified builder
     # too, and a broken text layer is refused with the reason, not served.
+    # J-1: context="download" — this surface never sends anything, so the
+    # blocked-check message must not talk about a send.
     try:
         blob = await run_in_threadpool(
-            pdf_service.verified_cover_letter_pdf, draft.cover_letter, applicant
+            pdf_service.verified_cover_letter_pdf, draft.cover_letter, applicant, context="download"
         )
     except pdf_service.PdfTextLayerError as e:
         logger.error("PDF text-layer verification failed — download blocked: %s", e)
@@ -197,10 +199,11 @@ async def download_tailored_cv(
     applicant = _draft_applicant_name(db, user)
     company = draft.job.company if draft.job else None
     name = f"CV - {applicant} (tailored)" + (f" - {company}.pdf" if company else ".pdf")
-    # WO-21: verified builder — see download_cover_letter.
+    # WO-21: verified builder — see download_cover_letter (J-1: the
+    # download-context message, never the send wording).
     try:
         blob = await run_in_threadpool(
-            pdf_service.verified_tailored_cv_pdf, draft.tailored_cv, applicant
+            pdf_service.verified_tailored_cv_pdf, draft.tailored_cv, applicant, context="download"
         )
     except pdf_service.PdfTextLayerError as e:
         logger.error("PDF text-layer verification failed — download blocked: %s", e)

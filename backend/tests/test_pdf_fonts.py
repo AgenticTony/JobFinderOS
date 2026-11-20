@@ -28,9 +28,9 @@ import pathlib
 
 import pdfplumber
 import pytest
-from pypdf import PdfReader
 
 from app.services import pdf_service
+from app.services.pdf_service import extract_text, normalize_ws
 
 # The live failure signature: em-dash, curly apostrophe, curly double
 # quotes — plus Swedish å/ä/ö, which the latin-1 core-font path was
@@ -47,22 +47,10 @@ def _extract(pdf_bytes: bytes) -> str:
         return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 
-def _extract_pypdf(pdf_bytes: bytes) -> str:
-    """WO-21: extract the way an ATS parser and the runtime check do —
-    pypdf, all pages. Assertions in this file run against BOTH readers so
-    a regression that only one of them sees cannot slip through."""
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    return "\n".join((page.extract_text() or "") for page in reader.pages)
-
-
-def _normws(text: str) -> str:
-    """Collapse whitespace: line wrapping splits a source line anywhere
-    the font's metrics decide (the WO-21 phrase assertion went red on the
-    ubuntu runner exactly this way under DejaVu), so multi-word phrase
-    containment is compared wrap-insensitively."""
-    import re
-
-    return re.sub(r"\s+", " ", text).strip()
+# J-1: the SECOND, independent reader is pdfplumber (_extract above); the
+# ATS-side reader is the service's own pdf_service.extract_text (imported
+# with its whitespace-collapse twin normalize_ws) — assertions run over
+# both so a regression only one of them sees cannot slip through.
 
 
 # ---------- font-fallback logic (runs identically everywhere) ----------
@@ -131,13 +119,13 @@ def test_pdf_render_preserves_curly_typography():
         assert "?" not in extracted, repr(extracted)
         # WO-21: the same document must survive the ATS-side read — a
         # minimum character count and a known phrase from the source text
-        # (em-dash included), extracted with pypdf and asserted, never
-        # merely warned.
-        via_pypdf = _extract_pypdf(render(CURLY + "\n" + SWEDISH, "Test Candidate"))
-        assert len(via_pypdf.strip()) >= 100, (render.__name__, repr(via_pypdf))
-        hay = _normws(via_pypdf)
-        assert "truly \u2014 about the role" in hay, repr(via_pypdf)
-        assert SWEDISH in hay, repr(via_pypdf)
+        # (em-dash included), extracted with the service's own reader
+        # (pdf_service.extract_text) and asserted, never merely warned.
+        via_service = extract_text(render(CURLY + "\n" + SWEDISH, "Test Candidate"))
+        assert len(via_service.strip()) >= 100, (render.__name__, repr(via_service))
+        hay = normalize_ws(via_service)
+        assert "truly \u2014 about the role" in hay, repr(via_service)
+        assert SWEDISH in hay, repr(via_service)
 
 
 def test_pdf_round_trip_non_ascii_name_extracts_cleanly():
@@ -146,11 +134,12 @@ def test_pdf_round_trip_non_ascii_name_extracts_cleanly():
     The name is what an ATS matches the document against \u2014 a text
     layer that mangles \u00c5/\u00e4/\u00fc turns "\u00c5sa M\u00fcll\u00e9r-Lindqvist"
     into an unmatchable candidate. Minimum char count + a known phrase +
-    every part of the name, extracted with pypdf and asserted. Runs
-    unconditionally — on the macOS host (Arial candidates) and the ubuntu
-    CI runner (DejaVu candidates) a TTF candidate always resolves, and a
-    machine where it does not is exactly the regression this assertion
-    must expose, never one it may silently wave through.
+    every part of the name, extracted with the service's own reader
+    (pdf_service.extract_text) and asserted. Runs unconditionally — on
+    the macOS host (Arial candidates) and the ubuntu CI runner (DejaVu
+    candidates) a TTF candidate always resolves, and a machine where it
+    does not is exactly the regression this assertion must expose, never
+    one it may silently wave through.
     """
     assert pdf_service._resolve_unicode_font() is not None, (
         "no unicode TTF candidate on this machine — the render below "
@@ -166,7 +155,7 @@ def test_pdf_round_trip_non_ascii_name_extracts_cleanly():
         "- Python och FastAPI i daglig produktion\n"
     )
     for render in (pdf_service.cover_letter_pdf, pdf_service.tailored_cv_pdf):
-        extracted = _extract_pypdf(render(body, name))
+        extracted = extract_text(render(body, name))
         assert len(extracted.strip()) >= 100, (render.__name__, repr(extracted))
         assert "backendutvecklarroll" in extracted, repr(extracted)
         for part in name.split():
