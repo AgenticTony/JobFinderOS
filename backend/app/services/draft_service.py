@@ -261,6 +261,122 @@ CV_UNREADABLE_MESSAGE = (
     "Please re-upload your CV, then retry it from this application."
 )
 
+# J-6: the message for a send whose OUTCOME IS UNKNOWN. A dispatch that
+# died of a timeout or a dropped connection may already have delivered:
+# telling the user "the email was not sent" invites a blind retry and a
+# second employer email. This message claims exactly what is known and
+# names the guarantee that makes retrying safe — the send carries an
+# idempotency key (_idempotency_key), so Resend dedupes an unchanged
+# resend and never delivers it twice.
+SEND_OUTCOME_UNKNOWN_MESSAGE = (
+    "We could not confirm whether the email was sent. You can retry it "
+    "from this application; an unchanged email is never delivered twice."
+)
+
+# The SDK wraps every failure of its own HTTP transport (timeout, dropped
+# connection) in a ResendError of this error_type. That is NOT an answer
+# from Resend: the request may already have reached it and been accepted.
+RESEND_TRANSPORT_ERROR_TYPE = "HttpClientError"
+
+# The SDK's rejection type, resolved once here. It is a pinned
+# dependency; the except keeps an SDK-less import (a script importing
+# this module for its pure helpers) working rather than crashing.
+try:
+    from resend.exceptions import ResendError as _ResendRejection
+except ImportError:  # pragma: no cover — the SDK ships with the backend
+    _ResendRejection = ()
+
+
+def _resend_rejected(exc: BaseException) -> bool:
+    """J-6: did Resend ANSWER this request and refuse it?
+
+    True only for a resend.exceptions.ResendError raised by the API
+    itself (validation, quota, bad key) — the one failure class that
+    proves nothing was accepted, so J-2's "the email was not sent"
+    wording is the truth. Everything else a dispatch can raise — the
+    SDK's transport wrapper (a ResendError whose error_type is
+    RESEND_TRANSPORT_ERROR_TYPE: the request may already be in), or any
+    exception from outside the SDK — leaves the delivery outcome
+    UNKNOWN.
+    """
+    if not isinstance(exc, _ResendRejection):
+        return False
+    return getattr(exc, "error_type", None) != RESEND_TRANSPORT_ERROR_TYPE
+
+
+def _dispatch_error_message(exc: BaseException) -> str:
+    """J-6: the user-facing message for a failed dispatch — only what is
+    KNOWN about delivery. Both messages keep the exception's own text
+    and type server-side (the caller logs them with the traceback)."""
+    if _resend_rejected(exc):
+        return SEND_FAILED_MESSAGE
+    return SEND_OUTCOME_UNKNOWN_MESSAGE
+
+
+def _idempotency_key(application_id, params: dict) -> str:
+    """J-6: the idempotency key for one application's email — the
+    application's id plus a hash of the values actually dispatched.
+
+    Hashed: the recipient, the subject, the body text and every
+    attachment's filename and bytes. Those are exactly the values that
+    make one email different from another, so two sends of an UNCHANGED
+    application carry the same key (Resend dedupes them: at most one
+    delivery) while any edit produces a new key — a retry after an edit
+    is a new send. The digest is one-way: no recipient, subject or CV
+    text is readable out of the key. The application id prefix keeps two
+    applications with identical content on different keys.
+
+    The hash is stable across a re-render because the PDFs are
+    reproducible: pdf_service pins fpdf2's creation date, so the same
+    draft text renders to the same bytes a second apart.
+    """
+    digest = hashlib.sha256()
+    digest.update(
+        f"to={params.get('to')}\nsubject={params.get('subject')}\n".encode("utf-8")
+    )
+    digest.update(f"text={params.get('text')}\n".encode("utf-8"))
+    for attachment in params.get("attachments") or ():
+        digest.update(f"file={attachment.get('filename')}\n".encode("utf-8"))
+        digest.update(
+            b"content=" + str(attachment.get("content")).encode("utf-8") + b"\n"
+        )
+    return f"{application_id}-{digest.hexdigest()}"
+
+
+def _resend_send(resend_module, params: dict, application_id):
+    """J-6: dispatch one application email, carrying its idempotency key.
+
+    The key rides the SDK's `options` argument, which the SDK sends as
+    the Idempotency-Key header — Resend replays the stored answer for a
+    repeated key instead of delivering a second copy, and that is what
+    makes "retry it" safe advice for an unknown-outcome send.
+
+    `options` is a later addition to the SDK's send signature, so the
+    callable is checked per call: an SDK (or a test double) exposing the
+    older single-argument signature still dispatches, just without the
+    header. The installed SDK takes it — J-6's test drives the real SDK
+    with only its HTTP transport faked and asserts the header on the
+    wire.
+    """
+    import inspect
+
+    send = resend_module.Emails.send
+    try:
+        takes_options = "options" in inspect.signature(send).parameters
+    except (TypeError, ValueError):  # pragma: no cover — exotic callables
+        takes_options = True
+    if not takes_options:
+        logger.warning(
+            "resend.Emails.send takes no `options` — dispatching WITHOUT an "
+            "idempotency key (an SDK older than the Idempotency-Key header); "
+            "a retried send is not deduped"
+        )
+        return send(params)
+    return send(
+        params,
+        options={"idempotency_key": _idempotency_key(application_id, params)},
+    )
+
 
 def get_draft(db: Session, draft_id: int) -> Optional[ApplicationDraft]:
     return db.query(ApplicationDraft).filter(ApplicationDraft.id == draft_id).first()
@@ -1362,10 +1478,6 @@ def _send_with_pdfs(
         # lands in the operator's inbox and never reaches the applicant.
         if profile is not None and getattr(profile, "email", None):
             params["reply_to"] = profile.email
-        email = resend.Emails.send(params)
-        application.status = "sent"
-        application.sent_at = utc_now()
-        logger.info("Tailored application sent to %s (id=%s)", application.target_email, email.get("id"))
     except pdf_service.PdfTextLayerError as e:
         # WO-21: a document the employer's ATS parser cannot read is a
         # FAILED send, not a degraded one — block before dispatch with
@@ -1385,12 +1497,31 @@ def _send_with_pdfs(
         )
         return
     except Exception as e:
-        # J-2: a dispatch failure the user can only wait out and retry.
-        # The SDK's exception text and type are server-side knowledge —
-        # logged with the traceback, never copied into the error column.
+        # J-2: the failure fired BEFORE anything was dispatched, so
+        # "the email was not sent" is the truth. The exception's text
+        # and type are server-side knowledge — logged with the
+        # traceback, never copied into the error column.
         application.status = "failed"
         application.error = SEND_FAILED_MESSAGE
+        logger.error(
+            "Tailored application send failed before dispatch (%s): %s",
+            type(e).__name__, e, exc_info=True,
+        )
+        return
+
+    # The dispatch itself. J-6: only a rejection Resend ANSWERED proves
+    # nothing was accepted — a timeout or a dropped connection may have
+    # delivered, so the message claims no more than is known.
+    try:
+        email = _resend_send(resend, params, application.id)
+    except Exception as e:
+        application.status = "failed"
+        application.error = _dispatch_error_message(e)
         logger.error(
             "Tailored application send failed (%s): %s",
             type(e).__name__, e, exc_info=True,
         )
+        return
+    application.status = "sent"
+    application.sent_at = utc_now()
+    logger.info("Tailored application sent to %s (id=%s)", application.target_email, email.get("id"))
