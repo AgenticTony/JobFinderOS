@@ -176,7 +176,7 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
             "Application email aborted — original CV unreadable (%s): %s",
             type(e).__name__, e, exc_info=True,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # J-2: a dispatch failure the user can only wait out and retry.
         # The SDK's exception text and type are server-side knowledge —
         # logged with the traceback, never copied into the error column.

@@ -384,7 +384,7 @@ def _reader_raises_on(content: bytes) -> tuple:
         with pdfplumber.open(io.BytesIO(content)) as pdf:
             for page in pdf.pages:
                 page.extract_text()
-    except Exception as e:  # noqa: BLE001 — exactly what we capture
+    except Exception as e:  # any reader error is exactly what we capture
         return type(e).__name__, str(e)
     return "", ""
 
