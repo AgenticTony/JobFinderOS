@@ -85,7 +85,13 @@ def run_tailor(db: Session, job: AIJob) -> Outcome:
 
 
 def fail_tailor(db: Session, job: AIJob, exc: Exception) -> Outcome:
-    error = f"Tailoring failed: {exc}"
+    # J-4: the SAME shared message the inline arm (draft_service) uses —
+    # the exception's type and text are already in the server log (the
+    # drainer logs them with the traceback before calling this), never
+    # in the string the user reads.
+    from app.services import draft_service
+
+    error = draft_service.TAILORING_FAILED_MESSAGE
     draft = _owned_draft(db, job)
     if draft is not None and draft.status in ("queued", "drafting"):
         draft.status = "failed"
@@ -121,8 +127,13 @@ def run_recheck(db: Session, job: AIJob) -> Outcome:
 
 
 def fail_recheck(db: Session, job: AIJob, exc: Exception) -> Outcome:
-    error = (f"Re-check failed: {exc}. Your text is saved — press "
-             "Check again.")
+    # J-4: the SAME shared message the inline arms (draft_service) use —
+    # the exception's type and text are already in the server log (the
+    # drainer logs them with the traceback before calling this), never
+    # in the string the user reads.
+    from app.services import draft_service
+
+    error = draft_service.RECHECK_FAILED_MESSAGE
     draft = _owned_draft(db, job)
     if draft is not None and draft.status == "failed":
         draft.error = error
