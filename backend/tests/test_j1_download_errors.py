@@ -23,7 +23,9 @@ test_ac_2  when the reader raises, its exception text reaches NEITHER
            traceback) is logged server-side on both paths.
 test_ac_3  one extraction helper and one whitespace-collapse helper:
            pdf_service.extract_text / pdf_service.normalize_ws, imported
-           — not re-implemented — by the two PDF suites.
+           — not re-implemented — by the two PDF suites, and actually
+           exposed by pdf_service under those public names (the private
+           _normalize_ws is gone, its own callers updated).
 """
 
 import ast
@@ -352,12 +354,24 @@ def test_ac_3():
     """AC-3: one pypdf extraction helper and one whitespace-collapse
     helper — pdf_service.extract_text / pdf_service.normalize_ws.
 
-    A source check, as the contract prescribes: the two PDF suites may
-    IMPORT the helpers, never re-implement them — no PdfReader, no pypdf
-    import, no local whitespace-collapsing re.sub — while the second,
-    independent reader (test_pdf_fonts' pdfplumber _extract) and the
-    ATS-side assertions (the >=100-character floor, the known phrase,
-    Swedish-character survival) survive over pdf_service.extract_text.
+    A source check, as the contract prescribes, over BOTH halves of the
+    sentence "pdf_service exposes extract_text and normalize_ws (renamed
+    from _normalize_ws), imported by the two PDF suites":
+
+    the suites — they may IMPORT the helpers, never re-implement them
+    (no PdfReader, no pypdf import, no local whitespace-collapsing
+    re.sub), while the second, independent reader (test_pdf_fonts'
+    pdfplumber _extract) and the ATS-side assertions (the >=100-character
+    floor, the known phrase, Swedish-character survival) survive over
+    pdf_service.extract_text;
+
+    the service — it exposes both helpers under those public names, the
+    pre-rename private _normalize_ws is gone (its own callers updated),
+    the pypdf reader is constructed in exactly one place, and the
+    exposed helpers do the real work (they extract and collapse). This
+    half is what goes red first: before the rename, the collapse helper
+    was still the module-private _normalize_ws while extract_text
+    already existed, so a check of the suites alone proved nothing.
     """
     for name in PDF_SUITES:
         source = (TESTS_DIR / name).read_text()
@@ -403,3 +417,30 @@ def test_ac_3():
         "the known-phrase assertion is gone"
     )
     assert "SWEDISH" in fonts_source, "the Swedish-character assertion is gone"
+
+    # --- The service half: the helpers' one home is pdf_service itself ---
+    assert callable(getattr(pdf_service, "extract_text", None)), (
+        "pdf_service must expose the one extraction helper, extract_text"
+    )
+    assert callable(getattr(pdf_service, "normalize_ws", None)), (
+        "pdf_service must expose the one whitespace-collapse helper, "
+        "normalize_ws, under its public name (renamed from _normalize_ws)"
+    )
+    assert not hasattr(pdf_service, "_normalize_ws"), (
+        "the private _normalize_ws survived its rename to normalize_ws — "
+        "pdf_service's own callers were not updated"
+    )
+    # One extraction helper: the pypdf reader is constructed in exactly
+    # one place, so every read in the service funnels through it.
+    service_source = pathlib.Path(pdf_service.__file__).read_text()
+    assert service_source.count("PdfReader(") == 1, (
+        "PdfReader is constructed outside the one extraction helper"
+    )
+    # The exposed names are the genuine helpers, not renamed stubs:
+    # collapse a whitespace run to single spaces, and read a rendered
+    # document end to end through both (known-good literals, from the
+    # body HEALTHY_BODY gives the renderer).
+    assert pdf_service.normalize_ws("Dear \n\t Hiring \n\n Manager,") == "Dear Hiring Manager,"
+    blob = pdf_service.cover_letter_pdf(HEALTHY_BODY, "Test Candidate")
+    served = pdf_service.normalize_ws(pdf_service.extract_text(blob))
+    assert "Dear Hiring Manager" in served, repr(served)

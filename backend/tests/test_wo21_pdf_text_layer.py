@@ -88,7 +88,12 @@ NON_ASCII_NAME = "Åsa Müllér-Lindqvist"
 
 # J-1: extraction and whitespace-collapsing come from pdf_service — the
 # one home for each helper — so this suite observes the SAME reader the
-# runtime check uses instead of re-implementing it.
+# runtime check uses instead of re-implementing it. (Containment stays
+# wrap-insensitive for the reason the old local helper's docstring
+# recorded: line wrapping splits a source line anywhere font metrics
+# decide — under DejaVu metrics on the ubuntu CI runner the em-dash
+# phrase once wrapped mid-phrase and the exact-substring assert went
+# red.)
 
 
 def _graphics_only_pdf() -> bytes:
