@@ -295,18 +295,22 @@ except ImportError:  # pragma: no cover — the SDK ships with the backend
 def _resend_rejected(exc: BaseException) -> bool:
     """J-6/J-8: is it PROVEN that nothing was sent?
 
-    True only for a resend.exceptions.ResendError that Resend ANSWERED
-    with an HTTP 4xx code other than 409 (validation, quota, bad key):
-    Resend saw the request and refused it, so nothing was accepted and
-    J-2's "the email was not sent" wording is the truth. Everything else
-    a dispatch can raise leaves the delivery outcome UNKNOWN — the SDK's
-    transport wrapper (a ResendError whose error_type is
+    True for a resend.exceptions.ResendError that Resend ANSWERED with
+    an HTTP 4xx code other than 409 (validation, quota, bad key): Resend
+    saw the request and refused it, so nothing was accepted and J-2's
+    "the email was not sent" wording is the truth. Also true for
+    KeylessSendUnavailableError — that refusal fires BEFORE dispatch, so
+    nothing has left the machine either. Everything else a dispatch can
+    raise leaves the delivery outcome UNKNOWN — the SDK's transport
+    wrapper (a ResendError whose error_type is
     RESEND_TRANSPORT_ERROR_TYPE: no HTTP answer, the request may already
     be in), a 409 (Resend's idempotency conflict: this key's request was
     already processed, so the email may be delivered), any 5xx answer
     (Resend saw the request and failed on its own side — acceptance is
     not disproved), and any exception raised outside the SDK.
     """
+    if isinstance(exc, KeylessSendUnavailableError):
+        return True  # J-8: refused before anything was dispatched
     if not isinstance(exc, _ResendRejection):
         return False
     if getattr(exc, "error_type", None) == RESEND_TRANSPORT_ERROR_TYPE:
@@ -388,18 +392,47 @@ def _idempotency_key(application_id, params: dict) -> str:
     return f"{application_id}-{email_params_digest(params)}"
 
 
-def _resend_send(resend_module, params: dict, application_id):
-    """J-6: dispatch one application email, carrying its idempotency key.
+def feedback_notification_key(params: dict) -> str:
+    """J-8: the idempotency key for the owner's feedback notification.
+
+    No application row stands behind this email, so the key is a
+    one-way digest of the notification's FULL params: the same
+    notification retried (a resubmit, a redelivery loop) carries the
+    same key and Resend delivers it once, while any difference in its
+    payload carries a different one. Nothing personal — message text,
+    category, the account's address — is readable out of the digest.
+    """
+    return f"feedback-{email_params_digest(params)}"
+
+
+class KeylessSendUnavailableError(Exception):
+    """J-8: resend.Emails.send cannot carry an idempotency key — its
+    signature has no `options` parameter, so the callable predates the
+    Idempotency-Key header.
+
+    Raised BEFORE anything is dispatched. An unkeyed send is a
+    duplication hazard (a retried send would not be deduped, which is
+    the guarantee J-6's user-facing advice rests on), so the dispatch is
+    refused outright. Nothing has left the machine, which is why J-2's
+    "the email was not sent" wording is the truth for this failure; the
+    caller logs the cause with the traceback.
+    """
+
+
+def _resend_send(resend_module, params: dict, key: str):
+    """J-6/J-8: dispatch one email, carrying its idempotency key.
 
     The key rides the SDK's `options` argument, which the SDK sends as
     the Idempotency-Key header — Resend replays the stored answer for a
     repeated key instead of delivering a second copy, and that is what
-    makes "retry it" safe advice for an unknown-outcome send.
+    makes "retry it" safe advice for an unknown-outcome send. J-8: the
+    key arrives precomputed by the caller, so every dispatch site states
+    what its key covers and none can dispatch without one.
 
     `options` is a later addition to the SDK's send signature, so the
-    callable is checked per call: an SDK (or a test double) exposing the
-    older single-argument signature still dispatches, just without the
-    header. The installed SDK takes it — J-6's test drives the real SDK
+    callable is checked per call — and a callable without it
+    REFUSES to dispatch (KeylessSendUnavailableError) rather than send
+    unkeyed. The installed SDK takes it — J-6's test drives the real SDK
     with only its HTTP transport faked and asserts the header on the
     wire.
     """
@@ -411,16 +444,13 @@ def _resend_send(resend_module, params: dict, application_id):
     except (TypeError, ValueError):  # pragma: no cover — exotic callables
         takes_options = True
     if not takes_options:
-        logger.warning(
-            "resend.Emails.send takes no `options` — dispatching WITHOUT an "
-            "idempotency key (an SDK older than the Idempotency-Key header); "
-            "a retried send is not deduped"
+        raise KeylessSendUnavailableError(
+            "resend.Emails.send takes no `options` parameter — it cannot "
+            "carry an idempotency key, so nothing was dispatched (an "
+            "unkeyed send is a duplication hazard: a retry would not be "
+            "deduped)"
         )
-        return send(params)
-    return send(
-        params,
-        options={"idempotency_key": _idempotency_key(application_id, params)},
-    )
+    return send(params, options={"idempotency_key": key})
 
 
 def get_draft(db: Session, draft_id: int) -> Optional[ApplicationDraft]:
@@ -1557,8 +1587,12 @@ def _send_with_pdfs(
     # The dispatch itself. J-6: only a rejection Resend ANSWERED proves
     # nothing was accepted — a timeout or a dropped connection may have
     # delivered, so the message claims no more than is known.
+    # J-8: the key covers every value in `params` (see _idempotency_key),
+    # and the dispatch refuses to go out without one.
     try:
-        email = _resend_send(resend, params, application.id)
+        email = _resend_send(
+            resend, params, _idempotency_key(application.id, params)
+        )
     except Exception as e:
         application.status = "failed"
         application.error = _dispatch_error_message(e)

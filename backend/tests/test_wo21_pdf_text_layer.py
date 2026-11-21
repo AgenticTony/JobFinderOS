@@ -247,7 +247,7 @@ def _fake_resend(monkeypatch, sink):
 
     class _Emails:
         @staticmethod
-        def send(params):
+        def send(params, options=None):
             sink.append(params)
             return {"id": f"msg_{len(sink)}"}
 

@@ -554,3 +554,175 @@ def test_ac_1(client, db, monkeypatch):
             assert application_d.error == UNKNOWN_OUTCOME, (label, application_d.error)
             assert "not sent" not in application_d.error.lower(), (
                 label, application_d.error)
+
+
+# ---------------------------------------------------------------------
+# AC-2 — no send goes out keyless
+# ---------------------------------------------------------------------
+
+
+def _feedback_row(db, uid, *, message, category="bug"):
+    from app.core.timeutil import utc_now
+    from app.models import Feedback
+
+    feedback = Feedback(
+        user_id=uid, category=category, message=message, created_at=utc_now()
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback
+
+
+def test_ac_2(client, db, monkeypatch, caplog):
+    """AC-2: every resend.Emails.send the backend makes carries an
+    idempotency key, and a send that cannot carry one dispatches
+    nothing."""
+    from app.services import feedback_service
+    from app.services.apply_service import retry_application
+
+    caplog.set_level(logging.ERROR)
+    _live_email_settings(monkeypatch)
+
+    # =================================================================
+    # Part 1 — every dispatch carries a key
+    # =================================================================
+    # (a) the draft send path (submit_draft -> _send_with_pdfs)
+    uid, profile, job, draft = _seed(db)
+    ok = _RecordingSend()
+    with monkeypatch.context() as mp:
+        _serve_original_cv(mp)
+        ok.install(mp)
+        application = submit_draft(db, draft, "email", profile, user_id=uid)
+    assert application.status == "sent", application.error
+    assert ok.calls, "no dispatch was recorded"
+    for call in ok.calls:
+        assert call["options"], "dispatched without an idempotency key"
+        _assert_key_shape(call["options"]["idempotency_key"], application.id)
+
+    # (b) the legacy send path (retry_application ->
+    #     apply_service._send_email_application)
+    uid_l, profile_l, job_l, _draft_l = _seed(db, with_draft=False)
+    application_l = _failed_application(db, uid_l, job_l)
+    ok_l = _RecordingSend()
+    with monkeypatch.context() as mp:
+        _serve_original_cv(mp)
+        ok_l.install(mp)
+        retry_application(db, application_l, profile_l)
+    assert application_l.status == "sent", application_l.error
+    assert ok_l.calls, "no dispatch was recorded"
+    for call in ok_l.calls:
+        assert call["options"], "dispatched without an idempotency key"
+        _assert_key_shape(call["options"]["idempotency_key"], application_l.id)
+
+    # (c) the owner notification (feedback_service.notify_owner)
+    notified: list = []
+
+    class _NotifyEmails:
+        @staticmethod
+        def send(params, options=None):
+            notified.append({"params": params, "options": options})
+            return {"id": f"msg_{len(notified)}"}
+
+    def _install_notify(mp):
+        mp.setitem(
+            sys.modules,
+            "resend",
+            type("R", (), {"Emails": _NotifyEmails, "api_key": None}),
+        )
+
+    feedback = _feedback_row(db, uid, message="The dashboard scores look wrong")
+    with monkeypatch.context() as mp:
+        _install_notify(mp)
+        assert feedback_service.notify_owner(
+            feedback, user_email="j8-owner@test.example")
+    assert len(notified) == 1, "the notification was not dispatched"
+    owner_params = dict(notified[0]["params"])
+    owner_key = (notified[0]["options"] or {}).get("idempotency_key")
+    assert owner_key, "the owner notification went out without a key"
+    # the key is one-way: none of the payload is readable out of it
+    for personal in (
+        "The dashboard scores look wrong",   # the message
+        "beta feedback",                     # the subject line
+        "j8-owner@test.example",             # the account (reply_to)
+        settings.FEEDBACK_NOTIFY_EMAIL,      # the owner inbox (to)
+    ):
+        assert personal not in owner_key, (owner_key, personal)
+
+    # The SAME notification retried carries the SAME key — Resend
+    # delivers it once, however many times the send is attempted.
+    with monkeypatch.context() as mp:
+        _install_notify(mp)
+        assert feedback_service.notify_owner(
+            feedback, user_email="j8-owner@test.example")
+    assert notified[1]["params"] == owner_params
+    assert notified[1]["options"] == {"idempotency_key": owner_key}
+
+    # A DIFFERENT notification carries a different key.
+    feedback_b = _feedback_row(db, uid, message="Please add CSV export")
+    with monkeypatch.context() as mp:
+        _install_notify(mp)
+        assert feedback_service.notify_owner(
+            feedback_b, user_email="j8-owner@test.example")
+    other_key = (notified[2]["options"] or {}).get("idempotency_key")
+    assert other_key and other_key != owner_key, (
+        "a different notification must not reuse the owner key"
+    )
+
+    # =================================================================
+    # Part 2 — a resend.Emails.send that cannot carry a key dispatches
+    #          NOTHING: detected before anything is sent
+    # =================================================================
+    keyless_calls: list = []
+
+    class _KeylessEmails:
+        """The pre-`options` SDK signature: no way to carry the header."""
+
+        @staticmethod
+        def send(params):
+            keyless_calls.append(params)
+            return {"id": "must-never-be-returned"}
+
+    def _install_keyless(mp):
+        mp.setitem(
+            sys.modules,
+            "resend",
+            type("R", (), {"Emails": _KeylessEmails, "api_key": None}),
+        )
+
+    # (a) the draft send path
+    uid_k, profile_k, job_k, draft_k = _seed(db)
+    with monkeypatch.context() as mp:
+        _serve_original_cv(mp)
+        _install_keyless(mp)
+        blocked = submit_draft(db, draft_k, "email", profile_k, user_id=uid_k)
+    assert not keyless_calls, "a keyless send was dispatched"
+    assert blocked.status == "failed", blocked.error
+    assert NOT_SENT in blocked.error, blocked.error
+    assert RETRY_IT in blocked.error, blocked.error
+    assert UNKNOWN_OUTCOME not in blocked.error, blocked.error
+    db.refresh(draft_k)
+    assert draft_k.status == "ready", "a refused send must stay retryable"
+    _assert_logged(caplog, DRAFT_LOGGER, "options", "idempotency")
+
+    # (b) the legacy send path
+    uid_kl, profile_kl, job_kl, _draft_kl = _seed(db, with_draft=False)
+    application_kl = _failed_application(db, uid_kl, job_kl)
+    with monkeypatch.context() as mp:
+        _serve_original_cv(mp)
+        _install_keyless(mp)
+        retry_application(db, application_kl, profile_kl)
+    assert not keyless_calls, "a keyless send was dispatched"
+    assert application_kl.status == "failed", application_kl.error
+    assert NOT_SENT in application_kl.error, application_kl.error
+    assert UNKNOWN_OUTCOME not in application_kl.error, application_kl.error
+    _assert_logged(caplog, APPLY_LOGGER, "options", "idempotency")
+
+    # (c) the owner notification refuses keyless too (best-effort: the
+    #     row is stored either way, so the answer is False, not a raise)
+    feedback_k = _feedback_row(db, uid, message="Keyless notification attempt")
+    with monkeypatch.context() as mp:
+        _install_keyless(mp)
+        assert feedback_service.notify_owner(
+            feedback_k, user_email="j8-owner@test.example") is False
+    assert not keyless_calls, "a keyless notification was dispatched"

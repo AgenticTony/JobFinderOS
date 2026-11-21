@@ -148,7 +148,7 @@ def _fake_resend(monkeypatch, sent):
 
     class _Emails:
         @staticmethod
-        def send(params):
+        def send(params, options=None):
             sent.append(params)
             return {"id": "msg_test"}
 
@@ -535,7 +535,7 @@ class TestDoubleSubmitWindow:
 
         class _Emails:
             @staticmethod
-            def send(params):
+            def send(params, options=None):
                 sent.append(params)
                 return {"id": "re_123"}
 
