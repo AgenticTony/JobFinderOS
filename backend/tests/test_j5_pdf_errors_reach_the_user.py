@@ -83,7 +83,13 @@ DRAFT_EIGHT = HEALTHY_BODY + "\n— å ä ö ç ñ ü ï"
 # The grouped fragments, verbatim from the approved contract.
 FROM_NAME = "from your profile name: "
 FROM_DRAFT = "; from the draft: "
-NAME_ADVICE = "Please check your name in your profile."
+# J-7 replaced J-5's name advice ("Please check your name in your
+# profile.") — with fallback fonts installed, a character lost from the
+# NAME is a gap in the operator's fonts, not a name the user can fix.
+NAME_ADVICE = (
+    "Your name contains characters this PDF font cannot show. "
+    "Please contact the operator."
+)
 DRAFT_ADVICE = "Please replace those characters in the draft."
 
 # The whole messages, verbatim: J-3's wording where only the draft group
@@ -110,13 +116,15 @@ NAME_ONLY = {
         "characters lost — cover letter: its text layer lost these "
         "characters during rendering: from your profile name: Ł (U+0141). "
         "the application was NOT sent. "
-        "Please check your name in your profile."
+        "Your name contains characters this PDF font cannot show. "
+        "Please contact the operator."
     ),
     "download": (
         "characters lost — cover letter: its text layer lost these "
         "characters during rendering: from your profile name: Ł (U+0141). "
         "the download was stopped. "
-        "Please check your name in your profile."
+        "Your name contains characters this PDF font cannot show. "
+        "Please contact the operator."
     ),
 }
 BOTH_GROUPS = {
@@ -125,7 +133,8 @@ BOTH_GROUPS = {
         "characters during rendering: from your profile name: Ł (U+0141); "
         "from the draft: å (U+00E5), — (U+2014). "
         "the application was NOT sent. "
-        "Please check your name in your profile. "
+        "Your name contains characters this PDF font cannot show. "
+        "Please contact the operator. "
         "Please replace those characters in the draft."
     ),
     "download": (
@@ -133,7 +142,8 @@ BOTH_GROUPS = {
         "characters during rendering: from your profile name: Ł (U+0141); "
         "from the draft: å (U+00E5), — (U+2014). "
         "the download was stopped. "
-        "Please check your name in your profile. "
+        "Your name contains characters this PDF font cannot show. "
+        "Please contact the operator. "
         "Please replace those characters in the draft."
     ),
 }
