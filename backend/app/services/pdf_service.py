@@ -3,7 +3,10 @@ PDF service — renders the tailored application package (cover letter + CV)
 into clean PDFs for sending. Used by the draft submit flow.
 
 fpdf2 with unicode font fallback: macOS Arial Unicode, Linux DejaVu, else
-core-font latin-1 transliteration (Swedish å/ä/ö survive all paths).
+core-font latin-1 transliteration (Swedish å/ä/ö survive all paths). When
+a unicode font DOES resolve, fpdf2's set_fallback_fonts draws any glyph
+the primary lacks (Chinese/Japanese/Korean names) from the first fallback
+candidate that has it (J-7).
 """
 
 import io
@@ -14,6 +17,7 @@ import unicodedata
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from fontTools.ttLib import TTFont
 from fpdf import FPDF
 from pypdf import PdfReader
 
@@ -39,6 +43,24 @@ FONT_CANDIDATES = [
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",  # Linux alt
 ]
 
+# J-7: fallback fonts fpdf2 draws from when the PRIMARY font lacks a
+# glyph — the gap that blocked every applicant whose name the primary
+# font cannot draw (Chinese/Japanese/Korean names under DejaVu, which
+# has no CJK glyphs at all). A glyph missing from every font stays a
+# blocked send ('characters lost'): the fallback widens what can be
+# drawn, it never hides a character nobody could draw.
+# Both production images install fonts-wqy-microhei (WenQuanYi Micro
+# Hei), a TrueType collection whose glyf outlines cover Chinese,
+# Japanese kana and Korean Hangul.
+FALLBACK_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # fonts-wqy-microhei
+]
+
+# A .ttc (TrueType collection) file holds several faces; both the
+# outline probe below and fpdf2's add_font load the collection's FIRST
+# font, so a collection candidate means exactly "face 0".
+_TTC_FACE_INDEX = 0
+
 _MARKDOWN_RE = re.compile(r"(\*\*|\*|__|##|#)")
 _BULLET_RE = re.compile(r"^[\-\u2022\u25cf]\s+")
 
@@ -51,6 +73,26 @@ def _resolve_unicode_font() -> Optional[str]:
         if os.path.exists(path):
             return path
     return None
+
+
+def _has_true_type_outlines(path: str) -> bool:
+    """True when the font file's outlines are TrueType (a `glyf` table).
+
+    A .ttc collection is judged on its first face, the one fpdf2 loads.
+    A candidate without TrueType outlines is NOT usable as a fallback:
+    with the pinned fpdf2 2.8.8 a CFF-outline font's runs extract as
+    nothing at all for pdfplumber and as NUL-padded text for pypdf — a
+    fallback that breaks the text layer it was adding glyphs to is worse
+    than no fallback, so the caller skips it (with a warning)."""
+    try:
+        font = TTFont(path, fontNumber=_TTC_FACE_INDEX, lazy=True)
+    except Exception as e:
+        logger.warning("Fallback font %s could not be opened (%s); skipped", path, e)
+        return False
+    try:
+        return "glyf" in font
+    finally:
+        font.close()
 
 
 class _UnicodePDF(FPDF):
@@ -74,10 +116,59 @@ class _UnicodePDF(FPDF):
                 self.add_font("AppFont", "", font_path)
                 self.add_font("AppFont", "B", font_path)
                 self.unicode_ok = True
+                # J-7: only a render that HAS a primary unicode font can
+                # fall back — the fontless core-font path below is
+                # byte-for-byte today's latin-1 transliteration, with no
+                # fallback fonts registered.
+                self._register_fallback_fonts()
                 return
             except Exception as e:  # fall through to core font
                 logger.warning("Unicode font load failed (%s), using Helvetica", e)
         self.set_font("Helvetica", "", 11)
+
+    def _register_fallback_fonts(self) -> None:
+        """J-7: register the fallback fonts fpdf2 draws a missing glyph
+        from (set_fallback_fonts). Every candidate is optional — a
+        missing file, an unreadable one, or one without TrueType
+        outlines is skipped, never an error: a candidate that cannot be
+        used only costs the glyphs it would have added, while an
+        exception raised here would be caught by __init__ and drop the
+        WHOLE render to the latin-1 core font."""
+        families: List[str] = []
+        for index, path in enumerate(FALLBACK_FONT_CANDIDATES):
+            if not os.path.exists(path):
+                continue
+            if not _has_true_type_outlines(path):
+                logger.warning(
+                    "Fallback font %s has no TrueType (glyf) outlines; "
+                    "skipped (fpdf2 2.8.8 renders a CFF-outline font's "
+                    "text layer unreadably)",
+                    path,
+                )
+                continue
+            family = f"AppFontFallback{index}"
+            try:
+                # Both styles, so a glyph missing from a BOLD run falls
+                # back too (set_fallback_fonts only falls back on an
+                # exact emphasis match by default).
+                self.add_font(
+                    family, "", path, collection_font_number=_TTC_FACE_INDEX
+                )
+                self.add_font(
+                    family, "B", path, collection_font_number=_TTC_FACE_INDEX
+                )
+            except Exception as e:
+                logger.warning(
+                    "Fallback font %s failed to load (%s); skipped", path, e
+                )
+                continue
+            families.append(family)
+        if not families:
+            return
+        try:
+            self.set_fallback_fonts(families)
+        except Exception as e:  # never let a fallback break the render
+            logger.warning("Registering fallback fonts failed (%s); ignored", e)
 
     def _clean(self, text: str) -> str:
         text = _MARKDOWN_RE.sub("", text)
@@ -153,8 +244,18 @@ CHECK_FORMATTING_ADVICE = "Please check the draft's formatting."
 # name as the document subtitle, so a character lost from the name is not
 # in the draft at all — telling the user to "replace those characters in
 # the draft" sends them hunting through a document that does not contain
-# the character. The name is edited in the profile.
-CHECK_NAME_ADVICE = "Please check your name in your profile."
+# the character. J-5 therefore sent the user to the profile, where the
+# name is edited.
+# J-7: the advice is no longer "check your name in your profile" — the
+# fallback fonts now draw every name the installed fonts cover, so a
+# character the render lost from the NAME can only be a gap in the fonts
+# the operator installed, not something the user mistyped (a typo is
+# drawn faithfully and never lands in this list). There is nothing the
+# user can change; only the operator can add the font.
+CHECK_NAME_ADVICE = (
+    "Your name contains characters this PDF font cannot show. "
+    "Please contact the operator."
+)
 
 # The only surfaces a blocked-check message exists for (J-3: anything
 # else is a caller bug, refused loudly by every entry point that takes

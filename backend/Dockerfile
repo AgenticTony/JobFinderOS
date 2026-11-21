@@ -16,8 +16,14 @@ WORKDIR /app
 # fonts-dejavu-core provides exactly the first Linux candidate
 # (/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf) and nothing else;
 # apt lists cleaned in the same layer to keep the slim image slim.
+# J-7 adds fonts-wqy-microhei beside it: DejaVu has NO CJK glyphs, so
+# every Chinese/Japanese/Korean applicant name was a blocked send
+# ('characters lost'). WenQuanYi Micro Hei is a TrueType (glyf-outline)
+# collection covering Chinese, Japanese kana and Korean Hangul, and is
+# pdf_service.py's first FALLBACK_FONT_CANDIDATES entry — fpdf2 draws a
+# glyph DejaVu lacks from it.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/*
 
 # Locked dependencies only — reproducible builds (lockfile committed)

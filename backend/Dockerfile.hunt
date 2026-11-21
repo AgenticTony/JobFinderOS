@@ -18,8 +18,12 @@ WORKDIR /app
 # ships no fonts, so pdf_service.py's unicode fallback found nothing and
 # employer-facing PDFs rendered "?" for em-dashes/curly quotes. The package
 # provides the first Linux path in FONT_CANDIDATES; lists cleaned in-layer.
+# J-7 adds fonts-wqy-microhei beside it (TrueType outlines; Chinese,
+# Japanese kana, Korean Hangul): DejaVu has no CJK glyphs, so a CJK
+# applicant name had no glyph to draw from. WenQuanYi Micro Hei is
+# pdf_service.py's first FALLBACK_FONT_CANDIDATES entry.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.lock ./
