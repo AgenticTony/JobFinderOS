@@ -22,6 +22,7 @@ reached which provider call, and whose ai_usage row it billed.
 """
 
 import json
+import logging
 import uuid
 from datetime import timedelta
 
@@ -254,18 +255,29 @@ class TestLoadNeverFailsTheDraft:
         clock.advance(1.5)
         assert drainer.drain_once() == ["done"]
 
-    def test_non_load_failure_still_fails_with_an_action(self, client, monkeypatch):
+    def test_non_load_failure_still_fails_with_an_action(self, client, monkeypatch,
+                                                         caplog):
         """'failed' stays for non-load causes — malformed output after the
-        format re-asks — with a Try-again message."""
+        format re-asks — with a Try-again message (J-4: the one fixed
+        string; the malformed-response cause is the server log's to
+        carry, never the user's)."""
         uid, job_id, h = _user(client)
         fake = FakeAI()
         _wire(monkeypatch, fake)
         monkeypatch.setattr(fake, "_answer", lambda kind, prompt: "not json at all")
         client.post(f"/api/v1/applications/draft/{job_id}", headers=h)
+        caplog.set_level(logging.ERROR)
         assert AIDrainer(clock=Clock()).drain_once() == ["failed"]
         d = _draft(uid, job_id)[0]
         assert d.status == "failed", "malformed output is a non-load failure"
-        assert "Malformed tailoring response" in (d.error or ""), d.error
+        assert d.error == "Tailoring failed. Press Try again.", d.error
+        # the CAUSE is the operator's to read: the drainer logs the
+        # exception with its traceback before fail_tailor runs
+        causes = [r for r in caplog.records
+                  if r.name == "app.services.ai_queue"
+                  and r.levelno >= logging.ERROR and r.exc_info]
+        assert any("Malformed tailoring response" in r.getMessage()
+                   for r in causes), [r.getMessage() for r in causes]
         assert _jobs(uid, "tailor")[0].status == "failed"
 
     def test_fabrication_block_is_a_finished_job_not_a_failure(self, client, monkeypatch):
