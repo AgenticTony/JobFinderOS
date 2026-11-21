@@ -3,6 +3,7 @@ Phase 1b multi-user tests: isolation, IDOR, rate limits, GDPR erasure,
 per-user matching. Runs on throwaway SQLite via TestClient — no network.
 """
 
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -2070,7 +2071,8 @@ class TestJudgeFailClosed:
     deterministic (temperature 0.0 — the retry loop and the measurement
     protocol both depend on it)."""
 
-    def test_unparseable_judge_response_fails_the_draft(self, client, db, monkeypatch):
+    def test_unparseable_judge_response_fails_the_draft(self, client, db, monkeypatch,
+                                                        caplog):
         from app.services import draft_service
         from app.services.ai_service import AIService
 
@@ -2101,12 +2103,20 @@ class TestJudgeFailClosed:
         monkeypatch.setattr(draft_service, "ai_service_available", lambda: True)
         monkeypatch.setattr(draft_service.settings, "FABRICATION_JUDGE", "on",
                             raising=False)
+        caplog.set_level(logging.ERROR)
         d = draft_service.create_draft_for_job(db, job, profile=p, user_id=uid)
         assert d.status == "failed", (
             f"judge transport failure read as a verdict: {d.status} — a "
             "malformed judge response must fail CLOSED"
         )
-        assert "judge" in (d.error or "").lower() or "unparseable" in (d.error or "").lower()
+        # J-4: the one fixed tailoring-failure message; the judge's own
+        # failure text is the server log's to carry, never the user's.
+        assert d.error == "Tailoring failed. Press Try again.", d.error
+        causes = [r for r in caplog.records
+                  if r.name == "app.services.draft_service"
+                  and r.levelno >= logging.ERROR and r.exc_info]
+        assert any("judge" in r.getMessage().lower() for r in causes), (
+            [r.getMessage() for r in causes])
 
     def test_judge_called_at_temperature_zero(self, client, db, monkeypatch):
         from app.services.ai_service import AIService

@@ -23,6 +23,7 @@ The contract these tests pin:
 """
 
 import json
+import logging
 import threading
 import time
 import uuid
@@ -507,17 +508,27 @@ class TestDraftSurvivesLoad:
         assert d.status == "failed" and d.fabrication_blocked is True, d.error
 
     def test_persistent_429_draft_failed_with_clear_error(self, db,
-                                                          monkeypatch, sleeps):
+                                                          monkeypatch, sleeps,
+                                                          caplog):
         import app.services.ai_service as ai_mod
 
         uid, profile, job = _seed(db)
         client = _ScriptedClient([_rate_limit()])
         ds = _wire(monkeypatch, client)
+        caplog.set_level(logging.ERROR)
         d = ds.create_draft_for_job(db, job, profile=profile, user_id=uid)
         assert d.status == "failed"
         assert len(client.calls) == 1 + ai_mod.RATE_LIMIT_RETRIES
-        assert "busy" in d.error.lower() and "try again" in d.error.lower(), (
+        # J-4: the ONE fixed Try-again message (a persistent 429 is the
+        # AI provider's failure, so retrying is the right advice); the
+        # 'busy' cause moved to the server log.
+        assert d.error == "Tailoring failed. Press Try again.", (
             f"user-facing error is not actionable: {d.error!r}")
+        causes = [r for r in caplog.records
+                  if r.name == "app.services.draft_service"
+                  and r.levelno >= logging.ERROR and r.exc_info]
+        assert any("AIBusyError" in r.getMessage() and "busy" in r.getMessage()
+                   for r in causes), [r.getMessage() for r in causes]
         assert "1302" not in d.error and "Error code" not in d.error, (
             f"raw provider payload leaked to the user: {d.error!r}")
         assert "Error:" not in d.error and "AIBusy" not in d.error, (

@@ -25,6 +25,13 @@ from app.models import AIJob, ApplicationDraft, JobPosting, Profile, User
 from app.services import ai_queue
 from app.services.ai_queue import Handler, Outcome, Requeue
 
+# J-4: the tailor/re-check failure messages live with the inline paths
+# they must never drift from — one shared definition, both arms.
+from app.services.draft_service import (
+    RECHECK_FAILED_MESSAGE,
+    TAILORING_FAILED_MESSAGE,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,13 +92,16 @@ def run_tailor(db: Session, job: AIJob) -> Outcome:
 
 
 def fail_tailor(db: Session, job: AIJob, exc: Exception) -> Outcome:
-    error = f"Tailoring failed: {exc}"
+    # J-4: the same fixed message the inline tailoring path shows — the
+    # failure is the AI provider's, so Try again is the right advice, and
+    # the exception's own text and type are already in the server log
+    # with its traceback (the drainer's logger.exception in run_job).
     draft = _owned_draft(db, job)
     if draft is not None and draft.status in ("queued", "drafting"):
         draft.status = "failed"
-        draft.error = error
+        draft.error = TAILORING_FAILED_MESSAGE
         db.add(draft)
-    return Outcome("failed", error=error)
+    return Outcome("failed", error=TAILORING_FAILED_MESSAGE)
 
 
 # ------------------------------------------------------------------
@@ -121,13 +131,15 @@ def run_recheck(db: Session, job: AIJob) -> Outcome:
 
 
 def fail_recheck(db: Session, job: AIJob, exc: Exception) -> Outcome:
-    error = (f"Re-check failed: {exc}. Your text is saved — press "
-             "Check again.")
+    # J-4: the same fixed message the inline re-check paths show. It is
+    # also the AIJob error job_view returns, so the draft card and the
+    # job poll say one thing; the exception's own text and type stay in
+    # the drainer's server-side log record.
     draft = _owned_draft(db, job)
     if draft is not None and draft.status == "failed":
-        draft.error = error
+        draft.error = RECHECK_FAILED_MESSAGE
         db.add(draft)
-    return Outcome("failed", error=error)
+    return Outcome("failed", error=RECHECK_FAILED_MESSAGE)
 
 
 # ------------------------------------------------------------------

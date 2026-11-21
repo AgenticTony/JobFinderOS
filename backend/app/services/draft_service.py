@@ -273,6 +273,19 @@ SEND_OUTCOME_UNKNOWN_MESSAGE = (
     "from this application; an unchanged email is never delivered twice."
 )
 
+# J-4: the user-facing messages for a failed tailoring and a failed
+# re-check — fixed strings, ONE definition each, taken by EVERY arm
+# (inline here and in the ai_jobs drainer's fail handlers). The
+# exception's own text and type never reach them: they are logged with
+# the traceback server-side. Both say the one action that is right,
+# because the failure is the AI provider's, not the user's — and the
+# re-check one says first what the user most needs to know: their edited
+# text is still on the draft.
+TAILORING_FAILED_MESSAGE = "Tailoring failed. Press Try again."
+RECHECK_FAILED_MESSAGE = (
+    "Re-check failed. Your text is saved. Press Check again."
+)
+
 # The SDK wraps every failure of its own HTTP transport (timeout, dropped
 # connection) in a ResendError of this error_type. That is NOT an answer
 # from Resend: the request may already have reached it and been accepted.
@@ -562,16 +575,18 @@ def create_draft_for_job(
     except Exception as e:  # noqa: BLE001 — surface the failure on the draft row
         db.rollback()
         draft.status = "failed"
-        from app.services.ai_service import AIBusyError
-
-        # A provider that stayed busy past the bounded retry gets a plain
-        # message (the "Try again" path), not the raw 429 payload.
-        draft.error = (f"Tailoring failed: {e}" if isinstance(e, AIBusyError)
-                       else f"Tailoring failed: {type(e).__name__}: {e}")
+        # J-4: one fixed message for every tailoring failure — a provider
+        # that stayed busy past the bounded retry (AIBusyError), a
+        # malformed package, a transport error. Retrying is the right
+        # advice for all of them (the failure is the AI provider's), and
+        # the exception's own words are the operator's to read, never the
+        # user's.
+        draft.error = TAILORING_FAILED_MESSAGE
         db.add(draft)
         db.commit()
         db.refresh(draft)
-        logger.error("Draft tailoring failed for job %s: %s", job.id, e)
+        logger.error("Draft tailoring failed for job %s: %s: %s", job.id,
+                     type(e).__name__, e, exc_info=True)
         return draft
 
 
@@ -807,9 +822,14 @@ def recheck_draft(db: Session, draft: ApplicationDraft, *, profile: Profile) -> 
         # The user's text is already saved (save_draft_edits); only this
         # check failed. Record it, keep the draft failed, re-raise for 400.
         db.rollback()
-        draft.error = f"Re-check failed: {type(e).__name__}: {e}"
+        # J-4: the fixed message says both facts the user needs — the
+        # text survived, and the check can be re-run. The guard's own
+        # failure (type and text) is server-side only.
+        draft.error = RECHECK_FAILED_MESSAGE
         db.add(draft)
         db.commit()
+        logger.error("Draft %s re-check failed: %s: %s", draft.id,
+                     type(e).__name__, e, exc_info=True)
         raise DraftError(draft.error) from e
     db.commit()
     db.refresh(draft)
@@ -1010,9 +1030,14 @@ def attest_claim(db: Session, draft: ApplicationDraft, claim: str,
             attested=attested,
         )
     except Exception as e:  # noqa: BLE001 — transport failure, never a verdict
-        draft.error = f"Re-check failed: {type(e).__name__}: {e}"
+        # J-4: same fixed message as recheck_draft's failure — the
+        # attestation itself was recorded, so only the check is lost; the
+        # user's text and their confirmation are both still on the draft.
+        draft.error = RECHECK_FAILED_MESSAGE
         db.add(draft)
         db.commit()
+        logger.error("Draft %s attest re-check failed: %s: %s", draft.id,
+                     type(e).__name__, e, exc_info=True)
         raise DraftError(draft.error) from e
 
     from app.services.fabrication import findings_as_json
