@@ -30,27 +30,39 @@ def create_feedback(db: Session, *, user: User, payload: FeedbackCreate) -> Feed
 def notify_owner(feedback: Feedback, *, user_email: str | None) -> bool:
     """Email the owner about new feedback. Best-effort: returns False
     (never raises) when Resend isn't wired or the send fails — the row
-    is already stored."""
+    is already stored.
+
+    J-8: the notification goes out under an idempotency key too — a
+    one-way digest of its full params — through the same dispatch
+    wrapper as the application emails, so it can never be sent keyless
+    and the same notification retried is delivered once."""
     if not settings.RESEND_API_KEY or not settings.APPLY_FROM_EMAIL:
         return False
     try:
         import resend
 
-        resend.api_key = settings.RESEND_API_KEY
-        resend.Emails.send(
-            {
-                "from": f"JobFinderOS feedback <{settings.APPLY_FROM_EMAIL}>",
-                "to": [settings.FEEDBACK_NOTIFY_EMAIL],
-                "reply_to": user_email,
-                "subject": f"[beta feedback:{feedback.category}] {feedback.message[:60]}",
-                "text": (
-                    f"category: {feedback.category}\n"
-                    f"account: {user_email or feedback.user_id}\n"
-                    f"at: {feedback.created_at.isoformat()}\n\n"
-                    f"{feedback.message}\n"
-                ),
-            }
+        # One home for the keyed dispatch (J-6/J-8) — this module never
+        # calls resend.Emails.send directly, so no send path can drift
+        # out from under the idempotency rule.
+        from app.services.draft_service import (
+            _resend_send,
+            feedback_notification_key,
         )
+
+        resend.api_key = settings.RESEND_API_KEY
+        params = {
+            "from": f"JobFinderOS feedback <{settings.APPLY_FROM_EMAIL}>",
+            "to": [settings.FEEDBACK_NOTIFY_EMAIL],
+            "reply_to": user_email,
+            "subject": f"[beta feedback:{feedback.category}] {feedback.message[:60]}",
+            "text": (
+                f"category: {feedback.category}\n"
+                f"account: {user_email or feedback.user_id}\n"
+                f"at: {feedback.created_at.isoformat()}\n\n"
+                f"{feedback.message}\n"
+            ),
+        }
+        _resend_send(resend, params, feedback_notification_key(params))
         return True
     except Exception:  # noqa: BLE001 — notification must never break submit
         logger.exception("Feedback notification failed (row %s stored)", feedback.id)

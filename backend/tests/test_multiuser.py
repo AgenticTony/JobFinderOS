@@ -1060,7 +1060,7 @@ class TestOutboundEmailBoundary:
 
         class _Emails:
             @staticmethod
-            def send(params):
+            def send(params, options=None):
                 sent.update(params)
                 return {"id": "msg_test"}
 
@@ -2378,7 +2378,7 @@ class TestWO23BlockedDraftRecovery:
 
         class _Emails:
             @staticmethod
-            def send(params):
+            def send(params, options=None):
                 sent.update(params)
                 return {"id": "msg_test"}
 
@@ -3148,7 +3148,7 @@ def _fake_resend(monkeypatch, sink):
 
     class _Emails:
         @staticmethod
-        def send(params):
+        def send(params, options=None):
             sink.append(params)
             return {"id": f"msg_{len(sink)}"}
 
