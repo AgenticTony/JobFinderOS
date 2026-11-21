@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import unicodedata
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from fpdf import FPDF
@@ -41,6 +42,9 @@ FONT_CANDIDATES = [
 _MARKDOWN_RE = re.compile(r"(\*\*|\*|__|##|#)")
 _BULLET_RE = re.compile(r"^[\-\u2022\u25cf]\s+")
 
+# J-6: the fixed render date (see _UnicodePDF.__init__).
+RENDER_CREATION_DATE = datetime(2020, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
 
 def _resolve_unicode_font() -> Optional[str]:
     for path in FONT_CANDIDATES:
@@ -56,6 +60,14 @@ class _UnicodePDF(FPDF):
 
     def __init__(self):
         super().__init__(format="A4")
+        # J-6: pin the creation date — fpdf2's default is the wall clock,
+        # and it lands in BOTH the document (/CreationDate) and the file
+        # identifier fpdf2 hashes, so two renders of the same text a
+        # second apart came out byte-different. The send path hashes the
+        # attachment bytes into its idempotency key, so the render must
+        # be a pure function of its input: same text in, same bytes out.
+        # The email carrying the PDF is the timestamp the employer sees.
+        self.set_creation_date(RENDER_CREATION_DATE)
         font_path = _resolve_unicode_font()
         if font_path:
             try:

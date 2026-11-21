@@ -23,10 +23,14 @@ from app.models import Application, JobPosting
 # J-2: the send-failure exception and the two user-facing messages have
 # ONE home (draft_service, the primary send path) — this module's retry
 # paths raise/honour the same literals so the two flows cannot drift.
+# J-6: the idempotency-keyed dispatch and the known/unknown outcome
+# split live there too, for the same reason.
 from app.services.draft_service import (
     CV_UNREADABLE_MESSAGE,
     SEND_FAILED_MESSAGE,
     OriginalCvUnreadableError,
+    _dispatch_error_message,
+    _resend_send,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,11 +166,6 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
         # APPLY_FROM_EMAIL inbox (same fix as the draft send path).
         if profile is not None and getattr(profile, "email", None):
             params["reply_to"] = profile.email
-
-        email = resend.Emails.send(params)
-        application.status = "sent"
-        application.sent_at = utc_now()
-        logger.info("Application email sent to %s (id=%s)", application.target_email, email.get("id"))
     except OriginalCvUnreadableError as e:
         # J-2: the send never left — the message says what to do first
         # (re-upload), because a plain retry would fail the same way.
@@ -176,13 +175,33 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
             "Application email aborted — original CV unreadable (%s): %s",
             type(e).__name__, e, exc_info=True,
         )
+        return
     except Exception as e:
-        # J-2: a dispatch failure the user can only wait out and retry.
-        # The SDK's exception text and type are server-side knowledge —
-        # logged with the traceback, never copied into the error column.
+        # J-2: the failure fired BEFORE anything was dispatched, so
+        # "the email was not sent" is the truth. The exception's text
+        # and type are server-side knowledge — logged with the
+        # traceback, never copied into the error column.
         application.status = "failed"
         application.error = SEND_FAILED_MESSAGE
+        logger.error(
+            "Application email failed before dispatch (%s): %s",
+            type(e).__name__, e, exc_info=True,
+        )
+        return
+
+    # The dispatch itself. J-6: only a rejection Resend ANSWERED proves
+    # nothing was accepted — a timeout or a dropped connection may have
+    # delivered, so the message claims no more than is known.
+    try:
+        email = _resend_send(resend, params, application.id)
+    except Exception as e:
+        application.status = "failed"
+        application.error = _dispatch_error_message(e)
         logger.error(
             "Application email failed (%s): %s",
             type(e).__name__, e, exc_info=True,
         )
+        return
+    application.status = "sent"
+    application.sent_at = utc_now()
+    logger.info("Application email sent to %s (id=%s)", application.target_email, email.get("id"))

@@ -94,9 +94,12 @@ APPLY_LOGGER = "app.services.apply_service"
 
 
 # The fake resend SDK's own error type — the class name is one of the
-# internals that must never reach a user-facing string.
-class ResendError(Exception):
-    pass
+# internals that must never reach a user-facing string. J-6 split the
+# dispatch failure by OUTCOME (a rejection Resend answered vs a transport
+# failure), so the double raises the SDK's REAL rejection type, carrying
+# the same vendor-shaped text: an exception of any other type now means
+# 'outcome unknown' and gets J-6's message, not J-2's.
+from resend.exceptions import ResendError
 
 
 @pytest.fixture(scope="module")
@@ -276,7 +279,12 @@ def test_ac_1(client, db, monkeypatch, caplog):
     application2 = _failed_application(db, uid2, job2, draft=draft2)
     application3 = _failed_application(db, uid3, job3)
     _live_email_settings(monkeypatch)
-    sdk = ResendError(SDK_EXC_TEXT)
+    sdk = ResendError(
+        code=429,
+        error_type="rate_limit_exceeded",
+        message=SDK_EXC_TEXT,
+        suggested_action="Reduce your request rate.",
+    )
     _raising_resend(monkeypatch, sdk)
     with monkeypatch.context() as mp:
         _serve_original_cv(mp)
