@@ -188,7 +188,7 @@ def _raising_resend(monkeypatch, exc):
     """A resend module whose dispatch raises `exc` — the SDK failure."""
     class _Emails:
         @staticmethod
-        def send(params):
+        def send(params, options=None):
             raise exc
 
     monkeypatch.setitem(
@@ -199,7 +199,7 @@ def _raising_resend(monkeypatch, exc):
 def _capturing_resend(monkeypatch, sink):
     class _Emails:
         @staticmethod
-        def send(params):
+        def send(params, options=None):
             sink.append(params)
             return {"id": f"msg_{len(sink)}"}
 

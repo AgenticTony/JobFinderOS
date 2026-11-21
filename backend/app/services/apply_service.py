@@ -30,6 +30,7 @@ from app.services.draft_service import (
     SEND_FAILED_MESSAGE,
     OriginalCvUnreadableError,
     _dispatch_error_message,
+    _idempotency_key,
     _resend_send,
 )
 
@@ -192,8 +193,13 @@ def _send_email_application(db: Session, application: Application, job: JobPosti
     # The dispatch itself. J-6: only a rejection Resend ANSWERED proves
     # nothing was accepted — a timeout or a dropped connection may have
     # delivered, so the message claims no more than is known.
+    # J-8: the key covers every value in `params` (see
+    # draft_service._idempotency_key), and the dispatch refuses to go
+    # out without one.
     try:
-        email = _resend_send(resend, params, application.id)
+        email = _resend_send(
+            resend, params, _idempotency_key(application.id, params)
+        )
     except Exception as e:
         application.status = "failed"
         application.error = _dispatch_error_message(e)
